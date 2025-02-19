@@ -1,0 +1,62 @@
+1. Create the API key secret
+
+  ```bash
+  kubectl create secret generic privatemode-api-key --from-literal=apiKey=your-api-key
+  ```
+
+{{- if .Values.config.workspace.enabled }}
+2. Ensure the PersistentVolumeClaim is created for the workspace:
+
+   ```bash
+   kubectl apply -f - <<EOF
+   apiVersion: v1
+   kind: PersistentVolumeClaim
+   metadata:
+     name: {{ .Values.config.workspace.volumeClaimName }}
+   spec:
+     accessModes:
+       - ReadWriteOnce
+     resources:
+       requests:
+         storage: 1Gi
+   EOF
+{{- end }}
+
+{{- if .Values.config.manifest.enabled }}
+3. Create the ConfigMap from your manifest file
+
+```bash
+kubectl create configmap privatemode-proxy-config --from-file=manifest.toml=/path/to/your/manifest.toml
+```
+{{- end }}
+
+{{- if .Values.config.tls.enabled }}
+4. Ensure the TLS secret is available (e.g., using cert-manager):
+
+kubectl create secret tls {{ .Values.config.tls.secretName }} \
+  --cert=<path-to-cert> --key=<path-to-key>
+{{- end }}
+
+5. Access the Proxy
+
+Once the deployment is complete, you can configure your application to access the OpenAI API through the privatemode-proxy service’s domain.
+
+By default, the privatemode-proxy can be accessed at the following URL:
+
+```
+http://privatemode-proxy-privatemode-proxy.default.svc.cluster.local:8080/v1
+```
+
+This URL is constructed as follows:
+
+```
+http://{helm-release}-privatemode-proxy.{namespace}.svc.cluster.local:{port}/v1
+```
+
+- **{helm-release}**: The name of your Helm release.
+- **{namespace}**: The Kubernetes namespace where the privatemode-proxy is deployed.
+- **{port}**: The port configured for the privatemode-proxy service (default is `8080`).
+
+
+If you have configured a custom DNS entry in your Kubernetes cluster, you will need to adjust the URL accordingly.
+Replace the default service domain with your custom domain, ensuring that your application can correctly resolve and communicate with the privatemode-proxy service.

@@ -1,0 +1,9 @@
+Copyright (c) Edgeless Systems GmbH.
+
+Permission is hereby granted to any person to view, analyze, and compile this source code solely for the purpose of auditing and for verifying its reproducibility and cryptographic hashes.
+
+Redistribution, modification, and use of the software for any other purpose are prohibited unless explicitly permitted by the copyright holder.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+The source code under `privatemode-proxy/` and `internal/gpl/` is additionally licensed under GPL-3.0. See LICENSE.GPL for the license text.

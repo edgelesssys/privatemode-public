@@ -1,0 +1,22 @@
+{
+  "source": [
+    "./build/bin/Privatemode.app"
+  ],
+  "bundle_id": "com.edgelesssystems.privatemode",
+  "apple_id": {
+    "username": "as@edgeless.systems",
+    "provider": "4D7MAN249M"
+  },
+  "sign": {
+    "application_identity": "Developer ID Application: Edgeless Systems GmbH",
+    "entitlements_file": "app.entitlements"
+  },
+  "dmg": {
+    "output_path": "build/bin/Privatemode.dmg",
+    "volume_name": "Privatemode",
+    "app_drop_link": [
+      200,
+      0
+    ]
+  }
+}

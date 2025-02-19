@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "privatemode-proxy.fullname" . }}
+  labels:
+    {{- include "privatemode-proxy.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "privatemode-proxy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "privatemode-proxy.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: {{ .Values.image.restartPolicy }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.image }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.port }}
+              protocol: TCP
+          args:
+            {{- if .Values.config.apiKey.enabled }}
+            - "--apiKey=$(privatemode_API_KEY)"
+            {{- end}}
+            {{- if .Values.config.ssEndpoint.enabled }}
+            - "--ssEndpoint={{ .Values.config.ssEndpoint }}"
+            {{- end}}
+            {{- if .Values.config.apiEndpoint.enabled }}
+            - "--apiEndpoint={{ .Values.config.apiEndpoint }}"
+            {{- end}}
+            - "--port={{ .Values.config.port }}"
+            {{- if .Values.config.workspace.enabled }}
+            - "--workspace={{ .Values.config.workspace.mountPath }}"
+            {{- end }}
+            {{- if .Values.config.manifest.enabled }}
+            - "--manifestPath={{ .Values.config.manifest.mountPath }}"
+            {{- end }}
+            {{- if .Values.config.tls.enabled }}
+            - "--tlsCertPath=/etc/tls/tls.crt"
+            - "--tlsKeyPath=/etc/tls/tls.key"
+            {{- end }}
+          env:
+            {{- if .Values.config.apiKey.enabled }}
+            - name: privatemode_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.apiKey.apiKeySecretName }}
+                  key: apiKey
+            {{- end }}
+          volumeMounts:
+            {{- if .Values.config.workspace.enabled }}
+            - name: workspace
+              mountPath: {{ .Values.config.workspace.mountPath }}
+            {{- end }}
+            {{- if .Values.config.manifest.enabled }}
+            - name: manifest-config
+              mountPath: {{ .Values.config.manifest.mountPath }}
+              subPath: {{ .Values.config.manifest.fileName }}
+              readOnly: true
+            {{- end }}
+            {{- if .Values.config.tls.enabled }}
+            - name: tls-certs
+              mountPath: /etc/tls
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        {{- if .Values.config.workspace.enabled }}
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: {{ .Values.config.workspace.volumeClaimName }}
+        {{- end }}
+        {{- if .Values.config.manifest.enabled }}
+        - name: manifest-config
+          configMap:
+            name: {{ .Values.config.manifest.configMapName }}
+        {{- end }}
+        {{- if .Values.config.tls.enabled }}
+        - name: tls-certs
+          secret:
+            secretName: {{ .Values.config.tls.secretName }}
+        {{- end }}
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}

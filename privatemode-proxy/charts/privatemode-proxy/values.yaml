@@ -1,0 +1,43 @@
+replicaCount: 1
+image:
+  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy@sha256:c5597085ddc1c09e965cf32d4e5609c6f8fe7a0d3ed462f4e9e22a665597a2cf
+  pullPolicy: IfNotPresent
+  restartPolicy: Always
+service:
+  type: ClusterIP
+  port: 8080
+resources: {}
+nodeSelector:
+  kubernetes.io/arch: amd64
+tolerations: []
+affinity: {}
+# Command-line options for the privatemode-proxy
+config:
+  # API key configuration
+  apiKey:
+    enabled: false
+    apiKeySecretName: 'privatemode-api-key' # Name of the Kubernetes Secret containing the API
+  # Attestation Service configuration
+  ssEndpoint:
+    enabled: false
+    ssEndpoint: 'secret.privatemode.ai:443'
+  # API configuration
+  apiEndpoint:
+    enabled: false
+    apiEndpoint: 'api.privatemode.ai:443'
+  # Container port configuration
+  port: '8080'
+  workspace:
+    enabled: false
+    volumeClaimName: 'privatemode-proxy-pvc'
+    mountPath: '/workspace'
+  # Manifest file configuration
+  manifest:
+    enabled: false # not recommended to be enabled
+    configMapName: 'privatemode-proxy-config'
+    fileName: 'manifest.toml'
+    mountPath: '/etc/config/manifest.toml'
+  # TLS configuration
+  tls:
+    enabled: false
+    secretName: 'privatemode-proxy-tls'

@@ -1,0 +1,11 @@
+{
+  "keys": [
+    {
+      "kty": "EC",
+      "crv": "P-384",
+      "kid": "edgelesstest",
+      "x": "MDliKWT7M9OOfajR-oNTIXhIUms8wuUblvlwnj3sQbOxfmZ3IUss1iOfYOXfKJNf",
+      "y": "BRB6EmZw7I-kfqNKcHci-8lOyeZQr5fJLGCxxU1L-piDACk7tl1Vl-_-XD6AGh7c"
+    }
+  ]
+}

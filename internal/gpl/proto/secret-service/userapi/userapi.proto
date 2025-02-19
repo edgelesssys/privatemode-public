@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package edgelesssys.continuum.secret_service.userapi;
+
+option go_package = "github.com/edgelesssys/continuum/internal/gpl/proto/secret-service/userapi";
+
+service UserAPI {
+    // SetSecrets allows clients to set additional secrets.
+    rpc SetSecrets(SetSecretsRequest) returns (SetSecretsResponse);
+}
+
+message SetSecretsResponse {}
+
+// SetSecrets is used to set inference secrets.
+message SetSecretsRequest {
+    // Secrets is a map of secret names to secret values.
+    map<string,bytes> Secrets = 1;
+    // TimeToLive is the time in seconds that the secrets are valid for.
+    // 0 or negative values means the secrets are valid indefinitely.
+    int64 TimeToLive = 2;
+}

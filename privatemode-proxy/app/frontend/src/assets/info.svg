@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="90"
+   height="90"
+   viewBox="0 0 90 90"
+   fill="none"
+   version="1.1"
+   id="svg8"
+   sodipodi:docname="info.svg"
+   inkscape:version="1.1 (c68e22c387, 2021-05-23)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs12" />
+  <sodipodi:namedview
+     id="namedview10"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="true"
+     showgrid="false"
+     inkscape:zoom="9.7"
+     inkscape:cx="45"
+     inkscape:cy="38.298969"
+     inkscape:window-width="2560"
+     inkscape:window-height="1351"
+     inkscape:window-x="-9"
+     inkscape:window-y="-9"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg8" />
+  <path
+     fill-rule="evenodd"
+     clip-rule="evenodd"
+     d="M45 83C65.9868 83 83 65.9868 83 45C83 24.0132 65.9868 7 45 7C24.0132 7 7 24.0132 7 45C7 65.9868 24.0132 83 45 83ZM45 90C69.8528 90 90 69.8528 90 45C90 20.1472 69.8528 0 45 0C20.1472 0 0 20.1472 0 45C0 69.8528 20.1472 90 45 90Z"
+     fill="black"
+     id="path2"
+     style="fill:#e3e3e3;fill-opacity:1" />
+  <path
+     fill-rule="evenodd"
+     clip-rule="evenodd"
+     d="M45 35.5C46.933 35.5 48.5 37.067 48.5 39L48.5 67C48.5 68.933 46.933 70.5 45 70.5C43.067 70.5 41.5 68.933 41.5 67L41.5 39C41.5 37.067 43.067 35.5 45 35.5Z"
+     fill="black"
+     id="path4"
+     style="fill:#e3e3e3;fill-opacity:1" />
+  <path
+     d="M48.5 25.5C48.5 27.433 46.933 29 45 29C43.067 29 41.5 27.433 41.5 25.5C41.5 23.567 43.067 22 45 22C46.933 22 48.5 23.567 48.5 25.5Z"
+     fill="black"
+     id="path6"
+     style="fill:#e3e3e3;fill-opacity:1" />
+</svg>

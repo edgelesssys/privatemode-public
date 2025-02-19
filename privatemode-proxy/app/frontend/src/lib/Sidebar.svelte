@@ -1,0 +1,149 @@
+<script lang="ts">
+  import { params } from 'svelte-spa-router'
+  import ChatMenuItem from './ChatMenuItem.svelte'
+  import { chatsStorage, pinMainMenu, checkStateChange, getChatSortOption, setChatSortOption, deleteAllChats } from './Storage.svelte'
+  import Fa from 'svelte-fa/src/fa.svelte'
+  import { faSquarePlus, faKey } from '@fortawesome/free-solid-svg-icons/index'
+  import ChatOptionMenu from './ChatOptionMenu.svelte'
+  import logo from '../assets/logo.svg'
+  import { clickOutside } from 'svelte-use-click-outside'
+  import { startNewChatWithWarning } from './Util.svelte'
+  import { chatSortOptions } from './Settings.svelte'
+  import { hasActiveModels } from './Models.svelte'
+  import { writable } from 'svelte/store'
+  import info from '../assets/info.svg'
+  import plus from '../assets/plus.svg'
+  import trash from '../assets/trash.svg'
+  import docs from '../assets/docs.svg'
+  import closeMenu from '../assets/close.svg'
+  import rocket from '../assets/rocket.svg'
+  import { replace } from 'svelte-spa-router'
+  import settings from '../assets/settings.svg'
+
+  $: sortedChats = $chatsStorage.sort(getChatSortOption().sortFn)
+  $: activeChatId = $params && $params.chatId ? parseInt($params.chatId) : undefined
+
+  let sortOption = getChatSortOption()
+  let hasModels = hasActiveModels()
+  // const showWaitlist = writable(false)
+
+  // const openWaitlist = () => {
+  //   showWaitlist.set(true)
+  // }
+
+  const onStateChange = (...args:any) => {
+    sortOption = getChatSortOption()
+    sortedChats = $chatsStorage.sort(sortOption.sortFn)
+    hasModels = hasActiveModels()
+  }
+
+  $: onStateChange($checkStateChange)
+
+  const showSortMenu = false
+
+  const delAllChats = () => {
+    replace('/').then(() => {
+      deleteAllChats()
+    })
+  }
+
+</script>
+
+<aside class="menu main-menu" class:pinned={$pinMainMenu} use:clickOutside={() => { $pinMainMenu = false }}>
+  <div class="menu-expanse">
+      <div class="navbar-brand menu-nav-bar">
+        <span class="navbar-item gpt-logo p-0">
+          <img src={logo} alt="Conntinuum AI" width="48" height="48" />
+          <p class="ml-2 is-size-5 has-text-weight-bold">Privatemode</p>
+        </span>
+      </div>
+      <div class="level-right">
+        <div class="level-item">
+          <button on:click={async () => { $pinMainMenu = false; await startNewChatWithWarning(activeChatId) }} class="panel-block button" title="Start new chat with default profile" class:is-disabled={!hasModels}
+            ><img src={plus} alt="add new chat" width="11" height="11" class="mr-2" /><span class="panel-block-text">New chat</span></button>
+        </div>
+      </div>
+      {#if sortedChats.length > 1}
+      <p class="previous-text">Previous</p>
+    {/if}
+    <ul class="menu-list menu-expansion-list">
+      {#if sortedChats.length === 0}
+        <li><a href={'#'} class="is-disabled">No chats yet...</a></li>
+      {:else}
+        {#key $checkStateChange}
+        {#each sortedChats as chat, i}
+        {#key chat.id}
+        <ChatMenuItem activeChatId={activeChatId} chat={chat} prevChat={sortedChats[i - 1]} nextChat={sortedChats[i + 1]} />
+        {/key}
+        {/each}
+        {/key}
+      {/if}
+    </ul>
+    <!-- <p class="menu-label">Actions</p> -->
+    <div class="level is-mobile bottom-buttons mb-1">
+      {#if sortedChats.length > 1}
+        <div class="level-left">
+            <div class="clear-trigger ml-2">
+              <button
+                class="button"
+                aria-haspopup="true"
+                aria-controls="dropdown-menu3"
+                on:click|preventDefault={() => delAllChats()}
+              >
+                <span class="icon"
+                  ><img
+                    src={trash}
+                    alt="clear icon"
+                    width="14"
+                    height="14"
+                  /></span
+                >
+                <span class="level-left-text">Clear conversations</span>
+              </button>
+            </div>
+        </div>
+      {/if}
+    </div>
+
+  <div class="side-info-block">
+    <!-- <AttestationBanner /> -->
+    <a
+      href="#/"
+      class="flex"
+    >
+      <img src={settings} alt="key icon" width="15" height="15" />
+      <p>Settings</p>
+    </a>
+
+    <a
+      href="https://privatemode.ai"
+      class="flex"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <img src={info} alt="info icon" width="11.5" height="14" />
+      <p>About Privatemode</p>
+    </a>
+
+    <a
+      href="https://docs.privatemode.ai"
+      class="flex"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <img src={docs} alt="docs icon" width="11.5" height="14" />
+      <p>Documentation</p>
+    </a>
+
+    <!-- <a on:click={openWaitlist} style="display: flex; align-items: center; gap: 10px;">
+      <img width="12" height="12" src={rocket} alt="signup icon" />
+      <p>Request API key</p>
+   </a> -->
+    </div>
+  </div>
+</aside>
+<div
+  class="modal-backdrop fade show {$pinMainMenu ? 'd-block' : 'd-none'}"
+  style="z-index: 31;"
+></div>
+<!-- <Waitlist showModal={showWaitlist} /> -->

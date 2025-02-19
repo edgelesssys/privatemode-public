@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package edgelesssys.continuum.secret_service.backendapi;
+
+option go_package = "github.com/edgelesssys/continuum/internal/proto/secret-service/backendapi";
+
+service BackendAPI {
+    rpc AccessSecrets(AccessSecretsRequest) returns (AccessSecretsResponse);
+}
+
+// AccessSecretsRequest is the request sent by an attestation-agent to the Secret Service to join the deployment.
+message AccessSecretsRequest {}
+
+// AccessSecretsResponse is the response sent by the Secret Service.
+// It contains authentication credentials for the worker to interact with etcd, as well as additional configuration options.
+message AccessSecretsResponse {
+    // Cert is a PEM encoded client certificate for the worker to interact with etcd.
+    bytes Cert = 1;
+    // Key is a PEM encoded private key for the worker to interact with etcd.
+    bytes Key = 2;
+    // CACert is the PEM encoded CA certificate of the etcd server.
+    bytes CACert = 3;
+}
