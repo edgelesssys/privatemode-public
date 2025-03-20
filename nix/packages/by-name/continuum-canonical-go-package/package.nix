@@ -1,8 +1,8 @@
 {
   lib,
-  buildGoModule,
+  buildGo124Module,
 }:
-buildGoModule {
+buildGo124Module {
   pname = "continuum-canonical-go-package";
   version = lib.continuumVersion;
 
@@ -11,7 +11,7 @@ buildGoModule {
     "go.sum"
   ];
 
-  vendorHash = "sha256-ysaax344t00f7OnYnIKCBWsoi4Pal6T624sJh0AWZl0=";
+  vendorHash = "sha256-HvfFEr/2b6EgvrKC9IxctOdBaRqpR19n53vmxjPnL+U=";
 
   doCheck = false;
 

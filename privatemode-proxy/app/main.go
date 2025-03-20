@@ -6,6 +6,7 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -21,13 +22,15 @@ import (
 var assets embed.FS
 
 func main() {
-	// Create an instance of the app structure
 	cfgDir, err := os.UserConfigDir()
 	if err != nil {
-		panic(err)
+		_, _ = fmt.Fprintln(os.Stderr, "Failed to get user config dir:", err)
+		os.Exit(1)
 	}
+
 	workspace := filepath.Join(cfgDir, "EdgelessSystems", "privatemode")
 	log := logging.NewFileLogger("info", os.Stderr, filepath.Join(workspace, "log.txt"))
+
 	app := NewApp(Config{
 		Flags: setup.Flags{
 			Workspace:      workspace,
@@ -40,6 +43,7 @@ func main() {
 			},
 		},
 		APIEndpoint: constants.APIEndpoint,
+		APIKey:      "",
 	}, log)
 
 	err = wails.Run(&options.App{ //nolint:exhaustruct
@@ -53,8 +57,12 @@ func main() {
 		},
 		OnStartup:        app.OnStartup,
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
+		Bind: []interface{}{
+			&ConfigurationService{config: &app.config},
+		},
 	})
 	if err != nil {
-		panic(err)
+		log.Error("Failed to start the app", "error", err)
+		os.Exit(1)
 	}
 }

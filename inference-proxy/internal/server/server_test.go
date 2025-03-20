@@ -2,7 +2,6 @@ package server
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -61,7 +60,7 @@ func benchmarkServe(b *testing.B, apiType string) {
 		// Send b.N requests in parallel to learn how many concurrent requests the server can handle.
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, bytes.NewBuffer(payload))
+				req, err := http.NewRequestWithContext(b.Context(), http.MethodPost, endpoint, bytes.NewBuffer(payload))
 				require.NoError(err)
 
 				resp, err := http.DefaultClient.Do(req)

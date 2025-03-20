@@ -12,8 +12,10 @@
 package openai
 
 const (
-	// ChatRequestEncryptionField is the field in the request that is encrypted / decrypted.
-	ChatRequestEncryptionField = "messages"
+	// ChatRequestMessagesField is the messages field in the request that is encrypted / decrypted.
+	ChatRequestMessagesField = "messages"
+	// ChatRequestToolsField is the tools field in the request that is encrypted / decrypted.
+	ChatRequestToolsField = "tools"
 	// ChatResponseEncryptionField is the field in the response that is encrypted / decrypted.
 	ChatResponseEncryptionField = "choices"
 	// ChatCompletionsEndpoint is the endpoint for chat completions.
@@ -23,30 +25,19 @@ const (
 )
 
 // EncryptedChatRequest is the request structure for an OpenAI chat completion call,
-// with an encrypted "messages" field.
+// with encrypted "messages" and "tools" fields.
 //
 // Don't send the marshalled type to clients/servers. Read package docs for more info.
 type EncryptedChatRequest struct {
-	Messages      string         `json:"messages"` // The whole messages array from Request as an encrypted blob.
-	Model         string         `json:"model"`
-	Temperature   float32        `json:"temperature"`
-	N             int            `json:"n"`
-	MaxTokens     int            `json:"max_tokens"`
-	Stream        bool           `json:"stream"`
-	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
-}
-
-// ChatRequest is the request structure for an OpenAI chat completion call.
-//
-// Don't send the marshalled type to clients/servers. Read package docs for more info.
-type ChatRequest struct {
-	Messages      []message      `json:"messages"`
-	Model         string         `json:"model"`
-	Temperature   float32        `json:"temperature"`
-	N             int            `json:"n"`
-	MaxTokens     int            `json:"max_tokens"`
-	Stream        bool           `json:"stream"`
-	StreamOptions *StreamOptions `json:"stream_options,omitempty"`
+	Messages            string         `json:"messages"` // The whole messages array from Request as an encrypted blob.
+	Model               string         `json:"model"`
+	Temperature         float32        `json:"temperature"`
+	N                   int            `json:"n,omitzero"`
+	MaxTokens           int            `json:"max_tokens,omitzero"` // deprecated in favor of max_completion_tokens
+	MaxCompletionTokens int            `json:"max_completion_tokens,omitzero"`
+	Stream              bool           `json:"stream"`
+	StreamOptions       *StreamOptions `json:"stream_options,omitempty"`
+	Tools               *string        `json:"tools,omitempty"` // The whole tools array from Request as an encrypted blob.
 }
 
 // StreamOptions contains options for streaming completions. It is an extended version of the OpenAI StreamOptions type.
@@ -61,8 +52,8 @@ type StreamOptions struct {
 // Don't send the marshalled type to clients/servers. Read package docs for more info.
 type EncryptedChatResponse struct {
 	// Choices is the whole choices array from Response as an encrypted blob.
-	// The field is marked as omitempty to avoid adding empty strings in unit tests.
-	Choices string `json:"choices,omitempty"`
+	// The field is marked as omitzero to avoid adding empty strings in unit tests.
+	Choices string `json:"choices,omitzero"`
 	ID      string `json:"id"`
 	Object  string `json:"object"`
 	Created int    `json:"created"`
@@ -104,8 +95,9 @@ type choice struct {
 }
 
 type message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string  `json:"role"`
+	Content   *string `json:"content"`
+	ToolCalls []any   `json:"tool_calls,omitempty"`
 }
 
 // Usage contains the token usage of an OpenAI chat completion call.

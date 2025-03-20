@@ -1,8 +1,6 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-//go:build contrast_unstable_api
-
 package setup
 
 import (
@@ -55,15 +53,17 @@ func getNewTLSConfig(ctx context.Context, fetcher contrastDeploymentFetcher, mfL
 		return nil, fmt.Errorf("fetching manifest: %w", err)
 	}
 	log.Info("Coordinator manifest fetched successfully")
-	if err := mfLogger.Log(expectedMfBytes); err != nil {
-		return nil, fmt.Errorf("log manifest: %w", err)
-	}
 
 	coordinatorPolicyHash, err := fetcher.FetchCoordinatorPolicyHash(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetching coordinator policy hash: %w", err)
 	}
 	log.Info("Coordinator policy hash fetched successfully")
+
+	if err := mfLogger.Log(expectedMfBytes, coordinatorPolicyHash); err != nil {
+		return nil, fmt.Errorf("log manifest: %w", err)
+	}
+
 	return tlsConfigUpdater.GetTLSConfig(ctx, expectedMfBytes, coordinatorPolicyHash)
 }
 
@@ -93,6 +93,6 @@ type mfLogger struct {
 	workspace string
 }
 
-func (m mfLogger) Log(mf []byte) error {
-	return manifestlog.WriteEntry(m.fs, m.workspace, mf)
+func (m mfLogger) Log(mf []byte, coordinatorPolicyHash string) error {
+	return manifestlog.WriteEntry(m.fs, m.workspace, mf, coordinatorPolicyHash)
 }

@@ -13,13 +13,12 @@
   import { writable } from 'svelte/store'
   import info from '../assets/info.svg'
   import plus from '../assets/plus.svg'
-  import trash from '../assets/trash.svg'
+  import trash from '../assets/trash-white.svg'
   import docs from '../assets/docs.svg'
   import closeMenu from '../assets/close.svg'
   import rocket from '../assets/rocket.svg'
   import { replace } from 'svelte-spa-router'
   import settings from '../assets/settings.svg'
-
   $: sortedChats = $chatsStorage.sort(getChatSortOption().sortFn)
   $: activeChatId = $params && $params.chatId ? parseInt($params.chatId) : undefined
 
@@ -51,16 +50,17 @@
 
 <aside class="menu main-menu" class:pinned={$pinMainMenu} use:clickOutside={() => { $pinMainMenu = false }}>
   <div class="menu-expanse">
-      <div class="navbar-brand menu-nav-bar">
-        <span class="navbar-item gpt-logo p-0">
-          <img src={logo} alt="Conntinuum AI" width="48" height="48" />
-          <p class="ml-2 is-size-5 has-text-weight-bold">Privatemode</p>
+      <div class="menu-nav-bar">
+        <span class="navbar-item gpt-logo">
+          <img src={logo} alt="Conntinuum AI" width="180" height="22" />
         </span>
       </div>
       <div class="level-right">
         <div class="level-item">
-          <button on:click={async () => { $pinMainMenu = false; await startNewChatWithWarning(activeChatId) }} class="panel-block button" title="Start new chat with default profile" class:is-disabled={!hasModels}
-            ><img src={plus} alt="add new chat" width="11" height="11" class="mr-2" /><span class="panel-block-text">New chat</span></button>
+          <button on:click={async () => { $pinMainMenu = false; await startNewChatWithWarning(activeChatId) }} class="panel-block button" title="Start new chat with default profile" class:is-disabled={!hasModels}>
+						<img src={plus} alt="add new chat" width="11" height="11" class="mr-2" />
+						New chat
+					</button>
         </div>
       </div>
       {#if sortedChats.length > 1}
@@ -68,7 +68,7 @@
     {/if}
     <ul class="menu-list menu-expansion-list">
       {#if sortedChats.length === 0}
-        <li><a href={'#'} class="is-disabled">No chats yet...</a></li>
+        <li><a href={'#'} class="is-disabled" style="color: white; opacity: 0.6;">No chats yet...</a></li>
       {:else}
         {#key $checkStateChange}
         {#each sortedChats as chat, i}
@@ -80,33 +80,41 @@
       {/if}
     </ul>
     <!-- <p class="menu-label">Actions</p> -->
-    <div class="level is-mobile bottom-buttons mb-1">
+		 <!-- Clear button is absent on design, but I styled it anyway. Please uncomment if you think it needs to be there -->
+    <!-- <div class="level is-mobile bottom-buttons mb-1">
       {#if sortedChats.length > 1}
-        <div class="level-left">
-            <div class="clear-trigger ml-2">
-              <button
-                class="button"
-                aria-haspopup="true"
-                aria-controls="dropdown-menu3"
-                on:click|preventDefault={() => delAllChats()}
-              >
-                <span class="icon"
-                  ><img
-                    src={trash}
-                    alt="clear icon"
-                    width="14"
-                    height="14"
-                  /></span
-                >
-                <span class="level-left-text">Clear conversations</span>
-              </button>
-            </div>
-        </div>
+				<div class="clear-trigger w-100">
+					<button
+						class="button text-white panel-block m-0"
+						aria-haspopup="true"
+						aria-controls="dropdown-menu3"
+						on:click|preventDefault={() => delAllChats()}
+					>
+							<img
+								src={trash}
+								alt="clear icon"
+								width="14"
+								height="14"
+								class="mr-2"
+							/>
+						<span class="level-left-text">Clear conversations</span>
+					</button>
+				</div>
       {/if}
-    </div>
+    </div> -->
 
   <div class="side-info-block">
     <!-- <AttestationBanner /> -->
+    {#if sortedChats.length > 1}
+      <a
+        href="#/"
+        class="flex"
+        on:click|preventDefault={() => delAllChats()}
+      >
+        <img src={trash} alt="clear icon" width="15" height="15" />
+        <p>Clear conversations</p>
+      </a>
+    {/if}
     <a
       href="#/"
       class="flex"

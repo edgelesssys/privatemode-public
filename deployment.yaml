@@ -1,0 +1,170 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secret-service
+  namespace: continuum-590943
+  labels:
+    app.kubernetes.io/instance: '590943'
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: secret-service
+  template:
+    metadata:
+      labels:
+        app: secret-service
+        app.kubernetes.io/instance: '590943'
+    spec:
+      runtimeClassName: contrast-cc
+      containers:
+        - name: secret-service
+          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.10.0@sha256:7e3152408553467749e1b4b5ef4659af2c73f627213464ca909e3d45fa0eb50d'
+          args:
+            - '--etcd-cert-sans=secret-service-internal.continuum-590943.svc.cluster.local'
+          ports:
+            - containerPort: 3000
+            - containerPort: 3001
+            - containerPort: 9000
+            - containerPort: 2379
+            - containerPort: 2380
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: workload-textgen
+  namespace: continuum-590943
+  labels:
+    app: workload-textgen
+    app.kubernetes.io/instance: '590943'
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: workload-textgen
+  serviceName: workload-textgen
+  template:
+    metadata:
+      labels:
+        app: workload-textgen
+        app.kubernetes.io/instance: '590943'
+        privatemode.edgeless.systems/needs-gpu: "true"
+      annotations:
+        io.katacontainers.config.hypervisor.default_memory: "64000"
+        io.katacontainers.config.runtime.create_container_timeout: "1800"
+    spec:
+      serviceAccountName: workload-textgen-sa
+      runtimeClassName: contrast-cc
+      initContainers:
+        - name: attestation-agent
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.10.0@sha256:8178216b2c4280b071cc7cc7ad0917587ca814c57412c50c759081bc9dfc01a8
+          env:
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+          command:
+            - '/bin/sh'
+            - '-c'
+          args:
+            - |
+              ln -sf /usr/lib64/libnvidia-ml.so.550.90.07 /usr/lib64/libnvidia-ml.so.1 && \
+              LD_PRELOAD=/usr/lib64/libcuda.so.1:usr/lib64/libnvidia-ml.so.1 attestation-agent \
+                --secret-svc-address=secret-service-internal.continuum-590943.svc.cluster.local \
+                --gpu-debug=false \
+                --gpu-secure-boot=true \
+                --gpu-eat-version=EAT-21 \
+                --gpu-driver-versions=535.104.05,535.129.03,550.90.07 \
+                --gpu-vbios-versions=96.00.88.00.11,96.00.74.00.11,96.00.9F.00.04,96.00.74.00.1C
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: etcd-pki
+              mountPath: /var/run/continuum/etcd/pki
+            - mountPath: /contrast
+              name: contrast-secrets
+          resources:
+            limits:
+              "nvidia.com/GH100_H100_PCIE": 1
+        - name: disk-mounter
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.10.0@sha256:924b2e0a6c4dffbdc075d8f407b2cfef52df30ce110049b84d4769356d38f1e9
+          args:
+            - --root-hash=3a49ed30e4a637228b5d962c6b1fa508bad337ca73ef02cb9f0dcc7931fefad7
+            - --device-path=/dev/modelweights
+            - --mount-path=/mnt/modelweights
+          restartPolicy: Always
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: mount-dir
+              mountPath: /mnt
+              mountPropagation: Bidirectional
+            - name: etcd-pki
+              mountPath: /var/run/continuum/etcd/pki
+          volumeDevices:
+            - name: modelweights
+              devicePath: /dev/modelweights
+      containers:
+        - name: workload
+          image: docker.io/vllm/vllm-openai:v0.7.3@sha256:4f4037303e8c7b69439db1077bb849a0823517c0f785b894dc8e96d58ef3a0c2
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: 8000
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 60
+          env:
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+            - name: LD_PRELOAD
+              value: "/usr/lib/x86_64-linux-gnu/libcuda.so.1"
+          args:
+            - '--host=0.0.0.0'
+            - '--model=/mnt/modelweights'
+            - '--served-model-name'
+            - 'ibnzterrell/Meta-Llama-3.3-70B-Instruct-AWQ-INT4'
+            - 'latest'
+            - '--disable-log-requests'
+            - '--max-model-len=70000'
+            - '--enable-auto-tool-choice'
+            - '--tool-call-parser'
+            - 'llama3_json'
+          volumeMounts:
+            - name: mount-dir
+              mountPath: /mnt
+              mountPropagation: HostToContainer
+          resources:
+            limits:
+              "nvidia.com/GH100_H100_PCIE": 1
+        - name: inference-proxy
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.10.0@sha256:d524d288c593cd55f515f151e3c53469ce4b4c90068aaf1af32fddfcebadd6f1
+          ports:
+            - containerPort: 8085
+          args:
+            - --adapter-type=openai
+            - --workload-address=127.0.0.1
+            - --workload-port=8000
+            - --secret-svc-address=secret-service-internal.continuum-590943.svc.cluster.local
+          volumeMounts:
+            - name: etcd-pki
+              mountPath: /var/run/continuum/etcd/pki
+      volumes:
+        - emptyDir: {}
+          name: mount-dir
+        - name: etcd-pki
+          emptyDir: {}
+  volumeClaimTemplates:
+    - kind: PersistentVolumeClaim
+      metadata:
+        name: modelweights
+        labels:
+          app.kubernetes.io/instance: '590943'
+      spec:
+        storageClassName: ibnzterrell-meta-llama-3-3-70b-instruct-awq-int4
+        volumeMode: Block
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 41Gi

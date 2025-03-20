@@ -11,8 +11,8 @@ html {
 	/* Back-ground */
 	--BgColorDark: hsl(228, 10%, 10%);
 	--BgColorLight: #f1f1f1;
-	// --BgColorSidebarDark: rgb(28, 30, 36);
-	--BgColorSidebarDark: rgb(16, 17, 22);
+	--BgColorSidebarDark: rgba(35, 35, 35, 1);
+	// --BgColorSidebarDark: rgb(16, 17, 22);
 	--BgColorSidebarLight: hsla(0, 0%, 93%, 0.354);
 	--BgColorSidebarAdditional: #4d4d4d;
 	// Tool drawer for messages
@@ -21,7 +21,7 @@ html {
 
 	/* Sizes */
 	--sidebarTop: 0px;
-	--sidebarWidth: 280px;
+	--sidebarWidth: 250px;
 
 	--sectionPaddingTop: 0px;
 
@@ -37,6 +37,7 @@ html {
 	--chatInputPaddingLeft: 40px;
 
 	--BgColor: var(-BgColorLight);
+	--bgBody: rgba(243, 244, 245, 1);
 	--running-totals: 0;
 }
 
@@ -46,6 +47,17 @@ body {
 	font-weight: 500 !important;
 	font-style: normal;
 	font-variation-settings: "slnt" 0;
+	background-color: var(--bgBody);
+}
+
+button:focus, .button:focus {
+	outline: none !important;
+	border-color: transparent !important;
+	box-shadow: none !important;
+}
+
+.text-green{
+	color: rgba(117, 251, 122, 1) !important;
 }
 
 .flex-container {
@@ -127,9 +139,10 @@ body {
 .navbar {
 	display: none !important;
 	min-width: 0;
+	background-color: var(--bgBody) !important;
 }
 .level-right {
-	padding: 0 20px;
+	padding: 0 10px;
 }
 .level-right button,
 .level-right .level-item {
@@ -137,15 +150,19 @@ body {
 }
 
 .panel-block.button {
-	border-radius: 50px !important;
-	padding: 4px 17px;
+	border-radius: 20px !important;
+	padding: 7px 10px;
 	background-color: transparent;
 	height: auto;
-	margin-block: 20px;
+	margin: 28px 0 18px 0;
 	transition: 0.2s;
-	@media screen and (min-width: 768px) {
-		padding: 8px 17px;
-		margin-block: 30px;
+	border: none;
+	color: #fff;
+	font-size: 14px;
+	line-height: 21px;
+	&:hover{
+		background-color: rgba(75, 75, 75, 1);
+		color: #fff;
 	}
 }
 .panel-block-text {
@@ -171,13 +188,12 @@ body {
 
 .side-info-block {
 	padding: 12px 0;
-	background-color: var(--BgColorSidebarAdditional);
-	color: #e3e3e3;
+	font-size: 14px;
 	& > * {
-		padding: 12px 20px;
+		padding: 10px 20px;
 		display: flex;
-		gap: 12px;
-		color: #e3e3e3;
+		gap: 13px;
+		color: #fff;
 		&:hover {
 			color: #e3e3e3;
 			background: rgba(255, 255, 255, 0.1);
@@ -186,10 +202,12 @@ body {
 }
 
 .previous-text {
-	padding-inline: 20px;
-	margin-bottom: 15px;
-	font-weight: 500;
+	padding-left: 20px;
+	margin-bottom: 10px;
+	font-weight: 700;
 	line-height: 13.5px;
+	font-size: 12px;
+	color: rgba(154, 154, 154, 1);
 }
 
 // @media (prefers-color-scheme: dark) {
@@ -238,7 +256,7 @@ body {
 	html {
 		--BgColorSidebarLight: hsl(210, 12%, 97%);
 		// --BgColorSidebarDark: rgb(22, 24, 30);
-		--sidebarWidth: max(300px, 20%);
+		--sidebarWidth: max(250px, 20%);
 		--mainContentWidth: calc(100%);
 		--sidebarTop: 56px;
 		--sectionPaddingTop: 56px;
@@ -306,6 +324,14 @@ select option.is-default {
 	width: fit-content;
 }
 
+.message{
+	font-size: 14px !important;
+}
+
+.message-body{
+	padding: 16px 20px !important;
+}
+
 /* Swap the border on user messages to the other side */
 .user-message > .message-body {
 	border-width: 0 4px 0 0 !important;
@@ -347,12 +373,12 @@ select option.is-default {
 
 .is-info.is-focused.input {
 	outline: none;
-	border-color:  hsl(0, 0%, 86%);
 	box-shadow: none;
 	resize: none;
-	border-radius: 50px !important;
-	padding: 17px 110px 17px 20px;
-	height: auto;
+	border: none;
+	border-radius: 50px;
+	padding: 9px 110px 9px 20px;
+	height: 45px;
 	color: #4d4d4d;
 	font-weight: 450;
 }
@@ -466,29 +492,29 @@ select option.is-default {
 }
 
 .is-loading-dots {
-	width: 10px;
+	width: 8px;
 	aspect-ratio: 1;
 	border-radius: 50%;
 	animation: l5 1s infinite linear alternate;
-	margin: 0 13px;
+	margin: 0 12px;
 }
 
 @keyframes l5 {
 	0% {
-		box-shadow: 13px 0 #000, -13px 0 #0002;
-		background: #000;
+		box-shadow: 12px 0 #7A49F6, -12px 0 #E4DBFD;
+		background: #7A49F6;
 	}
 	33% {
-		box-shadow: 13px 0 #000, -13px 0 #0002;
-		background: #0002;
+		box-shadow: 12px 0 #7A49F6, -12px 0 #E4DBFD;
+		background: #E4DBFD;
 	}
 	66% {
-		box-shadow: 13px 0 #0002, -13px 0 #000;
-		background: #0002;
+		box-shadow: 12px 0 #E4DBFD, -12px 0 #7A49F6;
+		background: #E4DBFD;
 	}
 	100% {
-		box-shadow: 13px 0 #0002, -13px 0 #000;
-		background: #000;
+		box-shadow: 12px 0 #E4DBFD, -12px 0 #7A49F6;
+		background: #7A49F6;
 	}
 }
 
@@ -618,10 +644,54 @@ select option.is-default {
 .chat-menu-item {
 	position: relative;
 	min-width: 0;
+	font-size: 14px;
+	line-height: 21px;
 	& img {
 		display: block;
 		height: 14px;
 		width: 100%;
+	}
+}
+
+.chat-menu-item-wrapper{
+	.dropdown{
+		position: absolute;
+		right: 0;
+		top: 0;
+		height: 35px;
+	}
+	.dropdown-menu{
+		background-color: var(--BgColorSidebarDark);
+		border: 0.5px solid rgba(154, 154, 154, 1);
+		box-shadow: 0px 4px 10px 0px rgba(0, 0, 0, 0.25);
+		min-width: fit-content;
+		padding: 6px 0 !important;
+		overflow: hidden;
+		z-index: 10;
+		left: auto;
+		right: 0;
+		isolation: isolate;
+		&.dropdown-menu-up{
+			bottom: 100%;
+			top: auto;
+		}
+		.dropdown-item{
+			padding: 0;
+			&:hover{
+				background: rgba(75, 75, 75, 1);
+			}
+			button{
+				width: 100%;
+				padding: 6px 12px !important;
+				font-size: 12px;
+				font-weight: 500;
+				color: #fff;
+				line-height: 1;
+				background: transparent;
+				border: none;
+				text-align: left;
+			}
+		}
 	}
 }
 
@@ -634,7 +704,7 @@ select option.is-default {
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-	font-size: 13.5px;
+	margin-right: 20px; // add space for the dropdown icon
 }
 
 .chat-menu-item .delete-button {
@@ -643,6 +713,11 @@ select option.is-default {
 
 .chat-menu-item .edit-button {
 	min-width: 14px;
+}
+
+.chat-menu-item.is-editable{
+	outline-offset: -2px;
+	overflow-wrap: anywhere;
 }
 
 .chat-name-editor {
@@ -671,8 +746,8 @@ aside.menu.main-menu .menu-expanse {
 	display: flex;
 	flex-flow: column;
 	height: 100%;
-	background-color: var(--BgColorSidebarLight);
-	padding-top: 30px;
+	background-color: var(--BgColorSidebarDark);
+	padding: 30px 0 0 0;
 }
 
 .menu-expanse .menu-label,
@@ -682,10 +757,10 @@ aside.menu.main-menu .menu-expanse {
 }
 
 .menu-expanse .menu-expansion-list {
-	padding: 0 20px;
+	padding: 0 10px;
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+	gap: 6px;
 	flex: 1 1 auto;
 	overflow-y: auto;
 }
@@ -746,7 +821,7 @@ aside.menu.main-menu .menu-expanse {
 }
 
 .chat-content {
-	max-width: 1000px;
+	max-width: 890px;
 	width: 100%;
 	margin: 0 auto;
 	padding: var(--chatContentPaddingTop)
@@ -779,7 +854,7 @@ aside.menu.main-menu .menu-expanse {
 	bottom: 0px;
 	width: calc(100% - var(--sidebarWidth));
 	left: var(--sidebarWidth);
-	background-color: white;
+	background-color: var(--bgBody);
 
 	padding: var(--chatInputPaddingTop)
 			var(--chatInputPaddingRight)
@@ -787,8 +862,19 @@ aside.menu.main-menu .menu-expanse {
 			var(--chatInputPaddingLeft);
 
 	textarea {
-		max-height: calc(100vh - (var(--chatContentPaddingBottom) + var(--runningTotalLineHeight) * var(--running-totals))) !important;
-		min-height: 58px !important;
+		// max-height: calc(100vh - (var(--chatContentPaddingBottom) + var(--runningTotalLineHeight) * var(--running-totals))) !important;
+		max-height: 188px;
+		min-height: 45px !important;
+		font-family: inherit;
+		font-size: 13.5px;
+		line-height: 27px;
+		border-radius: 20px !important;
+		scrollbar-width: thin;
+		scrollbar-color: rgba(208, 208, 208, 1) white;
+		
+		&::placeholder {
+			color: rgba(98, 98, 98, 1);
+		}
 	}
 }
 .close-mobile-menu {
@@ -850,10 +936,8 @@ aside.menu.main-menu .menu-expanse {
 	margin: 5px;
 }
 
-.main-menu .menu-nav-bar .gpt-logo .icon {
-	display: inline-block;
-	margin-top: 8px;
-	margin-left: 8px;
+.main-menu .menu-nav-bar .gpt-logo {
+	padding: 0 20px;
 }
 
 .main-menu .menu-nav-bar .chat-option-menu {
@@ -903,7 +987,7 @@ aside.menu.main-menu .menu-expanse {
 	display: block;
 	margin: 4px;
 	// border-radius: 10px;
-	opacity: 0.6;
+	opacity: 0.9;
 }
 
 .button-pack .button:hover {
@@ -933,7 +1017,7 @@ aside.menu.main-menu .menu-expanse {
 
 .tool-drawer,
 .tool-drawer-mask {
-	z-index: 1;
+	z-index: 2;
 	position: absolute;
 	visibility: hidden;
 	width: 0%;
@@ -944,7 +1028,7 @@ aside.menu.main-menu .menu-expanse {
 	margin: 0px;
 	padding: 0px;
 	transition: 0.1s;
-	background-color: var(--chatToolDrawerColor);
+	background-color: transparent;
 	border-radius: 4px;
 }
 
@@ -960,6 +1044,11 @@ aside.menu.main-menu .menu-expanse {
 .tool-drawer-mask {
 	top: auto;
 	bottom: 0px;
+}
+
+.assistant-message:not(.is-danger) .message-body{
+	border: none !important;
+	padding-left: 0 !important;
 }
 
 .assistant-message .tool-drawer,
@@ -1108,23 +1197,20 @@ aside.menu.main-menu .menu-expanse {
 .menu-list .chat-menu-item {
 	display: flex;
 	justify-content: space-between;
-	border-radius: 50px;
-	padding: 7px 14px;
-	background-color: var(--BgColorSidebarAdditional);
-	color: #f1f1f1;
-	transition: 0.2s;
-	@media screen and (min-width: 768px) {
-		padding: 11px 14px;
-	}
+	border-radius: 20px;
+	padding: 7px 10px;
+	color: #fff;
+	transition: background 0.2s ease-in-out;
 }
 
 .button, .input {
-        border-width: 2px;
+	border-width: 2px;
 }
 
-.menu-list a:hover {
-	background-color: $esPurple;
-	color: #f1f1f1;
+.menu-list .chat-menu-item:hover,
+.menu-list .chat-menu-item.is-active {
+	background-color: rgba(75, 75, 75, 1);
+	color: #fff;
 }
 .dropdown.is-up .dropdown-menu {
 	background: transparent;
@@ -1143,28 +1229,27 @@ aside.menu.main-menu .menu-expanse {
 		color: #4d4d4d;
 	}
 	@media screen and (min-width: 768px) {
-                display: block;
+		display: block;
 		//position: sticky;
 		top: 0;
-		background: white;
+		background: var(--bgBody);
 		padding: 35px 20px;
 		.subtitle {
-                        font-size: 30px;
+      font-size: 30px;
 		}
 	}
 }
 
 .prompt-input-container form {
 	position: relative;
-	margin-bottom: 20px;
+	margin-bottom: 12px;
 }
 
 .chat-page-controls {
 	position: absolute;
 	z-index: 5;
-	top: 50%;
-	right: 1%;
-	transform: translateY(-50%);
+	bottom: 0;
+	right: 10px;
 	display: flex;
 	align-items: center;
 }
@@ -1175,11 +1260,15 @@ aside.menu.main-menu .menu-expanse {
 .control.mic .button {
 	border: none;
 	padding: 0 10px;
+	height: 45px;
+	border: none;
 }
 .control.send .button {
 	background: none;
 	color: #000000;
 	padding: 0 10px;
+	height: 45px;
+	border: none;
 	width: auto !important;
 }
 .message.is-info {
@@ -1187,10 +1276,10 @@ aside.menu.main-menu .menu-expanse {
 }
 
 .message.user-message {
-        background-color: #e4dbfd;
-        color: #000000;
-        border-radius: 30px;
-        border: none;
+	background-color: #fff;
+	color: #000000;
+	border-radius: 30px;
+	border: none;
 }
 
 .message.user-message .message-body,
@@ -1200,7 +1289,7 @@ aside.menu.main-menu .menu-expanse {
         border: none;
 }
 .message.is-success.assistant-message {
-	background-color: #f1f1f1;
+	background-color: transparent;
 }
 .message-display p {
 	word-wrap: break-word;
@@ -1246,6 +1335,7 @@ aside.menu.main-menu .menu-expanse {
 .menu-button .button {
 	padding: 0;
 	border: none;
+	background-color: var(--bgBody);
 }
 
 .chat-option-menu.navbar-item {
@@ -1271,6 +1361,8 @@ aside.menu.main-menu .menu-expanse {
 
 .level-left .button:focus {
 	box-shadow: none;
+	outline: none;
+	border: none;
 }
 
 .navbar-item img {
@@ -1313,4 +1405,39 @@ aside.menu.main-menu .menu-expanse {
 
 .is-info.textarea, .is-info.input {
 	border-color: $esPurple;
+}
+
+// Critical Wails-specific styles for banner
+.app-container {
+  --sidebarWidth: 250px;
+}
+
+/* These styles ensure the banner displays correctly in production builds */
+.update-banner-container, 
+.update-banner {
+  display: block !important;
+  background-color: rgba(122, 73, 246, 0.15) !important;
+  color: rgb(122, 73, 246) !important;
+  text-align: center !important;
+  padding: 0.5rem !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  left: 0 !important;
+  right: 0 !important;
+}
+
+@media (min-width: 769px) {
+  .update-banner-container,
+  .update-banner {
+    margin-left: var(--sidebarWidth, 250px) !important;
+    width: calc(100% - var(--sidebarWidth, 250px)) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .update-banner-container,
+  .update-banner {
+    width: 100% !important;
+    margin-left: 0 !important;
+  }
 }

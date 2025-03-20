@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:public": "vite --host 0.0.0.0",
-    "build": "vite build",
+    "build": "vite build && node -e \"require('fs').writeFileSync('dist/.gitkeep', '');\"",
     "build:github": "vite build --base=/chatgpt-web/",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
@@ -53,5 +53,8 @@
     "typescript": "<5.5",
     "uuid": "^11.0.3",
     "vite": "^4.5.1"
+  },
+  "dependencies": {
+    "compare-versions": "^6.1.1"
   }
 }

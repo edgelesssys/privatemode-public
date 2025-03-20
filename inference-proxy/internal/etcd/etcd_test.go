@@ -49,7 +49,7 @@ func TestFetchSecrets(t *testing.T) {
 				log:    slog.Default(),
 			}
 
-			secrets, _, err := etcd.fetchSecrets(context.Background())
+			secrets, _, err := etcd.fetchSecrets(t.Context())
 			if tc.wantErr {
 				assert.Error(err)
 				return
@@ -196,7 +196,7 @@ func TestWatchSecrets(t *testing.T) {
 				log:    slog.Default(),
 			}
 
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {

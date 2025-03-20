@@ -52,6 +52,7 @@ export class ChatRequest {
         let userMessage
         switch (response.status) {
           case 401:
+          case 403:
             userMessage = 'Authentication failed. Please check your App key.'
             break
           case 429:

@@ -1,6 +1,17 @@
 # Privatemode UI
 This is the source code of the Privatemode UI. It's a modified version of ChatGPT-web. To build it, please see the instructions in the original Readme following below.
 
+## Building
+
+Before being able to build the app, you need to create dummy files for the Wails bindings:
+
+```bash
+mkdir -p wailsjs/go/main && echo 'export function GetConfiguredAPIKey () {
+  return '\'''\''
+}
+' > wailsjs/go/main/ConfigurationService.js
+```
+
 # ChatGPT-web
 
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Niek/chatgpt-web/pages.yml?style=flat-square)](https://github.com/Niek/chatgpt-web/actions/workflows/pages.yml)

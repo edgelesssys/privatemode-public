@@ -6,6 +6,7 @@
   import { replace } from 'svelte-spa-router'
   // import PromptConfirm from './PromptConfirm.svelte'
   import type { ChatSettings } from './Types.svelte'
+  export const isNativeApp = window['go'] !== undefined
   export const sizeTextElements = (force?: boolean) => {
     const els = document.querySelectorAll('textarea.auto-size')
     for (let i:number = 0, l = els.length; i < l; i++) {
@@ -111,7 +112,7 @@
       onConfirm: () => {}
     })
   }
-  
+
   export const warningNotice = (message:string, error:Error|undefined = undefined):any => {
     openModal(PromptNotice, {
       title: 'Warning',
@@ -158,4 +159,4 @@
     return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&')
   }
 
-</script> 
+</script>

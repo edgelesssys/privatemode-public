@@ -14,7 +14,7 @@
   export const latestModelMap = persisted('latestModelMap', {} as Record<Model, Model>) // What was returned when a model was requested
   export const globalStorage = persisted('global', {} as GlobalSettings)
   const apiKeyFromEnv = import.meta.env.VITE_OPENAI_API_KEY || ''
-  const apiBaseUriFromEnv = import.meta.env.VITE_API_BASE
+  const apiBaseUriFromEnv = import.meta.env.VITE_API_BASE || ''
   const defaultModelFromEnv = import.meta.env.VITE_DEFAULT_MODEL || 'latest'
   export const apiKeyStorage = persisted('apiKey', apiKeyFromEnv as string)
   export const defaultModelStorage = persisted('defaultModel', defaultModelFromEnv as string)
@@ -28,7 +28,7 @@
   export let currentChatId = writable(0)
   export let lastChatId = persisted('lastChatId', 0)
 
-  const chatDefaults = getChatDefaults()
+  const chatDefaults = getChatDefaults();
   
   export const getApiKey = (): string => {
     return get(apiKeyStorage)

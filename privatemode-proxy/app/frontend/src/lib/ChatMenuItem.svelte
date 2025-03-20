@@ -9,6 +9,7 @@
   import { hasActiveModels } from './Models.svelte'
   import trash from '../assets/trash-white.svg'
   import editIcon from '../assets/edit.svg'
+  import threeDots from '../assets/three-dots-vertical.svg'
 
   export let chat:Chat
   export let activeChatId:number|undefined
@@ -17,8 +18,23 @@
 
   let editing:boolean = false
   let original:string
+  let isDropdownOpen:boolean = false
 
-  let waitingForConfirm:any = 0
+  const waitingForConfirm:any = 0
+
+  const checkDropdownPosition = (dropdownMenu: HTMLElement) => {
+    const menuExpansionList = document.querySelector('.menu-expansion-list') as HTMLElement
+    if (menuExpansionList) {
+      const dropdownRect = dropdownMenu.getBoundingClientRect()
+      const menuRect = menuExpansionList.getBoundingClientRect()
+
+      if (dropdownRect.bottom > menuRect.bottom) {
+        dropdownMenu.classList.add('dropdown-menu-up')
+      } else {
+        dropdownMenu.classList.remove('dropdown-menu-up')
+      }
+    }
+  }
 
   onMount(async () => {
     if (!chat.name) {
@@ -76,35 +92,113 @@
     editing = true
     setTimeout(() => {
       const el = document.getElementById(`chat-menu-item-${chat.id}`)
-      el && el.focus()
+      if (el) {
+        el.focus()
+        const range = document.createRange()
+        const sel = window.getSelection()
+        range.selectNodeContents(el)
+        range.collapse(false) // false means collapse to end
+        sel.removeAllRanges()
+        sel.addRange(range)
+      }
     }, 0)
   }
 
+  // const share = () => {
+  //   // TODO: implement share chat
+  //   isDropdownOpen = false
+  // }
 </script>
 
-<li>
+<li class="chat-menu-item-wrapper position-relative">
   {#if editing}
-    <div id="chat-menu-item-{chat.id}" class="chat-menu-item is-active" style="font-size: 13.5px;" on:keydown={keydown} contenteditable bind:innerText={chat.name} on:blur={update} />
+    <div id="chat-menu-item-{chat.id}" class="chat-menu-item is-active is-editable" on:keydown={keydown} contenteditable bind:innerText={chat.name} on:blur={update} />
   {:else}
-    <a href={`#/chat/${chat.id}`} class="chat-menu-item" class:is-waiting={waitingForConfirm} class:is-disabled={!hasActiveModels()} class:is-active={activeChatId === chat.id}>
-      {#if waitingForConfirm}
-        <a href={'$'} class="is-hidden px-1 delete-button btn btn-sm ms-auto lh-1" on:click|preventDefault={() => delChat()}>
-          <Fa icon={faCircleCheck} height="13" />
-        </a>
-      {:else}
-        <div class="chat-item-name d-flex align-items-center">
-          <Fa class="mr-2 chat-icon flex-shrink-0" size="md" icon={faMessage} style="color: #ccc;" />
-          <span>{chat.name || `Chat ${chat.id}`}</span>
-        </div>
-        <div class="d-flex flex-shrink-0">
-          <a href={'$'} class="is-hidden edit-button btn btn-sm px-1" on:click|preventDefault={() => edit()}>
-            <img src={editIcon} width="13" height="13" alt="edit icon" />
-          </a>
-          <a href={'$'} class="is-hidden delete-button btn btn-sm px-1" on:click|preventDefault={() => delChat()}>
-            <img src={trash} width="11" height="13" alt="edit icon" />
-          </a>
-        </div>
-      {/if}
+    <a href={`#/chat/${chat.id}`} class="chat-menu-item d-flex align-items-center justify-content-between" class:is-waiting={waitingForConfirm} class:is-disabled={!hasActiveModels()} class:is-active={activeChatId === chat.id}>
+      <div class="chat-item-name">
+        <span>{chat.name || `Chat ${chat.id}`}</span>
+      </div>
+
+      <div class="dropdown">
+        <button class="border-0 p-0 px-2 bg-transparent d-flex align-items-center justify-content-center" type="button" on:click|preventDefault={() => isDropdownOpen = !isDropdownOpen}>
+          <img src={threeDots} alt="edit" width="16" height="16" />
+        </button>
+        
+        <ul class="dropdown-menu m-0 {isDropdownOpen ? 'd-block' : 'd-none'}">
+          <li class="dropdown-item">
+            <button class="p-0 px-1" on:click|preventDefault={() => edit()}>
+              Rename
+            </button>
+          </li>
+          <!-- <li class="dropdown-item">
+            <button class="p-0 px-1" on:click|preventDefault={() => share()}>
+              Share Chat
+            </button>
+          </li> -->
+          <li class="dropdown-item">
+            <button class="p-0 px-1" on:click|preventDefault={() => delChat()}>
+              Delete
+            </button>
+          </li>
+        </ul>
+      </div>
     </a>
   {/if}
 </li>
+
+<style>
+  .chat-menu-item {
+    position: relative;
+    width: 100%;
+  }
+
+  .chat-menu-item.is-editable {
+    outline: none !important;
+  }
+
+  .chat-menu-item.is-editable:focus {
+    outline: none !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .chat-menu-item .dropdown {
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
+  }
+
+  .chat-menu-item:hover .dropdown {
+    visibility: visible;
+    opacity: 1;
+  }
+
+  .dropdown-menu {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    z-index: 1000;
+  }
+
+  .dropdown-menu.dropdown-menu-up {
+    top: auto;
+    bottom: 100%;
+  }
+
+  .dropdown-item {
+    padding: 8px 12px;
+    cursor: pointer;
+  }
+
+  .dropdown-item:hover {
+    background-color: var(--vt-c-divider-light);
+  }
+
+  .dropdown-item button {
+    background: none;
+    border: none;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+  }
+</style>

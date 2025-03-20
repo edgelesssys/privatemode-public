@@ -7,6 +7,8 @@
   import { set as setOpenAI } from './providers/openai/util.svelte'
   import { hasActiveModels } from './Models.svelte'
   import { get } from 'svelte/store'
+  import { isNativeApp } from './Util.svelte'
+  import { GetConfiguredAPIKey } from '../../wailsjs/go/main/ConfigurationService'
 
   $: apiKey = $apiKeyStorage
   const openAiEndpoint = $globalStorage.openAiEndpoint || ''
@@ -15,9 +17,24 @@
   let hasModels = hasActiveModels()
   let apiError: string = ''
 
-  onMount(() => {
+  const initApiKey = async () => {
+    // In a native app try to read it from the config file
+    // but only if not already set or an empty string (so the
+    // user can recover the key from the config file).
+    if (!isNativeApp || apiKey) {
+      return
+    }
+
+    const configuredKey = await GetConfiguredAPIKey()
+    if (configuredKey) {
+      setOpenAI({ apiKey: configuredKey })
+    }
+  }
+
+  onMount(async () => {
     if (!$started) {
       $started = true
+      await initApiKey()
       if (hasActiveModels() && getChat($lastChatId)) {
         const chatId = $lastChatId
         $lastChatId = 0
@@ -51,9 +68,9 @@
       }
       apiError = ''
       return true
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to connect:', error)
-      apiError = `There was an error connecting to this endpoint: ${error.message}`
+      apiError = `There was an error connecting to this endpoint: ${error instanceof Error ? error.message : String(error)}`
       return false
     }
   }
@@ -73,8 +90,9 @@
   </article>
   <article class="message" class:is-danger={!hasModels} class:is-warning={!apiKey} class:is-info={apiKey}>
     <div class="message-body">
-      Set your Privatemode App key below:
-
+      <p class="is-size-8 mb-4">
+        Enter your App key below{#if isNativeApp}&nbsp;or set it in the configuration file{/if}.
+      </p>
       <form
         class="field has-addons has-addons-right"
         on:submit|preventDefault={async (event) => {
@@ -89,6 +107,7 @@
         <p class="control is-expanded">
           <input
             aria-label="OpenAI API key"
+            placeholder="Your App key"
             autocomplete="off"
             class="input"
             class:is-danger={!hasModels}

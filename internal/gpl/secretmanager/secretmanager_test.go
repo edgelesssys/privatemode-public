@@ -18,7 +18,7 @@ func TestGetSecretUpdatesAfterLifetime(t *testing.T) {
 	mock := &updateCounter{}
 	sut := New(mock.UpdateFn, secretLifetime, refreshBuffer)
 	now := time.Now()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	secret, err := sut.LatestSecret(ctx, now)
 	assert.NoError(err)

@@ -43,6 +43,7 @@
   import { getModelDetail } from './Models.svelte'
   import microphone from '../assets/microphone.svg'
   import send from '../assets/send.svg'
+  import logoSmall from '../assets/logo-small.svg'
 
   export let params = { chatId: '' }
   const chatId: number = parseInt(params.chatId)
@@ -361,6 +362,17 @@
   }
 
 </script>
+<style>
+  .chat-page {
+    padding-top: var(--banner-offset, 1.25rem);
+    transition: padding-top 0.3s ease;
+  }
+
+  :global(.update-banner:not(:empty) + .chat-page) {
+    --banner-offset: 3rem;
+  }
+</style>
+
 {#if chat}
 <ChatSettingsModal chatId={chatId} bind:show={showSettingsModal} />
 <div class="chat-page pt-5 px-2" style="--running-totals: {Object.entries(chat.usage || {}).length}">
@@ -389,7 +401,8 @@
 
 {#if chatRequest.updating === true || $currentChatId === 0}
   <article class="message is-success assistant-message">
-    <div class="message-body content">
+    <div class="message-body content d-flex align-items-center">
+      <img src={logoSmall} alt="" width="24" height="24" class="mr-2 flex-shrink-0" />
       <div class="is-loading-dots" ></div>
       <span>{chatRequest.updatingMessage}</span>
     </div>
@@ -402,7 +415,7 @@
 </div>
 </div>
 <Footer class="prompt-input-container" strongMask={true}>
-  <div class="chat-content mx-auto pt-4 pb-2 px-3">
+  <div class="chat-content mx-auto pt-4 pb-2">
   <form class="field has-addons has-addons-right is-align-items-flex-end" on:submit|preventDefault={() => submitForm()}>
     <p class="control is-expanded">
       <textarea

@@ -12,6 +12,7 @@
   import PromptConfirm from './PromptConfirm.svelte'
   import { getImage } from './ImageStore.svelte'
   import { getModelDetail } from './Models.svelte'
+  import logoSmall from '../assets/logo-small.svg'
 
   export let message:Message
   export let chatId:number
@@ -232,7 +233,10 @@
   class:streaming={message.streaming}
   class:incomplete={message.finish_reason === 'length'}
 >
-  <div class="message-body content">
+  <div class="message-body content d-flex align-items-start">
+    {#if isAssistant}
+      <img src={logoSmall} alt="" width="24" height="24" class="mr-2 flex-shrink-0" />
+    {/if}
 
     {#if editing}
       <form class="message-edit" on:submit|preventDefault={update} on:keydown={keydown}>
@@ -243,43 +247,38 @@
           <img src={imageUrl} alt="">
         {/if}
     {:else}
-      <div
-        class="message-display"
-
-        on:touchend={editOnDoubleTap}
-          on:dblclick|preventDefault={() => edit()}
-        >
+      <div class="message-display" on:touchend={editOnDoubleTap} on:dblclick|preventDefault={() => edit()}>
         {#if message.summary && !message.summary.length}
-        <p><b>Summarizing...</b></p>
+          <p><b>Summarizing...</b></p>
         {/if}
         {#key refreshCounter}
-        <SvelteMarkdown
-          source={displayMessage}
-          options={markdownOptions}
-          renderers={{ code: Code, html: Code }}
-        />
+          <SvelteMarkdown
+            source={displayMessage}
+            options={markdownOptions}
+            renderers={{ code: Code, html: Code }}
+          />
         {/key}
         {#if imageUrl}
           <img src={imageUrl} alt="">
         {/if}
+        {#if message.finish_reason === 'length' || message.finish_reason === 'abort'}
+          <button
+            type="button"
+            class="continue-button"
+            on:click|preventDefault|stopPropagation={() => {
+              continueIncomplete()
+            }}
+          >
+            Continue
+          </button>
+        {/if}
       </div>
-      {#if message.finish_reason === 'length' || message.finish_reason === 'abort'}
-        <button
-          type="button"
-          class="continue-button"
-          on:click|preventDefault|stopPropagation={() => {
-            continueIncomplete()
-          }}
-        >
-          Continue
-        </button>
-      {/if}
     {/if}
   </div>
   <div class="tool-drawer-mask"></div>
   <div class="tool-drawer">
     <div class="button-pack">
-      {#if message.finish_reason === 'length' || message.finish_reason === 'abort'}
+      <!-- {#if message.finish_reason === 'length' || message.finish_reason === 'abort'}
       <a
         href={'#'}
         title="Continue "
@@ -290,7 +289,7 @@
       >
       <span class="icon"><Fa icon={faEllipsis} /></span>
       </a>
-      {/if}
+      {/if} -->
       {#if message.summarized}
       <a
         href={'#'}
@@ -397,6 +396,7 @@
   .continue-button {
     display: inline-block;
     margin-left: 4px;
+    margin-top: 1em;
     font-weight: bold;
     background: none;
     border: none;

@@ -48,7 +48,7 @@ func TestUpdateSecrets(t *testing.T) {
 				tc.customize(sut)
 			}
 
-			err := sut.UpdateSecrets(context.Background(), map[string][]byte{"key": []byte("value")}, time.Hour)
+			err := sut.UpdateSecrets(t.Context(), map[string][]byte{"key": []byte("value")}, time.Hour)
 			assert := assert.New(t)
 			if tc.wantErr {
 				assert.Error(err)

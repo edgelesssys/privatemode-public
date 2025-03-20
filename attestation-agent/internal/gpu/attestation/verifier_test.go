@@ -268,7 +268,7 @@ func TestVerify(t *testing.T) {
 
 			token := createToken(t, tc.tokenTransformer, tc.signingKey(t), tc.signingMethod)
 
-			err := v.Verify(context.Background(), token, [32]byte{})
+			err := v.Verify(t.Context(), token, [32]byte{})
 			if tc.wantErr {
 				assert.Error(err)
 			} else {

@@ -1,8 +1,6 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-//go:build contrast_unstable_api
-
 package setup
 
 import (

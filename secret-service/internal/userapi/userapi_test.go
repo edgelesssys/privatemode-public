@@ -57,7 +57,7 @@ func TestSetSecrets(t *testing.T) {
 				log:         slog.Default(),
 			}
 
-			_, err := s.SetSecrets(context.Background(), tc.secretReq)
+			_, err := s.SetSecrets(t.Context(), tc.secretReq)
 			if tc.wantErr {
 				assert.Error(err)
 				return

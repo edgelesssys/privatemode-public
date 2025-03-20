@@ -10,6 +10,7 @@ type choice struct {
 }
 
 type message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string   `json:"role"`
+	Content   *string  `json:"content"`
+	ToolCalls []string `json:"tool_calls,omitempty"`
 }

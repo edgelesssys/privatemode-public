@@ -8,11 +8,14 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist/*
-!dist/.gitkeep
-dist-ssr
+/wailsjs/
 *.local
 src-tauri/gen/
+package.json.md5
+
+# required for downstream build processes
+dist/*
+!dist/.gitkeep
 
 # Editor directories and files
 .vscode/*

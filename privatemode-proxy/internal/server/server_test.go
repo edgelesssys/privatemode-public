@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,26 +23,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testAPIKey string = "testkey"
+
 func TestPromptEncryption(t *testing.T) {
 	require := require.New(t)
-	ctx := context.Background()
-	apiKey := "testkey"
+	ctx := t.Context()
 
-	// Arrange stub server
-	log := slog.Default()
 	secret := secretmanager.Secret{
 		ID:   "123",
 		Data: bytes.Repeat([]byte{0x42}, 32),
 	}
 	stubAuthOpenAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != fmt.Sprintf("Bearer %s", apiKey) {
+		if r.Header.Get("Authorization") != fmt.Sprintf("Bearer %s", testAPIKey) {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		stub.OpenAIEchoHandler(secret.Map(), log).ServeHTTP(w, r)
+		stub.OpenAIEchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
 	}))
 	defer stubAuthOpenAIServer.Close()
 
+	apiKey := testAPIKey
 	testCases := map[string]struct {
 		apiKey           *string
 		expectStatusCode int
@@ -59,23 +60,18 @@ func TestPromptEncryption(t *testing.T) {
 			apiKey:           nil,
 			expectStatusCode: http.StatusOK,
 			requestMutator: func(req *http.Request) {
-				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
+				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", testAPIKey))
 			},
 		},
 	}
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			// Arrange server
-			sut := &Server{
-				apiKey:    tc.apiKey,
-				sm:        stubSecretManager{Secret: secret},
-				forwarder: forwarder.New("tcp", stubAuthOpenAIServer.Listener.Addr().String(), log),
-				log:       log,
-			}
+			sut := newTestServer(tc.apiKey, secret, stubAuthOpenAIServer.Listener.Addr().String())
 
 			// Act
 			prompt := "Hello"
-			req := prepareRequest(ctx, require, prompt)
+			req := prepareRequest(ctx, require, &prompt, nil)
 			if tc.requestMutator != nil {
 				tc.requestMutator(req)
 			}
@@ -89,18 +85,145 @@ func TestPromptEncryption(t *testing.T) {
 				var res openai.ChatResponse
 				require.NoError(json.NewDecoder(resp.Body).Decode(&res))
 				require.Len(res.Choices, 1)
-				assert.Equal("Echo: Hello", res.Choices[0].Message.Content)
+				assert.Equal("Echo: Hello", *res.Choices[0].Message.Content)
 			}
 		})
 	}
 }
 
-func prepareRequest(ctx context.Context, require *require.Assertions, prompt string) *http.Request {
+func TestTools(t *testing.T) {
+	strPtr := func(s string) *string { return &s }
+
+	secret := secretmanager.Secret{
+		ID:   "123",
+		Data: bytes.Repeat([]byte{0x42}, 32),
+	}
+
+	stubAuthOpenAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stub.OpenAIEchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
+	}))
+	t.Cleanup(func() {
+		stubAuthOpenAIServer.Close()
+	})
+
+	// Create the SUT once (or inside the loop if you prefer)
+	apiKey := testAPIKey
+	sut := newTestServer(&apiKey, secret, stubAuthOpenAIServer.Listener.Addr().String())
+
+	testFunc1 := `{"type":"function","function":"func1"}`
+	testFunc1Echo := `{"type":"function","function":"func1","test":"echo"}`
+	testFunc2 := `{"type":"function","function":"func2"}`
+	testFunc2Echo := `{"type":"function","function":"func2","test":"echo"}`
+
+	testCases := map[string]struct {
+		prompt            *string
+		tools             []string
+		expectedContent   string
+		expectedToolCalls []string
+	}{
+		// rare edge cases
+		"no prompt, no functions array": {
+			prompt:            nil,
+			tools:             nil,
+			expectedContent:   "Echo: nil",
+			expectedToolCalls: nil,
+		},
+		"empty prompt, no functions array": {
+			prompt:            strPtr(""),
+			tools:             nil,
+			expectedContent:   "Echo: ",
+			expectedToolCalls: nil,
+		},
+		"with prompt, empty functions array": {
+			prompt:            strPtr("Hello with 0 tools"),
+			tools:             []string{},
+			expectedContent:   "Echo: Hello with 0 tools",
+			expectedToolCalls: nil,
+		},
+		// test returning the tool call back to the server (usually the message before tool response)
+		"no prompt, one function": {
+			prompt:            nil,
+			tools:             []string{testFunc1},
+			expectedContent:   "Echo: nil",
+			expectedToolCalls: []string{testFunc1Echo},
+		},
+		// default case
+		"with prompt, one function": {
+			prompt:            strPtr("Hello with tools"),
+			tools:             []string{testFunc1},
+			expectedContent:   "Echo: Hello with tools",
+			expectedToolCalls: []string{testFunc1Echo},
+		},
+		// test multiple tools
+		"with prompt, two functions": {
+			prompt:            strPtr("Hello with two tools"),
+			tools:             []string{testFunc1, testFunc2},
+			expectedContent:   "Echo: Hello with two tools",
+			expectedToolCalls: []string{testFunc1Echo, testFunc2Echo},
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+
+			var tools *string
+			if tc.tools != nil {
+				toolsJSON := "[" + strings.Join(tc.tools, ",") + "]"
+				tools = &toolsJSON
+			}
+
+			req := prepareRequest(t.Context(), require, tc.prompt, tools)
+			resp := httptest.NewRecorder()
+			sut.GetHandler().ServeHTTP(resp, req)
+			require.Equal(http.StatusOK, resp.Code)
+
+			// Decode response
+			var res openai.ChatResponse
+			require.NoError(json.NewDecoder(resp.Body).Decode(&res))
+			require.Len(res.Choices, 1)
+
+			// "Echo: <prompt>"
+			msgContent := res.Choices[0].Message.Content
+			assert.Equal(tc.expectedContent, *msgContent)
+
+			// Check the tool calls
+			toolCalls := res.Choices[0].Message.ToolCalls
+			if tc.expectedToolCalls == nil {
+				// No tool calls
+				require.Nil(toolCalls)
+			} else {
+				// One call per tool
+				require.NotNil(toolCalls)
+				require.Len(toolCalls, len(tc.expectedToolCalls))
+
+				for i, call := range toolCalls {
+					// Compare ignoring field ordering
+					expected := (tc.expectedToolCalls)[i]
+					assert.JSONEq(expected, call.(string))
+				}
+			}
+		})
+	}
+}
+
+// newTestServer returns a stub server for testing.
+func newTestServer(apiKey *string, secret secretmanager.Secret, openAIServerAddr string) *Server {
+	return &Server{
+		apiKey:    apiKey,
+		sm:        stubSecretManager{Secret: secret},
+		forwarder: forwarder.New("tcp", openAIServerAddr, slog.Default()),
+		log:       slog.Default(),
+	}
+}
+
+func prepareRequest(ctx context.Context, require *require.Assertions, prompt *string, tools *string) *http.Request {
 	baseURL := "http://192.0.2.1:8080" // doesn't matter
 	url := fmt.Sprintf("%s/v1/chat/completions", baseURL)
 	content := []struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role    string  `json:"role"`
+		Content *string `json:"content"`
 	}{
 		{
 			Role:    "user",
@@ -113,7 +236,9 @@ func prepareRequest(ctx context.Context, require *require.Assertions, prompt str
 	payload := openai.EncryptedChatRequest{
 		Model:    constants.ServedModel,
 		Messages: string(bt),
+		Tools:    tools,
 	}
+
 	payloadBytes, err := json.Marshal(payload)
 	require.NoError(err)
 

@@ -89,7 +89,10 @@ func (s *Server) encryptionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inputSelector := forwarder.FieldSelector{openai.ChatRequestEncryptionField: forwarder.SimpleValue}   // The encrypted field is a simple string
+	inputSelector := forwarder.FieldSelector{
+		openai.ChatRequestMessagesField: forwarder.SimpleValue,
+		openai.ChatRequestToolsField:    forwarder.SimpleValue,
+	} // The encrypted field is a simple string
 	outputSelector := forwarder.FieldSelector{openai.ChatResponseEncryptionField: forwarder.NestedValue} // Decrypting should yield an OpenAI response struct
 	s.forwarder.Forward(
 		w, r,

@@ -4,7 +4,6 @@ package etcd
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
 	"testing"
 	"time"
@@ -25,12 +24,12 @@ func TestEtcd(t *testing.T) {
 	fs := afero.Afero{Fs: afero.NewOsFs()}
 	t.Setenv("CONTINUUM_BASE_DIR", tmpDir)
 
-	ctx := context.Background()
+	ctx := t.Context()
 	log := slog.Default()
 	pki, err := ca.New(nil, nil, fs, log)
 	require.NoError(err)
 
-	etcdServer, done, err := New(context.Background(), "0.0.0.0", pki, fs, log)
+	etcdServer, done, err := New(t.Context(), "0.0.0.0", pki, fs, log)
 	require.NoError(err)
 	defer done()
 

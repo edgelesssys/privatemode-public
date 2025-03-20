@@ -8,22 +8,11 @@ This allows users to fully [verify the Privatemode service](https://docs.private
 
 You are allowed to inspect the code and build it for auditing and verification purposes. For details, see [LICENSE](LICENSE).
 
-## How to build
+## Build and verify the container images
 
-You need to have
+See the [Verification from source code](https://docs.privatemode.ai/guides/verify-source) guide in the Privatemode documentation.
 
-1. A Linux machine
-2. [Docker](https://docs.docker.com/engine/install/)
-3. A [Nix](https://nixos.org/) installation.
-   To install Nix, we recommend the [Determinate Systems Nix installer](https://determinate.systems/posts/determinate-nix-installer/).
-
-You can reproduce the relevant container images by running:
-
-```sh
-./scripts/calculate-image-digests.sh
-```
-
-### Desktop app
+## Build the desktop app
 
 You need to have
 

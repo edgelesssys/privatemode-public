@@ -84,7 +84,7 @@ func TestSetSecrets(t *testing.T) {
 
 			e := &Etcd{server: tc.server}
 
-			err := e.SetSecrets(context.Background(), tc.secrets, 0)
+			err := e.SetSecrets(t.Context(), tc.secrets, 0)
 			if tc.wantErr {
 				assert.Error(err)
 				return
@@ -131,7 +131,7 @@ func TestDeleteSecrets(t *testing.T) {
 
 			e := &Etcd{server: tc.server}
 
-			err := e.DeleteSecrets(context.Background(), tc.secrets)
+			err := e.DeleteSecrets(t.Context(), tc.secrets)
 			if tc.wantErr {
 				assert.Error(err)
 				return

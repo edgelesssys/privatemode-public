@@ -3,7 +3,6 @@
 package nras
 
 import (
-	"context"
 	"log/slog"
 	"os"
 	"testing"
@@ -17,7 +16,7 @@ func TestJWKS(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	nrasClient := NewClient(logger)
 
-	jwks, err := nrasClient.JWKS(context.Background())
+	jwks, err := nrasClient.JWKS(t.Context())
 	require.NoError(err)
 	require.NotEmpty(jwks)
 }

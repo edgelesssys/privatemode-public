@@ -40,7 +40,10 @@ func (t *Adapter) ServeMux() *http.ServeMux {
 
 	// Create chat completion: https://platform.openai.com/docs/api-reference/chat/create
 	srv.HandleFunc("/v1/chat/completions", t.forwardWithFieldMutation(
-		forwarder.FieldSelector{openai.ChatRequestEncryptionField: forwarder.NestedValue},  // Decrypting should yield an OpenAI response struct
+		forwarder.FieldSelector{
+			openai.ChatRequestMessagesField: forwarder.NestedValue,
+			openai.ChatRequestToolsField:    forwarder.NestedValue,
+		}, // Decrypting should yield an OpenAI response struct
 		forwarder.FieldSelector{openai.ChatResponseEncryptionField: forwarder.SimpleValue}, // Encrypting the response field results in a simple string
 	)) // cannot restrict to POST method because OPTIONS is needed for CORS by the browser
 

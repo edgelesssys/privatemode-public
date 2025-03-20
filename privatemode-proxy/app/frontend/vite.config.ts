@@ -16,8 +16,23 @@ export default defineConfig(({ command, mode, ssrBuild }) => {
         postcss: {
           plugins: [
             purgecss({
-              content: ['./**/*.html', './**/*.svelte'],
-              safelist: ['pre', 'code']
+              content: ['./**/*.html', './**/*.svelte', './**/*.ts', './**/*.js'],
+              // Just use very broad safelist patterns to ensure no CSS is accidentally purged
+              safelist: {
+                standard: [
+                  'pre',
+                  'code',
+                  'update-banner-container',
+                  'sticky-header',
+                  'side-bar-column',
+                  'main-content-column',
+                  'app-container',
+                  'navbar',
+                  'update-banner'
+                ],
+                // Use this for regex patterns
+                deep: [/^navbar/, /^update-banner/, /svelte/]
+              }
             })
           ]
         }

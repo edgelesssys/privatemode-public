@@ -3,7 +3,6 @@
 package nras
 
 import (
-	"context"
 	"crypto/rand"
 	"log/slog"
 	"os"
@@ -42,7 +41,7 @@ func TestAttestGPU(t *testing.T) {
 	require.NoError(err)
 
 	eat, err := nrasClient.AttestGPU(
-		context.Background(),
+		t.Context(),
 		ArchHopper,
 		nonce,
 		report,

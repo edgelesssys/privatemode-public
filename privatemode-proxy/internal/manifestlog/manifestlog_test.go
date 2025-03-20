@@ -18,7 +18,7 @@ func TestWriteLogEntry(t *testing.T) {
 	fs := afero.NewMemMapFs()
 
 	// Log manifest
-	assert.NoError(WriteEntry(fs, "workspace", newManifest))
+	assert.NoError(WriteEntry(fs, "workspace", newManifest, "policyhash1"))
 
 	// Assert
 	expectedManifestPath := "workspace/manifests/1" + fileSuffix
@@ -26,14 +26,14 @@ func TestWriteLogEntry(t *testing.T) {
 
 	// Update manifest and log
 	newManifest = []byte("schema_version = 2")
-	assert.NoError(WriteEntry(fs, "workspace", newManifest))
+	assert.NoError(WriteEntry(fs, "workspace", newManifest, "policyhash2"))
 
 	// Assert
 	expectedManifestPath2 := "workspace/manifests/2" + fileSuffix
 	assertManifestFileIsLogged(fs, expectedManifestPath2, newManifest, assert)
 
 	expectedLogPath := "workspace/manifests/log.txt"
-	assertLogFile(fs, assert, expectedLogPath, []string{expectedManifestPath, expectedManifestPath2})
+	assertLogFile(fs, t, expectedLogPath, []string{expectedManifestPath, expectedManifestPath2}, []string{"policyhash1", "policyhash2"})
 }
 
 func TestTOMLFileWithoutLogFile(t *testing.T) {
@@ -42,7 +42,7 @@ func TestTOMLFileWithoutLogFile(t *testing.T) {
 
 	alreadyExistingManifestPath := "workspace/manifests/1" + fileSuffix
 	require.NoError(t, afero.WriteFile(fs, alreadyExistingManifestPath, []byte("2021-09-01T12:00:00Z workspace/manifests/1"+fileSuffix+"\n"), 0o644))
-	assert.Error(WriteEntry(fs, "workspace", []byte("schema_version = 1")))
+	assert.Error(WriteEntry(fs, "workspace", []byte("schema_version = 1"), "policyhash"))
 }
 
 func TestAppendToExistingLogs(t *testing.T) {
@@ -52,28 +52,33 @@ func TestAppendToExistingLogs(t *testing.T) {
 
 	// Existing log and manifest
 	alreadyExistingManifestPath := "workspace/manifests/1" + fileSuffix
-	require.NoError(t, afero.WriteFile(fs, "workspace/manifests/log.txt", []byte("2021-09-01T12:00:00Z workspace/manifests/1"+fileSuffix+"\n"), 0o644))
+	require.NoError(t, afero.WriteFile(fs, "workspace/manifests/log.txt", []byte("2021-09-01T12:00:00Z policyhash1 workspace/manifests/1"+fileSuffix+"\n"), 0o644))
 	require.NoError(t, afero.WriteFile(fs, alreadyExistingManifestPath, []byte(""), 0o644))
 
 	// Act
-	assert.NoError(WriteEntry(fs, "workspace", newManifest))
+	assert.NoError(WriteEntry(fs, "workspace", newManifest, "policyhash2"))
 
 	// Assert
 	expectedManifestPath := "workspace/manifests/2" + fileSuffix
 	assertManifestFileIsLogged(fs, expectedManifestPath, newManifest, assert)
 
 	expectedLogPath := "workspace/manifests/log.txt"
-	assertLogFile(fs, assert, expectedLogPath, []string{alreadyExistingManifestPath, expectedManifestPath})
+	assertLogFile(fs, t, expectedLogPath, []string{alreadyExistingManifestPath, expectedManifestPath}, []string{"policyhash1", "policyhash2"})
 }
 
-func assertLogFile(fs afero.Fs, assert *assert.Assertions, expectedLogPath string, expectedManifestPaths []string) {
+func assertLogFile(fs afero.Fs, t *testing.T, expectedLogPath string, expectedManifestPaths, expectedPolicyHashes []string) {
+	assert := assert.New(t)
+	require := require.New(t)
+
 	bt, err := afero.ReadFile(fs, expectedLogPath)
-	assert.NoError(err)
+	require.NoError(err)
 	lines := strings.Split(string(bt), "\n")
-	assert.Equal(len(expectedManifestPaths), len(lines)-1) // -1 because the last line is empty
+	require.Len(lines, len(expectedManifestPaths)+1) // +1 because the last line is empty
 
 	for i, expectedManifestPath := range expectedManifestPaths {
-		assert.Contains(lines[i], expectedManifestPath, "Line should contain the expected manifest path")
+		fields := strings.Fields(lines[i])
+		assert.Equal(expectedPolicyHashes[i], fields[1])
+		assert.Equal(expectedManifestPath, fields[2])
 	}
 }
 

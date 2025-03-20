@@ -129,7 +129,7 @@ func TestGetMountPoint(t *testing.T) {
 				log:         slog.Default(),
 			}
 
-			gotMountPoint, err := m.MountDisk(context.Background(), "", "")
+			gotMountPoint, err := m.MountDisk(t.Context(), "", "")
 			if tc.wantErr {
 				assert.Error(err)
 				return

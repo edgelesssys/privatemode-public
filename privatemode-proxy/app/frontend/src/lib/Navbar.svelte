@@ -1,15 +1,12 @@
 <script lang="ts">
   import { params } from 'svelte-spa-router'
   import { pinMainMenu } from './Storage.svelte'
-  import logo from '../assets/logo.svg'
-  import ChatOptionMenu from './ChatOptionMenu.svelte'
-	import burger from "../assets/burger.svg";
-  import { faBars, faXmark } from '@fortawesome/free-solid-svg-icons/index'
+  import burger from '../assets/burger.svg'
 
 $: activeChatId = $params && $params.chatId ? parseInt($params.chatId) : undefined
 </script>
 
-<nav class="navbar position-sticky top-0" aria-label="main navigation">
+<nav class="navbar" aria-label="main navigation">
 	<div class="navbar-brand chat-navbar">
 		<div class="navbar-item menu-button">
 			
@@ -40,5 +37,12 @@ $: activeChatId = $params && $params.chatId ? parseInt($params.chatId) : undefin
 	.navbar-item-text {
 		overflow: hidden;
 		text-overflow: ellipsis;
+	}
+	
+	.navbar {
+		transition: top 0.3s ease;
+		position: relative; /* Changed from sticky since parent is now sticky */
+		z-index: 45; /* Higher than banner (40) but lower than sidebar (50) */
+		background-color: white; /* Ensure it's not transparent */
 	}
 </style>

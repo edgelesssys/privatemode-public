@@ -14,8 +14,15 @@ git submodule update --init
 
 ## Live Development
 
+### Frontend
+Running the native app with wails allows to debug the frontend: in the app right-click -> inspect or run a browser against the wails server.
 ```bash
-VITE_DEFAULT_MODEL="latest" VITE_API_BASE="" wails dev
+wails dev -tags "contrast_unstable_api"
+```
+
+Use `VITE_*` environment variables to generate static configuration settings that can be used in the frontend.
+```bash
+VITE_DEFAULT_MODEL="latest" VITE_API_BASE="" wails dev -tags "contrast_unstable_api"
 ```
 
 ## Building
@@ -25,6 +32,9 @@ Adjust the platform variable to the one you want to build for:
 ```bash
 just build-desktop-app darwin/arm64
 ```
+
+## Configuration File
+The native app has a configuration file to allow configuration of default settings such as the API KEY before use (see [Getting started](/docs/docs/guides/desktop-app.md#Getting-started)).
 
 ## Signing and Notarization on MacOS
 
