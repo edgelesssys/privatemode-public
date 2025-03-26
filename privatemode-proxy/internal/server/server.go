@@ -109,7 +109,9 @@ func allowWails(resp http.Header, req http.Header) error {
 	if strings.HasPrefix(origin, "wails://") {
 		resp.Set("Access-Control-Allow-Origin", origin)
 	} else {
-		resp.Set("Access-Control-Allow-Origin", "null")
+		// MDN recommends to unset the Header for unknown/unwanted origins.
+		// https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Origin.
+		resp.Del("Access-Control-Allow-Origin")
 	}
 	return nil
 }

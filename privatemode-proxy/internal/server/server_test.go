@@ -46,6 +46,7 @@ func TestPromptEncryption(t *testing.T) {
 	testCases := map[string]struct {
 		apiKey           *string
 		expectStatusCode int
+		expectedHeaders  map[string]string
 		requestMutator   func(*http.Request)
 	}{
 		"with privatemode-proxy API key": {
@@ -61,6 +62,26 @@ func TestPromptEncryption(t *testing.T) {
 			expectStatusCode: http.StatusOK,
 			requestMutator: func(req *http.Request) {
 				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", testAPIKey))
+			},
+		},
+		"ACAO header is set for wails origin": {
+			apiKey:           &apiKey,
+			expectStatusCode: http.StatusOK,
+			requestMutator: func(req *http.Request) {
+				req.Header.Set("Origin", "wails://wails.localhost")
+			},
+			expectedHeaders: map[string]string{
+				"Access-Control-Allow-Origin": "wails://wails.localhost",
+			},
+		},
+		"ACAO header is unset for unknown origin": {
+			apiKey:           &apiKey,
+			expectStatusCode: http.StatusOK,
+			requestMutator: func(req *http.Request) {
+				req.Header.Set("Origin", "http://localhost")
+			},
+			expectedHeaders: map[string]string{
+				"Access-Control-Allow-Origin": "",
 			},
 		},
 	}
@@ -86,6 +107,10 @@ func TestPromptEncryption(t *testing.T) {
 				require.NoError(json.NewDecoder(resp.Body).Decode(&res))
 				require.Len(res.Choices, 1)
 				assert.Equal("Echo: Hello", *res.Choices[0].Message.Content)
+			}
+
+			for key, value := range tc.expectedHeaders {
+				assert.Equal(value, resp.Header().Get(key))
 			}
 		})
 	}
