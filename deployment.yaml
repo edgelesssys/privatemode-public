@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: secret-service
-  namespace: continuum-75947b
+  namespace: continuum-83c1af
   labels:
-    app.kubernetes.io/instance: '75947b'
+    app.kubernetes.io/instance: '83c1af'
 spec:
   replicas: 1
   selector:
@@ -14,14 +14,14 @@ spec:
     metadata:
       labels:
         app: secret-service
-        app.kubernetes.io/instance: '75947b'
+        app.kubernetes.io/instance: '83c1af'
     spec:
       runtimeClassName: contrast-cc
       containers:
         - name: secret-service
-          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.11.0@sha256:327a3f8cc72af952a7b8eb1079bf56421d58563575d62bac2afd9d517dc1a774'
+          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.12.0@sha256:0bfc3c48e40aea444082f53ef28305fb1f2f6c03e4335219d2adf6cdad691ddc'
           args:
-            - '--etcd-cert-sans=secret-service-internal.continuum-75947b.svc.cluster.local'
+            - '--etcd-cert-sans=secret-service-internal.continuum-83c1af.svc.cluster.local'
           ports:
             - containerPort: 3000
             - containerPort: 3001
@@ -33,10 +33,10 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: workload-codegen
-  namespace: continuum-75947b
+  namespace: continuum-83c1af
   labels:
     app: workload-codegen
-    app.kubernetes.io/instance: '75947b'
+    app.kubernetes.io/instance: '83c1af'
 spec:
   replicas: 1
   selector:
@@ -47,7 +47,7 @@ spec:
     metadata:
       labels:
         app: workload-codegen
-        app.kubernetes.io/instance: '75947b'
+        app.kubernetes.io/instance: '83c1af'
         privatemode.edgeless.systems/needs-gpu: "true"
       annotations:
         io.katacontainers.config.hypervisor.default_memory: "64000"
@@ -57,7 +57,7 @@ spec:
       runtimeClassName: contrast-cc
       initContainers:
         - name: attestation-agent
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.11.0@sha256:5d4f669ee8fc63fe2f6e9b33997c2bd6b78549fca2ea54933bb927ee9dd4c727
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.12.0@sha256:d984c03a364270aed0d2d26ea59d7a2e55c81ac1741e5534f9d8d54539b16c58
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -68,7 +68,7 @@ spec:
             - |
               ln -sf /usr/lib64/libnvidia-ml.so.550.90.07 /usr/lib64/libnvidia-ml.so.1 && \
               LD_PRELOAD=/usr/lib64/libcuda.so.1:usr/lib64/libnvidia-ml.so.1 attestation-agent \
-                --secret-svc-address=secret-service-internal.continuum-75947b.svc.cluster.local \
+                --secret-svc-address=secret-service-internal.continuum-83c1af.svc.cluster.local \
                 --gpu-debug=false \
                 --gpu-secure-boot=true \
                 --gpu-eat-version=EAT-21 \
@@ -85,7 +85,7 @@ spec:
             limits:
               "nvidia.com/GH100_H100_PCIE": 1
         - name: disk-mounter
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.11.0@sha256:f70568730d13a92f2a390f571381dcdaf3e48e3ca60e30bd460dda92e34d03e0
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.12.0@sha256:93286d19d36d2974ab0e382c886b3d20644276ee215fa5cb95f01b361909f0b5
           args:
             - --root-hash=c6ab549d3ec1cb75d531886229825deec19e43e1dbc35480fd82a0517f04c14c
             - --device-path=/dev/modelweights
@@ -104,7 +104,7 @@ spec:
               devicePath: /dev/modelweights
       containers:
         - name: workload
-          image: docker.io/vllm/vllm-openai:v0.7.3@sha256:4f4037303e8c7b69439db1077bb849a0823517c0f785b894dc8e96d58ef3a0c2
+          image: docker.io/vllm/vllm-openai:v0.8.2@sha256:61732e5aae863dc2e1df4c4a3e45a95d55b3991917b3bedc8bf1da5e077a4eb4
           ports:
             - containerPort: 8000
           readinessProbe:
@@ -120,6 +120,7 @@ spec:
             - name: LD_PRELOAD
               value: "/usr/lib/x86_64-linux-gnu/libcuda.so.1"
           args:
+            - '--no-enable-prefix-caching'
             - '--host=0.0.0.0'
             - '--model=/mnt/modelweights'
             - '--served-model-name'
@@ -133,14 +134,14 @@ spec:
             limits:
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.11.0@sha256:9a06ae135ce75c705a2897a269c2e4d17e86f744e92846da76222eaa99e9ed8a
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.12.0@sha256:fb5223af466e06f6e32b11c9d38609b48e4c0b42ffc43a0ea93a54711564f8fc
           ports:
             - containerPort: 8085
           args:
             - --adapter-type=openai
             - --workload-address=127.0.0.1
             - --workload-port=8000
-            - --secret-svc-address=secret-service-internal.continuum-75947b.svc.cluster.local
+            - --secret-svc-address=secret-service-internal.continuum-83c1af.svc.cluster.local
           volumeMounts:
             - name: etcd-pki
               mountPath: /var/run/continuum/etcd/pki
@@ -154,7 +155,7 @@ spec:
       metadata:
         name: modelweights
         labels:
-          app.kubernetes.io/instance: '75947b'
+          app.kubernetes.io/instance: '83c1af'
       spec:
         storageClassName: mistralai-codestral-22b-v0-1
         volumeMode: Block
@@ -168,10 +169,10 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: workload-textgen
-  namespace: continuum-75947b
+  namespace: continuum-83c1af
   labels:
     app: workload-textgen
-    app.kubernetes.io/instance: '75947b'
+    app.kubernetes.io/instance: '83c1af'
 spec:
   replicas: 1
   selector:
@@ -182,7 +183,7 @@ spec:
     metadata:
       labels:
         app: workload-textgen
-        app.kubernetes.io/instance: '75947b'
+        app.kubernetes.io/instance: '83c1af'
         privatemode.edgeless.systems/needs-gpu: "true"
       annotations:
         io.katacontainers.config.hypervisor.default_memory: "64000"
@@ -192,7 +193,7 @@ spec:
       runtimeClassName: contrast-cc
       initContainers:
         - name: attestation-agent
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.11.0@sha256:5d4f669ee8fc63fe2f6e9b33997c2bd6b78549fca2ea54933bb927ee9dd4c727
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.12.0@sha256:d984c03a364270aed0d2d26ea59d7a2e55c81ac1741e5534f9d8d54539b16c58
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -203,7 +204,7 @@ spec:
             - |
               ln -sf /usr/lib64/libnvidia-ml.so.550.90.07 /usr/lib64/libnvidia-ml.so.1 && \
               LD_PRELOAD=/usr/lib64/libcuda.so.1:usr/lib64/libnvidia-ml.so.1 attestation-agent \
-                --secret-svc-address=secret-service-internal.continuum-75947b.svc.cluster.local \
+                --secret-svc-address=secret-service-internal.continuum-83c1af.svc.cluster.local \
                 --gpu-debug=false \
                 --gpu-secure-boot=true \
                 --gpu-eat-version=EAT-21 \
@@ -220,7 +221,7 @@ spec:
             limits:
               "nvidia.com/GH100_H100_PCIE": 1
         - name: disk-mounter
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.11.0@sha256:f70568730d13a92f2a390f571381dcdaf3e48e3ca60e30bd460dda92e34d03e0
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.12.0@sha256:93286d19d36d2974ab0e382c886b3d20644276ee215fa5cb95f01b361909f0b5
           args:
             - --root-hash=3a49ed30e4a637228b5d962c6b1fa508bad337ca73ef02cb9f0dcc7931fefad7
             - --device-path=/dev/modelweights
@@ -239,7 +240,7 @@ spec:
               devicePath: /dev/modelweights
       containers:
         - name: workload
-          image: docker.io/vllm/vllm-openai:v0.7.3@sha256:4f4037303e8c7b69439db1077bb849a0823517c0f785b894dc8e96d58ef3a0c2
+          image: docker.io/vllm/vllm-openai:v0.8.2@sha256:61732e5aae863dc2e1df4c4a3e45a95d55b3991917b3bedc8bf1da5e077a4eb4
           ports:
             - containerPort: 8000
           readinessProbe:
@@ -255,6 +256,7 @@ spec:
             - name: LD_PRELOAD
               value: "/usr/lib/x86_64-linux-gnu/libcuda.so.1"
           args:
+            - '--no-enable-prefix-caching'
             - '--host=0.0.0.0'
             - '--model=/mnt/modelweights'
             - '--served-model-name'
@@ -273,14 +275,14 @@ spec:
             limits:
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.11.0@sha256:9a06ae135ce75c705a2897a269c2e4d17e86f744e92846da76222eaa99e9ed8a
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.12.0@sha256:fb5223af466e06f6e32b11c9d38609b48e4c0b42ffc43a0ea93a54711564f8fc
           ports:
             - containerPort: 8085
           args:
             - --adapter-type=openai
             - --workload-address=127.0.0.1
             - --workload-port=8000
-            - --secret-svc-address=secret-service-internal.continuum-75947b.svc.cluster.local
+            - --secret-svc-address=secret-service-internal.continuum-83c1af.svc.cluster.local
           volumeMounts:
             - name: etcd-pki
               mountPath: /var/run/continuum/etcd/pki
@@ -294,7 +296,7 @@ spec:
       metadata:
         name: modelweights
         labels:
-          app.kubernetes.io/instance: '75947b'
+          app.kubernetes.io/instance: '83c1af'
       spec:
         storageClassName: ibnzterrell-meta-llama-3-3-70b-instruct-awq-int4
         volumeMode: Block
@@ -303,3 +305,61 @@ spec:
         resources:
           requests:
             storage: 41Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unstructured-api
+  namespace: continuum-83c1af
+  labels:
+    app: unstructured-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: unstructured-api
+  template:
+    metadata:
+      labels:
+        app: unstructured-api
+        app.kubernetes.io/instance: '83c1af'
+      annotations:
+        io.katacontainers.config.runtime.create_container_timeout: "600"
+    spec:
+      runtimeClassName: contrast-cc
+      containers:
+        - name: unstructured-api
+          image: 'quay.io/unstructured-io/unstructured-api:0.0.83@sha256:49b31365e2747d3a5f0fb4f33daf55569fd33e3bc63d3f3861b10b6af59f4fee'
+          resources:
+            requests:
+              memory: "24Gi"
+            limits:
+              memory: "24Gi"
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /healthcheck
+              port: http
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 60
+        - name: inference-proxy
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.12.0@sha256:fb5223af466e06f6e32b11c9d38609b48e4c0b42ffc43a0ea93a54711564f8fc
+          ports:
+            - containerPort: 8085
+          args:
+            - --adapter-type=unencrypted
+            - --workload-address=127.0.0.1
+            - --workload-port=80
+            - --secret-svc-address=secret-service-internal.continuum-83c1af.svc.cluster.local
+          volumeMounts:
+            - name: etcd-pki
+              mountPath: /var/run/continuum/etcd/pki
+      volumes:
+        - emptyDir: {}
+          name: mount-dir
+        - name: etcd-pki
+          emptyDir: {}

@@ -1,4 +1,7 @@
-#!/usr/bin/env bash
+#!/usr/bin/env nix
+#! nix shell nixpkgs#yq-go -c bash
+# shellcheck shell=bash
+
 set -euo pipefail
 
 manifest=$1

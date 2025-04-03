@@ -39,11 +39,11 @@ func IsSupportedInferenceAPI(apiType string) bool {
 // New creates a new InferenceAdapter for the given API type.
 func New(apiType string, cipher *cipher.Cipher, forwarder mutatingForwarder, log *slog.Logger) (InferenceAdapter, error) {
 	switch strings.ToLower(apiType) {
-	case "triton":
+	case InferenceAPITriton:
 		return triton.New(cipher, forwarder, log)
-	case "openai":
+	case InferenceAPIOpenAI:
 		return openai.New(cipher, forwarder, log)
-	case "unencrypted":
+	case InferenceAPIUnencrypted:
 		return unencrypted.New(forwarder, log)
 	default:
 		return nil, fmt.Errorf("unknown API type %q", apiType)

@@ -1,4 +1,7 @@
-#!/usr/bin/env bash
+#!/usr/bin/env nix
+#! nix shell nixpkgs#yq-go -c bash
+# shellcheck shell=bash
+
 set -euo pipefail
 
 dir=$(dirname "$0")/..
@@ -11,7 +14,7 @@ base_url=https://github.com/edgelesssys/contrast/releases/download/$contrast_ver
 # generate and adjust manifest
 ./contrast generate --disable-updates --reference-values metal-qemu-snp-gpu "$dir/deployment.yaml"
 SECRET_SERVICE_DOMAIN=staging.secret.privatemode.ai
-SECRET_SERVICE_K8S_DOMAIN=secret-service-internal.$(yq 'select(.metadata.name == "workload") | .metadata.namespace' "$dir/deployment.yaml").svc.cluster.local
+SECRET_SERVICE_K8S_DOMAIN=secret-service-internal.$(yq 'select(.metadata.name == "secret-service") | .metadata.namespace' "$dir/deployment.yaml").svc.cluster.local
 export SECRET_SERVICE_DOMAIN SECRET_SERVICE_K8S_DOMAIN
 "$dir/scripts/adjust-manifest.sh" manifest.json
 
