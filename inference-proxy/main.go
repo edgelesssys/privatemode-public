@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
@@ -23,8 +24,11 @@ import (
 var (
 	workloadPort    = flag.String("workload-port", constants.WorkloadDefaultExposedPort, "port the workload is listening on")
 	adapterType     = flag.String("adapter-type", "openai", "type of adapter to use")
-	workloadAddress = flag.String("workload-address", "", "host name or IP the workload can be reached at over TCP. Mutually exclusive with --workload-container-id")
+	workloadAddress = flag.String("workload-address", "", "host name or IP the workload can be reached at over TCP")
 	ssAddress       = flag.String("secret-svc-address", "", "host name or IP for the secret service.")
+	etcdMemberCert  = flag.String("etcd-member-cert", filepath.Join(constants.EtcdBasePath(), "etcd.crt"), "path to the etcd member certificate")
+	etcdMemberKey   = flag.String("etcd-member-key", filepath.Join(constants.EtcdBasePath(), "etcd.key"), "path to the etcd member key")
+	etcdCA          = flag.String("etcd-ca", filepath.Join(constants.EtcdBasePath(), "ca.crt"), "path to the etcd CA certificate")
 	logLevel        = flag.String(logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
 )
 
@@ -52,7 +56,7 @@ func main() {
 	if *adapterType != adapter.InferenceAPIUnencrypted {
 		var closeClient func()
 		var err error
-		secrets, closeClient, err = setUpEtcdSync(ctx, *ssAddress, log)
+		secrets, closeClient, err = setUpEtcdSync(ctx, *ssAddress, *etcdMemberCert, *etcdMemberKey, *etcdCA, log)
 		if err != nil {
 			log.Error("Failed to set up etcd sync", "error", err)
 			os.Exit(1)
@@ -89,11 +93,11 @@ func main() {
 	}
 }
 
-func setUpEtcdSync(ctx context.Context, address string, log *slog.Logger) (*secrets.Secrets, func(), error) {
+func setUpEtcdSync(ctx context.Context, address, etcdMemberCert, etcdMemberKey, etcdCA string, log *slog.Logger) (*secrets.Secrets, func(), error) {
 	log.Info("Setting up sync of inference secrets from etcd")
 	fs := afero.Afero{Fs: afero.NewOsFs()}
 
-	etcdWatcher, closeClient, err := etcd.New([]string{address}, fs, log)
+	etcdWatcher, closeClient, err := etcd.New([]string{address}, etcdMemberCert, etcdMemberKey, etcdCA, fs, log)
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating etcd watcher: %w", err)
 	}

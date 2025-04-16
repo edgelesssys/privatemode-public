@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: secret-service
-  namespace: continuum-83c1af
+  namespace: continuum-8c7240
   labels:
-    app.kubernetes.io/instance: '83c1af'
+    app.kubernetes.io/instance: '8c7240'
 spec:
   replicas: 1
   selector:
@@ -14,14 +14,17 @@ spec:
     metadata:
       labels:
         app: secret-service
-        app.kubernetes.io/instance: '83c1af'
+        app.kubernetes.io/instance: '8c7240'
     spec:
       runtimeClassName: contrast-cc
       containers:
         - name: secret-service
-          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.12.0@sha256:0bfc3c48e40aea444082f53ef28305fb1f2f6c03e4335219d2adf6cdad691ddc'
+          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.13.0@sha256:2c4ad70b1f282689a73dd95ce77b1820a8749df5b37ea0bbf5b26d631677adb1'
           args:
-            - '--etcd-cert-sans=secret-service-internal.continuum-83c1af.svc.cluster.local'
+            - '--etcd-host=secret-service-internal.continuum-8c7240.svc.cluster.local'
+            - '--etcd-server-cert=/contrast/tls-config/certChain.pem'
+            - '--etcd-server-key=/contrast/tls-config/key.pem'
+            - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
           ports:
             - containerPort: 3000
             - containerPort: 3001
@@ -33,10 +36,10 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: workload-codegen
-  namespace: continuum-83c1af
+  namespace: continuum-8c7240
   labels:
     app: workload-codegen
-    app.kubernetes.io/instance: '83c1af'
+    app.kubernetes.io/instance: '8c7240'
 spec:
   replicas: 1
   selector:
@@ -47,17 +50,20 @@ spec:
     metadata:
       labels:
         app: workload-codegen
-        app.kubernetes.io/instance: '83c1af'
+        app.kubernetes.io/instance: '8c7240'
         privatemode.edgeless.systems/needs-gpu: "true"
       annotations:
         io.katacontainers.config.hypervisor.default_memory: "64000"
         io.katacontainers.config.runtime.create_container_timeout: "1800"
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8000"
     spec:
       serviceAccountName: workload-codegen-sa
       runtimeClassName: contrast-cc
       initContainers:
         - name: attestation-agent
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.12.0@sha256:d984c03a364270aed0d2d26ea59d7a2e55c81ac1741e5534f9d8d54539b16c58
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.13.0@sha256:566ee8dc6e20fafc50430c2309fad107cea029e751e623f3372d6c1ca3efebce
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -68,7 +74,6 @@ spec:
             - |
               ln -sf /usr/lib64/libnvidia-ml.so.550.90.07 /usr/lib64/libnvidia-ml.so.1 && \
               LD_PRELOAD=/usr/lib64/libcuda.so.1:usr/lib64/libnvidia-ml.so.1 attestation-agent \
-                --secret-svc-address=secret-service-internal.continuum-83c1af.svc.cluster.local \
                 --gpu-debug=false \
                 --gpu-secure-boot=true \
                 --gpu-eat-version=EAT-21 \
@@ -76,16 +81,11 @@ spec:
                 --gpu-vbios-versions=96.00.88.00.11,96.00.74.00.11,96.00.9F.00.04,96.00.74.00.1C
           securityContext:
             privileged: true
-          volumeMounts:
-            - name: etcd-pki
-              mountPath: /var/run/continuum/etcd/pki
-            - mountPath: /contrast
-              name: contrast-secrets
           resources:
             limits:
               "nvidia.com/GH100_H100_PCIE": 1
         - name: disk-mounter
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.12.0@sha256:93286d19d36d2974ab0e382c886b3d20644276ee215fa5cb95f01b361909f0b5
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.13.0@sha256:9de243bafa96188fcc609f3082fe63ee122c96d78d4814697415e5438f2b2ec2
           args:
             - --root-hash=c6ab549d3ec1cb75d531886229825deec19e43e1dbc35480fd82a0517f04c14c
             - --device-path=/dev/modelweights
@@ -97,8 +97,6 @@ spec:
             - name: mount-dir
               mountPath: /mnt
               mountPropagation: Bidirectional
-            - name: etcd-pki
-              mountPath: /var/run/continuum/etcd/pki
           volumeDevices:
             - name: modelweights
               devicePath: /dev/modelweights
@@ -134,28 +132,26 @@ spec:
             limits:
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.12.0@sha256:fb5223af466e06f6e32b11c9d38609b48e4c0b42ffc43a0ea93a54711564f8fc
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.13.0@sha256:d66010af998f2a4d2fe05449b261cd03d2a6c9e9b91073a65c0a58ff6ad08e5c
           ports:
             - containerPort: 8085
           args:
             - --adapter-type=openai
             - --workload-address=127.0.0.1
             - --workload-port=8000
-            - --secret-svc-address=secret-service-internal.continuum-83c1af.svc.cluster.local
-          volumeMounts:
-            - name: etcd-pki
-              mountPath: /var/run/continuum/etcd/pki
+            - --secret-svc-address=secret-service-internal.continuum-8c7240.svc.cluster.local
+            - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
+            - '--etcd-member-key=/contrast/tls-config/key.pem'
+            - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
       volumes:
         - emptyDir: {}
           name: mount-dir
-        - name: etcd-pki
-          emptyDir: {}
   volumeClaimTemplates:
     - kind: PersistentVolumeClaim
       metadata:
         name: modelweights
         labels:
-          app.kubernetes.io/instance: '83c1af'
+          app.kubernetes.io/instance: '8c7240'
       spec:
         storageClassName: mistralai-codestral-22b-v0-1
         volumeMode: Block
@@ -169,10 +165,10 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: workload-textgen
-  namespace: continuum-83c1af
+  namespace: continuum-8c7240
   labels:
     app: workload-textgen
-    app.kubernetes.io/instance: '83c1af'
+    app.kubernetes.io/instance: '8c7240'
 spec:
   replicas: 1
   selector:
@@ -183,17 +179,20 @@ spec:
     metadata:
       labels:
         app: workload-textgen
-        app.kubernetes.io/instance: '83c1af'
+        app.kubernetes.io/instance: '8c7240'
         privatemode.edgeless.systems/needs-gpu: "true"
       annotations:
         io.katacontainers.config.hypervisor.default_memory: "64000"
         io.katacontainers.config.runtime.create_container_timeout: "1800"
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "8000"
     spec:
       serviceAccountName: workload-textgen-sa
       runtimeClassName: contrast-cc
       initContainers:
         - name: attestation-agent
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.12.0@sha256:d984c03a364270aed0d2d26ea59d7a2e55c81ac1741e5534f9d8d54539b16c58
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.13.0@sha256:566ee8dc6e20fafc50430c2309fad107cea029e751e623f3372d6c1ca3efebce
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -204,7 +203,6 @@ spec:
             - |
               ln -sf /usr/lib64/libnvidia-ml.so.550.90.07 /usr/lib64/libnvidia-ml.so.1 && \
               LD_PRELOAD=/usr/lib64/libcuda.so.1:usr/lib64/libnvidia-ml.so.1 attestation-agent \
-                --secret-svc-address=secret-service-internal.continuum-83c1af.svc.cluster.local \
                 --gpu-debug=false \
                 --gpu-secure-boot=true \
                 --gpu-eat-version=EAT-21 \
@@ -212,16 +210,11 @@ spec:
                 --gpu-vbios-versions=96.00.88.00.11,96.00.74.00.11,96.00.9F.00.04,96.00.74.00.1C
           securityContext:
             privileged: true
-          volumeMounts:
-            - name: etcd-pki
-              mountPath: /var/run/continuum/etcd/pki
-            - mountPath: /contrast
-              name: contrast-secrets
           resources:
             limits:
               "nvidia.com/GH100_H100_PCIE": 1
         - name: disk-mounter
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.12.0@sha256:93286d19d36d2974ab0e382c886b3d20644276ee215fa5cb95f01b361909f0b5
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.13.0@sha256:9de243bafa96188fcc609f3082fe63ee122c96d78d4814697415e5438f2b2ec2
           args:
             - --root-hash=3a49ed30e4a637228b5d962c6b1fa508bad337ca73ef02cb9f0dcc7931fefad7
             - --device-path=/dev/modelweights
@@ -233,8 +226,6 @@ spec:
             - name: mount-dir
               mountPath: /mnt
               mountPropagation: Bidirectional
-            - name: etcd-pki
-              mountPath: /var/run/continuum/etcd/pki
           volumeDevices:
             - name: modelweights
               devicePath: /dev/modelweights
@@ -275,28 +266,26 @@ spec:
             limits:
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.12.0@sha256:fb5223af466e06f6e32b11c9d38609b48e4c0b42ffc43a0ea93a54711564f8fc
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.13.0@sha256:d66010af998f2a4d2fe05449b261cd03d2a6c9e9b91073a65c0a58ff6ad08e5c
           ports:
             - containerPort: 8085
           args:
             - --adapter-type=openai
             - --workload-address=127.0.0.1
             - --workload-port=8000
-            - --secret-svc-address=secret-service-internal.continuum-83c1af.svc.cluster.local
-          volumeMounts:
-            - name: etcd-pki
-              mountPath: /var/run/continuum/etcd/pki
+            - --secret-svc-address=secret-service-internal.continuum-8c7240.svc.cluster.local
+            - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
+            - '--etcd-member-key=/contrast/tls-config/key.pem'
+            - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
       volumes:
         - emptyDir: {}
           name: mount-dir
-        - name: etcd-pki
-          emptyDir: {}
   volumeClaimTemplates:
     - kind: PersistentVolumeClaim
       metadata:
         name: modelweights
         labels:
-          app.kubernetes.io/instance: '83c1af'
+          app.kubernetes.io/instance: '8c7240'
       spec:
         storageClassName: ibnzterrell-meta-llama-3-3-70b-instruct-awq-int4
         volumeMode: Block
@@ -310,7 +299,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: unstructured-api
-  namespace: continuum-83c1af
+  namespace: continuum-8c7240
   labels:
     app: unstructured-api
 spec:
@@ -322,7 +311,7 @@ spec:
     metadata:
       labels:
         app: unstructured-api
-        app.kubernetes.io/instance: '83c1af'
+        app.kubernetes.io/instance: '8c7240'
       annotations:
         io.katacontainers.config.runtime.create_container_timeout: "600"
     spec:
@@ -347,14 +336,14 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 60
         - name: inference-proxy
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.12.0@sha256:fb5223af466e06f6e32b11c9d38609b48e4c0b42ffc43a0ea93a54711564f8fc
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.13.0@sha256:d66010af998f2a4d2fe05449b261cd03d2a6c9e9b91073a65c0a58ff6ad08e5c
           ports:
             - containerPort: 8085
           args:
             - --adapter-type=unencrypted
             - --workload-address=127.0.0.1
-            - --workload-port=80
-            - --secret-svc-address=secret-service-internal.continuum-83c1af.svc.cluster.local
+            - --workload-port=8000
+            - --secret-svc-address=secret-service-internal.continuum-8c7240.svc.cluster.local
           volumeMounts:
             - name: etcd-pki
               mountPath: /var/run/continuum/etcd/pki
@@ -363,3 +352,148 @@ spec:
           name: mount-dir
         - name: etcd-pki
           emptyDir: {}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: coordinator
+  namespace: 'continuum-8c7240'
+  labels:
+    app.kubernetes.io/instance: '8c7240'
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: coordinator
+  namespace: 'continuum-8c7240'
+  labels:
+    app.kubernetes.io/instance: '8c7240'
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - create
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coordinator
+  namespace: 'continuum-8c7240'
+  labels:
+    app.kubernetes.io/instance: '8c7240'
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: coordinator
+subjects:
+  - kind: ServiceAccount
+    name: coordinator
+    namespace: "continuum-8c7240"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coordinator
+  namespace: 'continuum-8c7240'
+  labels:
+    app.kubernetes.io/instance: '8c7240'
+spec:
+  ports:
+    - name: userapi
+      port: 1313
+      targetPort: 1313
+    - name: meshapi
+      port: 7777
+      targetPort: 7777
+    - name: default-userapi
+      port: 443
+      targetPort: 1313
+  selector:
+    app.kubernetes.io/name: coordinator
+    app.kubernetes.io/instance: '8c7240'
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: coordinator
+  namespace: 'continuum-8c7240'
+  labels:
+    app.kubernetes.io/instance: '8c7240'
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Delete
+    whenScaled: Delete
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: coordinator
+  serviceName: coordinator
+  template:
+    metadata:
+      annotations:
+        contrast.edgeless.systems/pod-role: coordinator
+      labels:
+        app.kubernetes.io/name: coordinator
+        app.kubernetes.io/instance: '8c7240'
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    contrast.edgeless.systems/pod-role: coordinator
+                topologyKey: kubernetes.io/hostname
+              weight: 100
+      containers:
+        - image: ghcr.io/edgelesssys/contrast/coordinator:v1.7.0@sha256:94eed95eca7f497ae516c18343aca5a604142bd7a92318c41c7e0cd5e5b20bcb
+          name: coordinator
+          ports:
+            - containerPort: 1313
+              name: userapi
+            - containerPort: 7777
+              name: meshapi
+          readinessProbe:
+            initialDelaySeconds: 1
+            periodSeconds: 5
+            tcpSocket:
+              port: 1313
+          resources:
+            limits:
+              memory: 200Mi
+            requests:
+              memory: 200Mi
+          securityContext:
+            capabilities:
+              add:
+                - SYS_ADMIN
+          volumeDevices:
+            - devicePath: /dev/csi0
+              name: state-device
+      runtimeClassName: contrast-cc
+      serviceAccountName: coordinator
+  volumeClaimTemplates:
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: state-device
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+        volumeMode: Block

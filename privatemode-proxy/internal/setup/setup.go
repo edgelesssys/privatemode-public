@@ -20,15 +20,12 @@ import (
 func SecretManager(ctx context.Context, flags Flags, log *slog.Logger) (*secretmanager.SecretManager, error) {
 	tlsConfigGetter := tlsconfig.NewGetter(flags.CoordinatorEndpoint, contrastsdk.NewWithSlog(log.With("component", "contrast-client")), flags.Workspace)
 	if flags.ManifestPath != "" { // static mode
-		if flags.CoordinatorPolicyHash == "" {
-			return nil, fmt.Errorf("coordinatorPolicyHash is required in static mode")
-		}
 		fs := afero.Afero{Fs: afero.NewOsFs()}
 		expectedMfBytes, err := fs.ReadFile(flags.ManifestPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read manifest file: %w", err)
 		}
-		tlsConfig, err := tlsConfigGetter.GetTLSConfig(ctx, expectedMfBytes, flags.CoordinatorPolicyHash)
+		tlsConfig, err := tlsConfigGetter.GetTLSConfig(ctx, expectedMfBytes)
 		if err != nil {
 			return nil, fmt.Errorf("updating TLS config: %w", err)
 		}

@@ -10,30 +10,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLoadAPIKey(t *testing.T) {
+func TestLoadConfig(t *testing.T) {
 	require := require.New(t)
 	logger := slog.Default()
 
 	testCases := map[string]struct {
 		configData string
-		expectKey  string
+		expectCfg  jsonConfig
 		wantErr    bool
 	}{
 		"no config file": {
-			expectKey: "",
+			expectCfg: jsonConfig{},
 		},
 		"config file with invalid JSON": {
 			configData: `{invalid-json}`,
-			expectKey:  "",
+			expectCfg:  jsonConfig{},
 			wantErr:    true,
 		},
 		"config file without APP key": {
 			configData: `{}`,
-			expectKey:  "",
+			expectCfg:  jsonConfig{},
 		},
 		"config file with valid APP key": {
 			configData: `{"app_key": "test-key"}`,
-			expectKey:  "test-key",
+			expectCfg:  jsonConfig{APIKey: "test-key"},
+		},
+		"complete config file": {
+			configData: `{"app_key": "test-key", "deployment_uid": "test-uid", "manifest_path": "test-manifest"}`,
+			expectCfg:  jsonConfig{APIKey: "test-key", DeploymentUID: "test-uid", ManifestPath: "test-manifest"},
 		},
 	}
 
@@ -47,12 +51,12 @@ func TestLoadAPIKey(t *testing.T) {
 				require.NoError(err)
 			}
 
-			apiKey, err := loadAPIKey(tempDir, logger)
+			config, err := loadRuntimeConfig(tempDir, logger)
 			if tc.wantErr {
 				assert.Error(err)
 			} else {
 				assert.NoError(err)
-				assert.Equal(tc.expectKey, apiKey)
+				assert.Equal(tc.expectCfg, config)
 			}
 		})
 	}

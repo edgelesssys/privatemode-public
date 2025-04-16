@@ -21,7 +21,7 @@ const (
 )
 
 // WriteEntry create a log entry for a new manifest and stores a versioned TOML file of the manifest.
-func WriteEntry(fs afero.Fs, workspacePath string, mf []byte, coordinatorPolicyHash string) error {
+func WriteEntry(fs afero.Fs, workspacePath string, mf []byte) error {
 	logFilePath := filepath.Join(workspacePath, constants.ManifestDir, logFileName)
 
 	if err := validateThatLogFileAndManifestsCoexist(fs, logFilePath, workspacePath); err != nil {
@@ -46,7 +46,7 @@ func WriteEntry(fs afero.Fs, workspacePath string, mf []byte, coordinatorPolicyH
 	version := nbrOfLines + 1
 	manifestPath := filepath.Join(workspacePath, constants.ManifestDir, fmt.Sprint(version)+fileSuffix)
 	timestamp := time.Now().Format(time.RFC3339)
-	logEntry := fmt.Sprintf("%s %s %s\n", timestamp, coordinatorPolicyHash, manifestPath)
+	logEntry := fmt.Sprintf("%s %s\n", timestamp, manifestPath)
 
 	_, err = logFile.WriteString(logEntry)
 	if err != nil {

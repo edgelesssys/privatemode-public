@@ -18,8 +18,8 @@ const (
 )
 
 // StartNewCluster creates a new etcd cluster with the current node as the first member.
-func StartNewCluster(ctx context.Context, host string) (srv *embed.Etcd, err error) {
-	cfg, err := newClusterConfig("default", host) // TODO(daniel-weisse): get node name from metadata API
+func StartNewCluster(ctx context.Context, host, serverCrt, serverKey, caCrt string) (srv *embed.Etcd, err error) {
+	cfg, err := newClusterConfig("default", host, serverCrt, serverKey, caCrt) // TODO(daniel-weisse): get node name from metadata API
 	if err != nil {
 		return nil, fmt.Errorf("creating etcd config: %w", err)
 	}
@@ -42,7 +42,7 @@ func StartNewCluster(ctx context.Context, host string) (srv *embed.Etcd, err err
 
 // JoinExistingCluster starts etcd and joins an existing etcd cluster.
 func JoinExistingCluster() error {
-	_, err := joinClusterConfig("", "", "")
+	_, err := joinClusterConfig("", "", "", "", "", "")
 	if err != nil {
 		return fmt.Errorf("creating etcd config: %w", err)
 	}

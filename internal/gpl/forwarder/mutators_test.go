@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestWithJSONRequestMutation(t *testing.T) {
+func TestWithSelectJSONRequestMutation(t *testing.T) {
 	testCases := map[string]struct {
 		mutator          stubMutator
 		fields           FieldSelector
@@ -25,10 +25,10 @@ func TestWithJSONRequestMutation(t *testing.T) {
 	}{
 		"single field simple string": {
 			mutator: stubMutator{
-				mutateResponse: "encryptedText",
+				mutateResponse: `"encryptedText"`,
 			},
 			requestBody:      `{"field1": "plainText"}`,
-			fields:           FieldSelector{"field1": SimpleValue},
+			fields:           FieldSelector{{"field1"}},
 			expectedResponse: `{"field1": "encryptedText"}`,
 		},
 		"single field nested JSON": {
@@ -36,15 +36,15 @@ func TestWithJSONRequestMutation(t *testing.T) {
 				mutateResponse: `{"nestedField": "plainText"}`,
 			},
 			requestBody:      `{"field1": "encryptedText"}`,
-			fields:           FieldSelector{"field1": NestedValue},
+			fields:           FieldSelector{{"field1"}},
 			expectedResponse: `{"field1": {"nestedField": "plainText"}}`,
 		},
 		"multiple fields": {
 			mutator: stubMutator{
-				mutateResponse: "plainText",
+				mutateResponse: `"plainText"`,
 			},
 			requestBody:      `{"field1": "encryptedText1", "field2": "encryptedText2"}`,
-			fields:           FieldSelector{"field1": SimpleValue, "field2": SimpleValue},
+			fields:           FieldSelector{{"field1"}, {"field2"}},
 			expectedResponse: `{"field1": "plainText", "field2": "plainText"}`,
 		},
 		"mutate error": {
@@ -52,23 +52,23 @@ func TestWithJSONRequestMutation(t *testing.T) {
 				mutateErr: assert.AnError,
 			},
 			requestBody: `{"field1": "encryptedText"}`,
-			fields:      FieldSelector{"field1": SimpleValue},
+			fields:      FieldSelector{{"field1"}},
 			wantErr:     true,
 		},
 		"missing fields are skipped": {
 			mutator: stubMutator{
-				mutateResponse: "plainText",
+				mutateResponse: `"plainText"`,
 			},
 			requestBody:      `{"field1": "encryptedText1"}`,
-			fields:           FieldSelector{"field1": SimpleValue, "field2": SimpleValue},
+			fields:           FieldSelector{{"field1"}, {"field2"}},
 			expectedResponse: `{"field1": "plainText"}`,
 		},
 		"not selected fields are skipped": {
 			mutator: stubMutator{
-				mutateResponse: "plainText",
+				mutateResponse: `"plainText"`,
 			},
 			requestBody:      `{"field1": "encryptedText1", "field2": "encryptedText2"}`,
-			fields:           FieldSelector{"field2": SimpleValue},
+			fields:           FieldSelector{{"field2"}},
 			expectedResponse: `{"field1": "encryptedText1", "field2": "plainText"}`,
 		},
 	}
@@ -77,7 +77,169 @@ func TestWithJSONRequestMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutate := WithJSONRequestMutation(tc.mutator.mutate, tc.fields, slog.Default())
+			mutate := WithSelectJSONRequestMutation(tc.mutator.mutate, tc.fields, slog.Default())
+			request := &http.Request{
+				Body: io.NopCloser(bytes.NewBufferString(tc.requestBody)),
+			}
+
+			err := mutate(request)
+			if tc.wantErr {
+				assert.Error(err)
+				return
+			}
+
+			assert.NoError(err)
+			body, err := io.ReadAll(request.Body)
+			assert.NoError(err)
+			assert.Equal(tc.expectedResponse, string(body))
+		})
+	}
+}
+
+func TestWithFullJSONRequestMutation(t *testing.T) {
+	testCases := map[string]struct {
+		mutator          stubMutator
+		skipFields       FieldSelector
+		requestBody      string
+		expectedResponse string
+		wantErr          bool
+	}{
+		"empty body": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      "",
+			expectedResponse: "",
+		},
+		"single field simple string": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": "plainText"}`,
+			expectedResponse: `{"field1": "encryptedText"}`,
+		},
+		"single field nested JSON": {
+			mutator: stubMutator{
+				mutateResponse: `{"nestedField": "plainText"}`,
+			},
+			requestBody:      `{"field1": "encryptedText"}`,
+			expectedResponse: `{"field1": {"nestedField": "plainText"}}`,
+		},
+		"multiple fields": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": "plainText", "field2": "plainText"}`,
+			expectedResponse: `{"field1": "encryptedText", "field2": "encryptedText"}`,
+		},
+		"mutate error": {
+			mutator: stubMutator{
+				mutateErr: assert.AnError,
+			},
+			requestBody: `{"field1": "encryptedText"}`,
+			wantErr:     true,
+		},
+		"fields can be skipped": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": "plainText", "field2": "plainText"}`,
+			skipFields:       FieldSelector{{"field1"}},
+			expectedResponse: `{"field1": "plainText", "field2": "encryptedText"}`,
+		},
+		"skip fields may be missing from body": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": "plainText", "field2": "plainText"}`,
+			skipFields:       FieldSelector{{"field3"}},
+			expectedResponse: `{"field1": "encryptedText", "field2": "encryptedText"}`,
+		},
+		"nested fields can be skipped": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": {"nestedField1": "plainText", "nestedField2": "plainText"}, "field2": "plainText"}`,
+			skipFields:       FieldSelector{{"field1", "nestedField1"}},
+			expectedResponse: `{"field1": {"nestedField1": "plainText", "nestedField2": "encryptedText"}, "field2": "encryptedText"}`,
+		},
+		"invalid JSON data throws an error": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody: `{"field1": "encryptedText"`,
+			wantErr:     true,
+		},
+		"fields with dots in name can be skipped": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": {"nested.field": "plainText"}, "field2": "plainText", "field2.3": "plainText"}`,
+			skipFields:       FieldSelector{{"field1", "nested\\.field"}},
+			expectedResponse: `{"field1": {"nested.field": "plainText"}, "field2": "encryptedText", "field2.3": "encryptedText"}`,
+		},
+		"multiple fields can be skipped": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": "plainText", "field2": "plainText", "field3": "plainText"}`,
+			skipFields:       FieldSelector{{"field1"}, {"field2"}},
+			expectedResponse: `{"field1": "plainText", "field2": "plainText", "field3": "encryptedText"}`,
+		},
+		"nested fields are encrypted as single fields": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": {"nestedField1": "plainText", "nestedField2": "plainText"}, "field2": "plainText"}`,
+			expectedResponse: `{"field1": "encryptedText", "field2": "encryptedText"}`,
+		},
+		"nested array fields can be skipped": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": [{"key1": "plainText", "key2": "plainText"}, {"key1": "plainText", "key2": "plaintText"}], "field2": "plainText"}`,
+			skipFields:       FieldSelector{{"field1", "#", "key1"}},
+			expectedResponse: `{"field1": [{"key1": "plainText", "key2": "encryptedText"}, {"key1": "plainText", "key2": "encryptedText"}], "field2": "encryptedText"}`,
+		},
+		"specific nested array fields can be skipped": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": [{"key1": "plainText", "key2": "plainText"}, {"key1": "plainText", "key2": "plaintText"}], "field2": "plainText"}`,
+			skipFields:       FieldSelector{{"field1", "0", "key1"}},
+			expectedResponse: `{"field1": [{"key1": "plainText", "key2": "encryptedText"}, "encryptedText"], "field2": "encryptedText"}`,
+		},
+		"array fields can be skipped": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": ["plainText", "plainText"], "field2": "plainText"}`,
+			skipFields:       FieldSelector{{"field1", "#"}},
+			expectedResponse: `{"field1": ["plainText", "plainText"], "field2": "encryptedText"}`,
+		},
+		"specific array fields can be skipped": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": ["plainText", "plainText"], "field2": "plainText"}`,
+			skipFields:       FieldSelector{{"field1", "0"}},
+			expectedResponse: `{"field1": ["plainText", "encryptedText"], "field2": "encryptedText"}`,
+		},
+		"specific missing nested array fields can be missing": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			requestBody:      `{"field1": ["plainText", "plainText"], "field2": "plainText"}`,
+			skipFields:       FieldSelector{{"field1", "0", "foo"}},
+			expectedResponse: `{"field1": ["encryptedText", "encryptedText"], "field2": "encryptedText"}`,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+
+			mutate := WithFullJSONRequestMutation(tc.mutator.mutate, tc.skipFields, slog.Default())
 			request := &http.Request{
 				Body: io.NopCloser(bytes.NewBufferString(tc.requestBody)),
 			}
@@ -106,11 +268,11 @@ func TestNewlinePreservationForStreamEventData(t *testing.T) {
 	b := bytes.NewBufferString(data)
 	readCloser := io.NopCloser(b)
 
-	responseMutator := WithJSONResponseMutation(
+	responseMutator := WithSelectJSONResponseMutation(
 		stubMutator{
-			mutateResponse: "encryptedText",
+			mutateResponse: `"encryptedText"`,
 		}.mutate,
-		FieldSelector{"field1": SimpleValue},
+		FieldSelector{{"field1"}},
 	)
 	sut := responseMutator(readCloser)
 
@@ -121,7 +283,7 @@ func TestNewlinePreservationForStreamEventData(t *testing.T) {
 	assert.Equal(expectedResponse, res.String())
 }
 
-func TestWithResponseMutation(t *testing.T) {
+func TestWithSelectResponseMutation(t *testing.T) {
 	testCases := map[string]struct {
 		mutator          stubMutator
 		responseBody     string
@@ -131,42 +293,42 @@ func TestWithResponseMutation(t *testing.T) {
 	}{
 		"single field mutation": {
 			mutator: stubMutator{
-				mutateResponse: "encryptedText",
+				mutateResponse: `"encryptedText"`,
 			},
 			responseBody:     `{"field1": "plainText"}`,
-			fields:           FieldSelector{"field1": SimpleValue},
+			fields:           FieldSelector{{"field1"}},
 			expectedResponse: `{"field1": "encryptedText"}`,
 		},
 		"multiple fields": {
 			mutator: stubMutator{
-				mutateResponse: "encryptedText",
+				mutateResponse: `"encryptedText"`,
 			},
 			responseBody:     `{"field1": "plainText1", "field2": "plainText2"}`,
-			fields:           FieldSelector{"field1": SimpleValue, "field2": SimpleValue},
+			fields:           FieldSelector{{"field1"}, {"field2"}},
 			expectedResponse: `{"field1": "encryptedText", "field2": "encryptedText"}`,
 		},
 		"missing fields are skipped": {
 			mutator: stubMutator{
-				mutateResponse: "encryptedText",
+				mutateResponse: `"encryptedText"`,
 			},
 			responseBody:     `{"field1": "plainText"}`,
-			fields:           FieldSelector{"field2": SimpleValue},
+			fields:           FieldSelector{{"field2"}},
 			expectedResponse: `{"field1": "plainText"}`,
 		},
 		"not selected fields are skipped": {
 			mutator: stubMutator{
-				mutateResponse: "encryptedText",
+				mutateResponse: `"encryptedText"`,
 			},
 			responseBody:     `{"field1": "plainText", "field2": "plainText2"}`,
-			fields:           FieldSelector{"field2": SimpleValue},
+			fields:           FieldSelector{{"field2"}},
 			expectedResponse: `{"field1": "plainText", "field2": "encryptedText"}`,
 		},
 		"mutate from nested JSON": {
 			mutator: stubMutator{
-				mutateResponse: "encryptedText",
+				mutateResponse: `"encryptedText"`,
 			},
 			responseBody:     `{"field1": {"nestedField": "plainText"}}`,
-			fields:           FieldSelector{"field1": SimpleValue},
+			fields:           FieldSelector{{"field1"}},
 			expectedResponse: `{"field1": "encryptedText"}`,
 		},
 		"mutate to nested JSON": {
@@ -174,7 +336,7 @@ func TestWithResponseMutation(t *testing.T) {
 				mutateResponse: `{"nestedField": "plainText"}`,
 			},
 			responseBody:     `{"field1": "encryptedText"}`,
-			fields:           FieldSelector{"field1": NestedValue},
+			fields:           FieldSelector{{"field1"}},
 			expectedResponse: `{"field1": {"nestedField": "plainText"}}`,
 		},
 		"mutate error": {
@@ -182,7 +344,7 @@ func TestWithResponseMutation(t *testing.T) {
 				mutateErr: assert.AnError,
 			},
 			responseBody: `{"field1": "plainText"}`,
-			fields:       FieldSelector{"field1": SimpleValue},
+			fields:       FieldSelector{{"field1"}},
 			wantErr:      true,
 		},
 	}
@@ -190,7 +352,7 @@ func TestWithResponseMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutator := WithJSONResponseMutation(tc.mutator.mutate, tc.fields)
+			mutator := WithSelectJSONResponseMutation(tc.mutator.mutate, tc.fields)
 			response := io.NopCloser(bytes.NewBufferString(tc.responseBody))
 
 			body, err := io.ReadAll(mutator(response))
@@ -209,12 +371,12 @@ func TestWithResponseMutation(t *testing.T) {
 	}{
 		"streaming mutation": {
 			mutator: stubMutator{
-				mutateResponse: "encryptedText",
+				mutateResponse: `"encryptedText"`,
 			},
 		},
 		"streaming large field mutation": {
 			mutator: stubMutator{
-				mutateResponse: string(bytes.Repeat([]byte("encryptedText"), 10000)),
+				mutateResponse: fmt.Sprintf("\"%s\"", bytes.Repeat([]byte("encryptedText"), 10000)),
 			},
 		},
 	}
@@ -222,7 +384,7 @@ func TestWithResponseMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutator := WithJSONResponseMutation(tc.mutator.mutate, FieldSelector{"field1": SimpleValue})
+			mutator := WithSelectJSONResponseMutation(tc.mutator.mutate, FieldSelector{{"field1"}})
 
 			msgChan := make(chan string)
 			reader := &fakeReader{
@@ -243,7 +405,7 @@ func TestWithResponseMutation(t *testing.T) {
 			responseParts := strings.Split(strings.TrimRight(response.String(), "\n"), "\n\n") // trim the last newline, so that we don't get an empty final part
 			assert.Len(responseParts, messageParts)
 			for i, part := range responseParts {
-				assert.Equal(fmt.Sprintf(`%d: {"field1": "%s"}`, i, tc.mutator.mutateResponse), part)
+				assert.Equal(fmt.Sprintf(`%d: {"field1": %s}`, i, tc.mutator.mutateResponse), part)
 			}
 		})
 	}

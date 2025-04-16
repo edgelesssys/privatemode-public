@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"k8s.io/utils/clock"
 )
 
 // SecretManager manages the lifetime of a secret and always returns an up-to-date secret.
@@ -21,6 +22,7 @@ type SecretManager struct {
 	secretRefreshBuffer time.Duration
 	updateSecretFn      updateSecretFn
 	mut                 sync.Mutex
+	clock               clock.Clock
 }
 
 // Secret includes all the information needed to identify and use a secret.
@@ -40,23 +42,23 @@ func (s Secret) Map() map[string][]byte {
 type updateSecretFn func(ctx context.Context, secrets map[string][]byte, ttl time.Duration) error
 
 // New creates a new SecretManager.
-func New(
-	updateSecretFn updateSecretFn,
-	secretLifetime time.Duration, secretRefreshBuffer time.Duration,
-) *SecretManager {
+func New(updateSecretFn updateSecretFn, secretLifetime, secretRefreshBuffer time.Duration) *SecretManager {
 	return &SecretManager{
 		secret:              nil,
 		secretLifetime:      secretLifetime,
 		secretRefreshBuffer: secretRefreshBuffer,
 		updateSecretFn:      updateSecretFn,
 		mut:                 sync.Mutex{},
+		clock:               clock.RealClock{},
 	}
 }
 
 // LatestSecret returns the current secret. If the secret is older than the lifetime, a new secret is generated.
-func (sm *SecretManager) LatestSecret(ctx context.Context, now time.Time) (Secret, error) {
+func (sm *SecretManager) LatestSecret(ctx context.Context) (Secret, error) {
 	sm.mut.Lock()
 	defer sm.mut.Unlock()
+
+	now := sm.clock.Now()
 	if sm.secret == nil || !now.Before(sm.secret.expirationDate) { // should trigger on expiration date and not after
 		if err := sm.updateSecret(ctx, now); err != nil {
 			return Secret{}, err
@@ -68,31 +70,24 @@ func (sm *SecretManager) LatestSecret(ctx context.Context, now time.Time) (Secre
 // Loop keeps the secret up-to-date by periodically updating it.
 func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
 	log.Info("Fetching initial secret")
-	now := time.Now()
-	secret, err := sm.LatestSecret(ctx, now)
-	if err != nil {
-		log.Error("Initial fetch of secret", "error", err)
-		return err
-	}
-	log.Info("Secret updated successfully")
 
 	for {
+		secret, err := sm.LatestSecret(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				log.Info("Context cancelled, stopping loop")
+				return nil //nolint:nilerr
+			}
+			log.Error("Failed to updated secret", "error", err)
+			return err
+		}
+		log.Info("Secret updated successfully")
+
 		select {
 		case <-ctx.Done():
 			log.Info("Context cancelled, stopping loop")
 			return nil
-		case <-time.After(secret.expirationDate.Sub(now)):
-			log.Info("Updating secret")
-			now = time.Now()
-			secret, err = sm.LatestSecret(ctx, now)
-			if err != nil {
-				if ctx.Err() != nil {
-					log.Info("Context cancelled, stopping loop")
-					return nil //nolint:nilerr
-				}
-				log.Error("Failed to update secret", "error", err)
-				return err
-			}
+		case <-sm.clock.After(secret.expirationDate.Sub(sm.clock.Now())):
 		}
 	}
 }

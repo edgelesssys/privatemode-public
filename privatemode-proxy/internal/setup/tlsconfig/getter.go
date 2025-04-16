@@ -7,7 +7,6 @@ package tlsconfig
 import (
 	"context"
 	"crypto/tls"
-	"encoding/hex"
 	"fmt"
 	"path/filepath"
 
@@ -22,18 +21,13 @@ const (
 
 // Getter is a client that gets the TLS config for the Contrast deployment.
 type Getter struct {
-	contrastClient      contrastClient
+	contrastClient      contrastsdk.Client
 	coordinatorEndpoint string
 	workspaceDir        string
 }
 
-type contrastClient interface {
-	GetCoordinatorState(ctx context.Context, cacheDir string, expectedMfBytes []byte, endpoint string, policyHash []byte) (contrastsdk.CoordinatorState, error)
-	Verify(expectedMfBytes []byte, manifests [][]byte) error
-}
-
 // NewGetter returns a new TLSConfigGetter that gets the Contrast TLS config.
-func NewGetter(coordinatorEndpoint string, contrastClient contrastClient, workspaceDir string) Getter {
+func NewGetter(coordinatorEndpoint string, contrastClient contrastsdk.Client, workspaceDir string) Getter {
 	return Getter{
 		contrastClient:      contrastClient,
 		coordinatorEndpoint: coordinatorEndpoint,
@@ -42,9 +36,9 @@ func NewGetter(coordinatorEndpoint string, contrastClient contrastClient, worksp
 }
 
 // GetTLSConfig gets the TLS config for the Contrast deployment.
-func (c Getter) GetTLSConfig(ctx context.Context, expectedMfBytes []byte, coordinatorPolicyHash string) (*tls.Config, error) {
+func (c Getter) GetTLSConfig(ctx context.Context, expectedMfBytes []byte) (*tls.Config, error) {
 	cacheDir := filepath.Join(c.workspaceDir, ContrastSubDir)
-	state, err := fetchAndVerifyCoordinatorState(ctx, cacheDir, c.coordinatorEndpoint, c.contrastClient, expectedMfBytes, coordinatorPolicyHash)
+	state, err := fetchAndVerifyCoordinatorState(ctx, cacheDir, c.coordinatorEndpoint, c.contrastClient, expectedMfBytes)
 	if err != nil {
 		return nil, fmt.Errorf("getting coordinator state: %w", err)
 	}
@@ -56,12 +50,8 @@ func (c Getter) GetTLSConfig(ctx context.Context, expectedMfBytes []byte, coordi
 	return tlsConfig, nil
 }
 
-func fetchAndVerifyCoordinatorState(ctx context.Context, cacheDir string, coordinatorEndpoint string, cclient contrastClient, expectedMfBytes []byte, hexCoordinatorPolicyHash string) (contrastsdk.CoordinatorState, error) {
-	policyHash, err := decodeCoordinatorPolicyHash(hexCoordinatorPolicyHash)
-	if err != nil {
-		return contrastsdk.CoordinatorState{}, fmt.Errorf("decoding coordinator policy hash: %w", err)
-	}
-	state, err := cclient.GetCoordinatorState(ctx, cacheDir, expectedMfBytes, coordinatorEndpoint, policyHash)
+func fetchAndVerifyCoordinatorState(ctx context.Context, cacheDir string, coordinatorEndpoint string, cclient contrastsdk.Client, expectedMfBytes []byte) (contrastsdk.CoordinatorState, error) {
+	state, err := cclient.GetCoordinatorState(ctx, cacheDir, expectedMfBytes, coordinatorEndpoint)
 	if err != nil {
 		return contrastsdk.CoordinatorState{}, fmt.Errorf("getting coordinator state: %w", err)
 	}
@@ -69,15 +59,4 @@ func fetchAndVerifyCoordinatorState(ctx context.Context, cacheDir string, coordi
 		return contrastsdk.CoordinatorState{}, fmt.Errorf("verifying Contrast manifest: %w", err)
 	}
 	return state, err
-}
-
-func decodeCoordinatorPolicyHash(hexEncoded string) ([]byte, error) {
-	hash, err := hex.DecodeString(hexEncoded)
-	if err != nil {
-		return nil, fmt.Errorf("hex-decoding coordinator-policy-hash flag: %w", err)
-	}
-	if len(hash) != 32 {
-		return nil, fmt.Errorf("coordinator-policy-hash must be exactly 32 hex-encoded bytes, got %d", len(hash))
-	}
-	return hash, nil
 }

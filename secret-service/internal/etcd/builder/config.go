@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"path/filepath"
 
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
@@ -12,8 +11,8 @@ import (
 )
 
 // newClusterConfig set up an etcd config to create a new cluster.
-func newClusterConfig(nodeName, host string) (*embed.Config, error) {
-	cfg, err := baseEtcdConfig(nodeName, host)
+func newClusterConfig(nodeName, host, serverCrt, serverKey, caCrt string) (*embed.Config, error) {
+	cfg, err := baseEtcdConfig(nodeName, host, serverCrt, serverKey, caCrt)
 	if err != nil {
 		return nil, err
 	}
@@ -24,8 +23,8 @@ func newClusterConfig(nodeName, host string) (*embed.Config, error) {
 }
 
 // joinClusterConfig sets up an etcd config to join an existing cluster.
-func joinClusterConfig(nodeName, host, clusterURL string) (*embed.Config, error) {
-	cfg, err := baseEtcdConfig(nodeName, host)
+func joinClusterConfig(nodeName, host, clusterURL, serverCrt, serverKey, caCrt string) (*embed.Config, error) {
+	cfg, err := baseEtcdConfig(nodeName, host, serverCrt, serverKey, caCrt)
 	if err != nil {
 		return nil, err
 	}
@@ -36,7 +35,7 @@ func joinClusterConfig(nodeName, host, clusterURL string) (*embed.Config, error)
 }
 
 // baseEtcdConfig sets up the base config for an etcd server.
-func baseEtcdConfig(nodeName, host string) (*embed.Config, error) {
+func baseEtcdConfig(nodeName, host, serverCrt, serverKey, caCrt string) (*embed.Config, error) {
 	cfg := embed.NewConfig()
 
 	cfg.Name = nodeName
@@ -67,9 +66,9 @@ func baseEtcdConfig(nodeName, host string) (*embed.Config, error) {
 	cfg.AdvertiseClientUrls = []url.URL{*advertiseClientURL}
 
 	tlsConfig := transport.TLSInfo{
-		CertFile:       filepath.Join(constants.EtcdPKIPath(), "etcd.crt"),
-		KeyFile:        filepath.Join(constants.EtcdPKIPath(), "etcd.key"),
-		TrustedCAFile:  filepath.Join(constants.EtcdPKIPath(), "ca.crt"),
+		CertFile:       serverCrt,
+		KeyFile:        serverKey,
+		TrustedCAFile:  caCrt,
 		ClientCertAuth: true,
 	}
 	cfg.ClientTLSInfo = tlsConfig

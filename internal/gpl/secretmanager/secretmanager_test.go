@@ -9,34 +9,41 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	testclock "k8s.io/utils/clock/testing"
 )
 
 func TestGetSecretUpdatesAfterLifetime(t *testing.T) {
 	assert := assert.New(t)
 	secretLifetime := 1 * time.Hour
 	refreshBuffer := 5 * time.Minute
+	now := time.Date(2024, 0, 0, 0, 0, 0, 0, time.UTC)
+	clock := testclock.NewFakeClock(now)
+
 	mock := &updateCounter{}
 	sut := New(mock.UpdateFn, secretLifetime, refreshBuffer)
-	now := time.Now()
+	sut.clock = clock
 	ctx := t.Context()
 
-	secret, err := sut.LatestSecret(ctx, now)
+	secret, err := sut.LatestSecret(ctx)
 	assert.NoError(err)
 	assert.Equal(1, mock.isCalled)
 
-	secret2, err := sut.LatestSecret(ctx, now.Add(1*time.Minute))
+	clock.Step(1 * time.Minute)
+	secret2, err := sut.LatestSecret(ctx)
 	// assert no update
 	assert.NoError(err)
 	assert.Equal(1, mock.isCalled)
 	assert.Equal(secret, secret2)
 
-	secret3, err := sut.LatestSecret(ctx, now.Add(secretLifetime))
+	clock.Step(secretLifetime)
+	secret3, err := sut.LatestSecret(ctx)
 	// assert update
 	assert.NoError(err)
 	assert.Equal(2, mock.isCalled)
 	assert.NotEqual(secret, secret3)
 
-	secret4, err := sut.LatestSecret(ctx, now.Add(2*secretLifetime-refreshBuffer))
+	clock.Step(secretLifetime - refreshBuffer)
+	secret4, err := sut.LatestSecret(ctx)
 	// assert update
 	assert.NoError(err)
 	assert.Equal(3, mock.isCalled)

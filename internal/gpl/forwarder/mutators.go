@@ -6,30 +6,32 @@ package forwarder
 import (
 	"bufio"
 	"bytes"
-	"cmp"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"slices"
+	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
-const (
-	// NestedValue indicates that this field is a nested JSON structure.
-	NestedValue Nested = true
-	// SimpleValue indicates that this field is a simple string.
-	SimpleValue Nested = false
-)
-
-// Nested indicates whether a JSON field is a nested JSON structure, or a simple string.
-type Nested bool
-
-// FieldSelector is a map of JSON field names to consider for mutation.
-// Each entry in the map indicates whether the JSON field is a nested JSON structure or a simple string.
-type FieldSelector map[string]Nested
+// FieldSelector is a list of JSON field names to consider for mutation.
+// JSON paths are represented as a list of strings, where each string is a field name.
+//
+// For example, the FieldSelector{["foo", "bar"]} creates the JSON path "foo.bar",
+// and would match the field "bar" in the object "foo".
+//
+// The special character '#' is used to indicate that all elements of an array should be considered.
+// For example, FieldSelector{["foo", "bar", "#", "baz"]} creates the JSON path "foo.bar.#.baz",
+// and would match all elements "baz" of the array "bar" in the object "foo", e.g. "foo.bar.0.baz", "foo.bar.1.baz", etc.
+// If only specific array elements should be selected, they can be directly addressed by their index.
+// For example, FieldSelector{["foo", "bar", "0", "baz"]} creates the JSON path "foo.bar.0.baz",
+// and would only match the first element "baz" of the array "bar" in the object "foo".
+type FieldSelector [][]string
 
 // MutationFunc mutates data.
 // It is used by [WithJSONRequestMutation] to mutate data read from an [*http.Request],
@@ -37,8 +39,47 @@ type FieldSelector map[string]Nested
 // It may be called multiple times for a single request to mutate data.
 type MutationFunc func(request string) (mutatedRequest string, err error)
 
-// WithJSONRequestMutation returns a [RequestMutator] which performs mutation on the request.
-func WithJSONRequestMutation(mutate MutationFunc, fields FieldSelector, log *slog.Logger) RequestMutator {
+// WithSelectJSONRequestMutation returns a [RequestMutator] which mutates the request.
+func WithSelectJSONRequestMutation(mutate MutationFunc, fields FieldSelector, log *slog.Logger) RequestMutator {
+	return withRequestMutation(mutate, fields, mutateSelectJSONFields, log)
+}
+
+// WithFullJSONRequestMutation returns a [RequestMutator] which mutates the request.
+func WithFullJSONRequestMutation(mutate MutationFunc, skipFields FieldSelector, log *slog.Logger) RequestMutator {
+	return withRequestMutation(mutate, skipFields, mutateAllJSONFields, log)
+}
+
+// WithSelectJSONResponseMutation returns a [ResponseMutator] which mutates the data read from the given [io.Reader].
+func WithSelectJSONResponseMutation(mutate MutationFunc, fields FieldSelector) ResponseMutator {
+	return func(reader io.Reader) io.Reader {
+		return &mutatingReader{
+			scanner:       bufio.NewScanner(reader),
+			mutate:        mutate,
+			jsonParseFunc: mutateSelectJSONFields,
+			fields:        fields,
+			leftover:      nil,
+		}
+	}
+}
+
+// WithFullJSONResponseMutation returns a [ResponseMutator] which mutates the data read from the given [io.Reader].
+func WithFullJSONResponseMutation(mutate MutationFunc, skipFields FieldSelector) ResponseMutator {
+	return func(reader io.Reader) io.Reader {
+		return &mutatingReader{
+			scanner:       bufio.NewScanner(reader),
+			mutate:        mutate,
+			jsonParseFunc: mutateAllJSONFields,
+			fields:        skipFields,
+			leftover:      nil,
+		}
+	}
+}
+
+func withRequestMutation(
+	mutate MutationFunc, fields FieldSelector,
+	mutateFunc func([]byte, MutationFunc, FieldSelector) ([]byte, error),
+	log *slog.Logger,
+) RequestMutator {
 	return func(r *http.Request) error {
 		log.Info("Mutating request")
 
@@ -47,7 +88,12 @@ func WithJSONRequestMutation(mutate MutationFunc, fields FieldSelector, log *slo
 			return fmt.Errorf("reading request body: %w", err)
 		}
 
-		req, err = mutateJSONFields(req, mutate, fields)
+		// Allow empty requests
+		if len(req) > 0 && !gjson.ValidBytes(req) {
+			return errors.New("invalid JSON data")
+		}
+
+		req, err = mutateFunc(req, mutate, fields)
 		if err != nil {
 			return fmt.Errorf("mutating request: %w", err)
 		}
@@ -58,26 +104,15 @@ func WithJSONRequestMutation(mutate MutationFunc, fields FieldSelector, log *slo
 	}
 }
 
-// WithJSONResponseMutation returns a [ResponseMutator] which mutates the data read from the given [io.Reader].
-func WithJSONResponseMutation(mutate MutationFunc, fields FieldSelector) ResponseMutator {
-	return func(reader io.Reader) io.Reader {
-		return &mutatingReader{
-			scanner:  bufio.NewScanner(reader),
-			mutate:   mutate,
-			fields:   fields,
-			leftover: nil,
-		}
-	}
-}
-
 // mutatingReader implements a wrapper for an io.ReadCloser,
 // which transparently mutates data chunks.
 type mutatingReader struct {
 	scanner  *bufio.Scanner
 	leftover []byte
 
-	fields FieldSelector
-	mutate MutationFunc
+	fields        FieldSelector
+	mutate        MutationFunc
+	jsonParseFunc func(data []byte, mutate MutationFunc, fields FieldSelector) ([]byte, error)
 }
 
 // Read reads from the underlying reader, performs mutation on the data chunks, and returns the mutated data.
@@ -110,7 +145,7 @@ func (r *mutatingReader) Read(b []byte) (int, error) {
 	}
 
 	// Mutate the data chunk
-	mutated, err := mutateJSONFields(buf, r.mutate, r.fields)
+	mutated, err := r.jsonParseFunc(buf, r.mutate, r.fields)
 	if err != nil {
 		return 0, err
 	}
@@ -127,26 +162,27 @@ func (r *mutatingReader) Read(b []byte) (int, error) {
 	return n, nil
 }
 
-func mutateJSONFields(data []byte, mutate MutationFunc, fields FieldSelector) ([]byte, error) {
+func mutateSelectJSONFields(data []byte, mutate MutationFunc, fields FieldSelector) ([]byte, error) {
 	result := data
-	for _, field := range sortedKeys(fields) {
+	jsonPaths := make([]string, 0, len(fields))
+	for _, field := range fields {
+		jsonPaths = append(jsonPaths, strings.Join(field, "."))
+	}
+	sort.StringSlice(jsonPaths).Sort()
+
+	for _, field := range jsonPaths {
 		plainField := gjson.GetBytes(result, field)
 		if len(plainField.Array()) == 0 { // skip if the field is empty/does not exist
 			continue
 		}
 
-		mutatedField, err := mutate(plainField.String())
+		mutatedField, err := mutate(plainField.Raw)
 		if err != nil {
 			return nil, fmt.Errorf("mutating request: %w", err)
 		}
 
-		if fields[field] { // nested value
-			// Use SetRawBytes, as otherwise quotes and data structure characters in the data will be escaped
-			result, err = sjson.SetRawBytes(result, field, []byte(mutatedField))
-		} else {
-			// Otherwise write the plain text as a string
-			result, err = sjson.SetBytes(result, field, mutatedField)
-		}
+		// Use SetRawBytes, as otherwise quotes and data structure characters in the data will be escaped
+		result, err = sjson.SetRawBytes(result, field, []byte(mutatedField))
 		if err != nil {
 			return nil, fmt.Errorf("updating input with mutated field: %w", err)
 		}
@@ -154,12 +190,83 @@ func mutateJSONFields(data []byte, mutate MutationFunc, fields FieldSelector) ([
 	return result, nil
 }
 
-// sortedKeys returns the keys of the given map in alphabetically sorted order.
-func sortedKeys[K cmp.Ordered, V any](m map[K]V) []K {
-	var keys []K
-	for k := range m {
-		keys = append(keys, k)
+func mutateAllJSONFields(data []byte, mutate MutationFunc, skipFields FieldSelector) ([]byte, error) {
+	// Collect all top level indices of the given JSON data
+	indices := []string{}
+	gjson.ParseBytes(data).ForEach(func(key, _ gjson.Result) bool {
+		// Escape wildcards and dots
+		escapedKey := strings.ReplaceAll(key.String(), ".", "\\.")
+		escapedKey = strings.ReplaceAll(escapedKey, "?", "\\?")
+		escapedKey = strings.ReplaceAll(escapedKey, "*", "\\*")
+		indices = append(indices, escapedKey)
+		return true
+	})
+	sort.StringSlice(indices).Sort()
+
+	result := data
+	for _, field := range indices {
+		skip := false
+		subPaths := FieldSelector{}
+		for _, skipField := range skipFields {
+			// Check if the current field should be skipped
+			if len(skipField) == 1 && skipField[0] == field {
+				skip = true
+				break
+			}
+
+			// Check if any subfields of the current field should be skipped
+			if len(skipField) > 1 && skipField[0] == field {
+				gjsonData := gjson.GetBytes(result, field)
+				switch {
+				case gjsonData.IsObject():
+					// In case of a nested object, add the subfield to the list of fields to be mutated
+					subPaths = append(subPaths, skipField[1:])
+				case gjsonData.IsArray() && skipField[1] == "#":
+					// In case of an array, and in case we want to iterate over all elements of the array,
+					// create new sub-paths, replacing the '#' placeholder with the actual array indices
+					fieldArray := gjsonData.Array()
+					for i := range fieldArray {
+						nestedArrayFields := []string{}
+						if len(skipField) > 2 {
+							nestedArrayFields = skipField[2:]
+						}
+						subPaths = append(subPaths, append([]string{strconv.Itoa(i)}, nestedArrayFields...))
+					}
+				case gjsonData.IsArray() && skipField[1] != "#":
+					// In case of an array, and not iterating over all elements of the array,
+					// just add the subfield to the list of fields to be mutated
+					subPaths = append(subPaths, skipField[1:])
+				}
+			}
+		}
+		if skip {
+			continue
+		}
+
+		// By default, use the mutation function supplied by the caller
+		mutateFunc := mutate
+		// If a subfield should be skipped, recursively call mutateJSONFields
+		if len(subPaths) > 0 {
+			mutateFunc = func(data string) (string, error) {
+				mutatedField, err := mutateAllJSONFields([]byte(data), mutate, subPaths)
+				if err != nil {
+					return "", fmt.Errorf("mutating nested field: %w", err)
+				}
+				return string(mutatedField), nil
+			}
+		}
+
+		// Mutate the field
+		mutatedField, err := mutateFunc(gjson.GetBytes(result, field).Raw)
+		if err != nil {
+			return nil, fmt.Errorf("mutating field %q: %w", field, err)
+		}
+
+		// Use SetRawBytes, as otherwise quotes and data structure characters in the data will be escaped
+		result, err = sjson.SetRawBytes(result, field, []byte(mutatedField))
+		if err != nil {
+			return nil, fmt.Errorf("updating input with mutated field: %w", err)
+		}
 	}
-	slices.Sort(keys)
-	return keys
+	return result, nil
 }

@@ -143,8 +143,10 @@ func (f *Forwarder) Forward(
 
 	w.WriteHeader(resp.StatusCode)
 
+	responseReader := responseMutator(resp.Body)
+
 	// Write response to client using a small buffer to ensure smooth streaming.
-	if _, err := io.CopyBuffer(w, responseMutator(resp.Body), make([]byte, copyBufferSize)); err != nil {
+	if _, err := io.CopyBuffer(w, responseReader, make([]byte, copyBufferSize)); err != nil {
 		if errors.Is(err, context.Canceled) {
 			f.log.Warn("Connection closed by client before forwarding finished", "error", err)
 		} else {

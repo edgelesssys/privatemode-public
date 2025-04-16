@@ -14,18 +14,14 @@ import (
 	"github.com/edgelesssys/continuum/attestation-agent/internal/gpu"
 	"github.com/edgelesssys/continuum/attestation-agent/internal/gpu/attestation"
 	"github.com/edgelesssys/continuum/attestation-agent/internal/gpu/attestation/policy"
-	"github.com/edgelesssys/continuum/attestation-agent/internal/secretapi"
 	"github.com/edgelesssys/continuum/internal/crypto"
-	"github.com/edgelesssys/continuum/internal/gpl/contrast"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
 	"github.com/edgelesssys/continuum/internal/gpl/process"
-	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 )
 
 var (
-	ssAddress string
-	logLevel  string
+	logLevel string
 
 	// GPU policy flags.
 	debugMode      bool
@@ -43,9 +39,6 @@ func main() {
 		SilenceUsage: true,
 	}
 
-	// Register flags
-	cmd.Flags().StringVar(&ssAddress, "secret-svc-address", "", "host name or IP for the secret service")
-	must(cmd.MarkFlagRequired("secret-svc-address"))
 	cmd.Flags().StringVar(&logLevel, logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
 
 	// GPU policy flags
@@ -69,23 +62,10 @@ func main() {
 
 func run(cmd *cobra.Command, _ []string) error {
 	log := logging.NewLogger(logLevel)
-	fs := afero.Afero{Fs: afero.NewOsFs()}
 
 	gpuPolicy := parseGPUPolicyFromFlags()
 	if err := verifyAndEnable(cmd.Context(), gpuPolicy, log); err != nil {
 		return fmt.Errorf("failed to verify GPUs: %w", err)
-	}
-
-	tlsConfig, err := contrast.ClientTLSConfigFromDir("")
-	if err != nil {
-		return fmt.Errorf("failed to create TLS config: %w", err)
-	}
-	secretAccess, err := secretapi.RequestSecretAccess(cmd.Context(), log, ssAddress, tlsConfig)
-	if err != nil {
-		return fmt.Errorf("failed to request secret access: %w", err)
-	}
-	if err := secretapi.SaveSecretAccessCerts(fs, secretAccess); err != nil {
-		return fmt.Errorf("failed to save secret access certificates: %w", err)
 	}
 
 	return nil

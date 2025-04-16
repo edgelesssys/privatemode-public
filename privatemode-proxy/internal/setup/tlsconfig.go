@@ -8,16 +8,12 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/manifestlog"
 	"github.com/spf13/afero"
 )
 
-const (
-	coordinatorHash = "coordinator_hash"
-	manifest        = "manifest.json"
-)
+const manifest = "manifest.json"
 
 // tlsConfigAdapter updates the TLS config with the interface for the secretupdater.
 type tlsConfigAdapter struct {
@@ -28,7 +24,7 @@ type tlsConfigAdapter struct {
 }
 
 type tlsConfigUpdater interface {
-	GetTLSConfig(ctx context.Context, expectedMfBytes []byte, coordinatorPolicyHash string) (*tls.Config, error)
+	GetTLSConfig(ctx context.Context, expectedMfBytes []byte) (*tls.Config, error)
 }
 
 // newTLSConfigAdapter returns a new TLSConfigGetter that updates the TLS config.
@@ -54,17 +50,11 @@ func getNewTLSConfig(ctx context.Context, fetcher contrastDeploymentFetcher, mfL
 	}
 	log.Info("Coordinator manifest fetched successfully")
 
-	coordinatorPolicyHash, err := fetcher.FetchCoordinatorPolicyHash(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("fetching coordinator policy hash: %w", err)
-	}
-	log.Info("Coordinator policy hash fetched successfully")
-
-	if err := mfLogger.Log(expectedMfBytes, coordinatorPolicyHash); err != nil {
+	if err := mfLogger.Log(expectedMfBytes); err != nil {
 		return nil, fmt.Errorf("log manifest: %w", err)
 	}
 
-	return tlsConfigUpdater.GetTLSConfig(ctx, expectedMfBytes, coordinatorPolicyHash)
+	return tlsConfigUpdater.GetTLSConfig(ctx, expectedMfBytes)
 }
 
 type contrastDeploymentFetcher struct {
@@ -75,24 +65,11 @@ func (f contrastDeploymentFetcher) FetchManifest(ctx context.Context) ([]byte, e
 	return fetchBodyFromURL(ctx, fmt.Sprintf("%s/%s", f.cdnBaseURL, manifest))
 }
 
-func (f contrastDeploymentFetcher) FetchCoordinatorPolicyHash(ctx context.Context) (string, error) {
-	return fetchCoordinatorPolicyHash(ctx, fmt.Sprintf("%s/%s", f.cdnBaseURL, coordinatorHash))
-}
-
-// fetchCoordinatorPolicyHash returns the hash of the policy to be enforced by the coordinator.
-func fetchCoordinatorPolicyHash(ctx context.Context, resourceURL string) (string, error) {
-	body, err := fetchBodyFromURL(ctx, resourceURL)
-	if err != nil {
-		return "", fmt.Errorf("fetching coordinator policy hash: %w", err)
-	}
-	return strings.TrimSpace(string(body)), nil
-}
-
 type mfLogger struct {
 	fs        afero.Fs
 	workspace string
 }
 
-func (m mfLogger) Log(mf []byte, coordinatorPolicyHash string) error {
-	return manifestlog.WriteEntry(m.fs, m.workspace, mf, coordinatorPolicyHash)
+func (m mfLogger) Log(mf []byte) error {
+	return manifestlog.WriteEntry(m.fs, m.workspace, mf)
 }

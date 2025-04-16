@@ -10,9 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
@@ -26,22 +24,6 @@ import (
 const testAPIKey string = "testkey"
 
 func TestPromptEncryption(t *testing.T) {
-	require := require.New(t)
-	ctx := t.Context()
-
-	secret := secretmanager.Secret{
-		ID:   "123",
-		Data: bytes.Repeat([]byte{0x42}, 32),
-	}
-	stubAuthOpenAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != fmt.Sprintf("Bearer %s", testAPIKey) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		stub.OpenAIEchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
-	}))
-	defer stubAuthOpenAIServer.Close()
-
 	apiKey := testAPIKey
 	testCases := map[string]struct {
 		apiKey           *string
@@ -54,11 +36,9 @@ func TestPromptEncryption(t *testing.T) {
 			expectStatusCode: http.StatusOK,
 		},
 		"without privatemode-proxy API key": {
-			apiKey:           nil,
 			expectStatusCode: http.StatusUnauthorized,
 		},
 		"without privatemode-proxy API key but request contains Auth header": {
-			apiKey:           nil,
 			expectStatusCode: http.StatusOK,
 			requestMutator: func(req *http.Request) {
 				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", testAPIKey))
@@ -87,12 +67,27 @@ func TestPromptEncryption(t *testing.T) {
 	}
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+
 			// Arrange server
+			secret := secretmanager.Secret{
+				ID:   "123",
+				Data: bytes.Repeat([]byte{0x42}, 32),
+			}
+			stubAuthOpenAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != fmt.Sprintf("Bearer %s", testAPIKey) {
+					http.Error(w, "Unauthorized", http.StatusUnauthorized)
+					return
+				}
+				stub.OpenAIEchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
+			}))
+			defer stubAuthOpenAIServer.Close()
+
 			sut := newTestServer(tc.apiKey, secret, stubAuthOpenAIServer.Listener.Addr().String())
 
 			// Act
 			prompt := "Hello"
-			req := prepareRequest(ctx, require, &prompt, nil)
+			req := prepareRequest(t.Context(), require, &prompt, nil)
 			if tc.requestMutator != nil {
 				tc.requestMutator(req)
 			}
@@ -193,10 +188,9 @@ func TestTools(t *testing.T) {
 			require := require.New(t)
 			assert := assert.New(t)
 
-			var tools *string
-			if tc.tools != nil {
-				toolsJSON := "[" + strings.Join(tc.tools, ",") + "]"
-				tools = &toolsJSON
+			var tools []any
+			for _, tool := range tc.tools {
+				tools = append(tools, json.RawMessage(tool))
 			}
 
 			req := prepareRequest(t.Context(), require, tc.prompt, tools)
@@ -243,25 +237,21 @@ func newTestServer(apiKey *string, secret secretmanager.Secret, openAIServerAddr
 	}
 }
 
-func prepareRequest(ctx context.Context, require *require.Assertions, prompt *string, tools *string) *http.Request {
+func prepareRequest(ctx context.Context, require *require.Assertions, prompt *string, tools []any) *http.Request {
 	baseURL := "http://192.0.2.1:8080" // doesn't matter
 	url := fmt.Sprintf("%s/v1/chat/completions", baseURL)
-	content := []struct {
-		Role    string  `json:"role"`
-		Content *string `json:"content"`
-	}{
-		{
-			Role:    "user",
-			Content: prompt,
-		},
-	}
-	bt, err := json.Marshal(content)
-	require.NoError(err)
 
-	payload := openai.EncryptedChatRequest{
-		Model:    constants.ServedModel,
-		Messages: string(bt),
-		Tools:    tools,
+	payload := openai.ChatRequest{
+		ChatRequestPlainData: openai.ChatRequestPlainData{
+			Model: constants.ServedModel,
+		},
+		Messages: []openai.Message{
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Tools: tools,
 	}
 
 	payloadBytes, err := json.Marshal(payload)
@@ -276,6 +266,6 @@ type stubSecretManager struct {
 	secretmanager.Secret
 }
 
-func (s stubSecretManager) LatestSecret(_ context.Context, _ time.Time) (secretmanager.Secret, error) {
+func (s stubSecretManager) LatestSecret(_ context.Context) (secretmanager.Secret, error) {
 	return s.Secret, nil
 }

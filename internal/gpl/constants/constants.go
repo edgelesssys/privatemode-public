@@ -45,6 +45,10 @@ const (
 	// ManifestDir is the directory where the manifest log is stored.
 	ManifestDir = "manifests"
 
+	// PrivatemodeVersionHeader is an HTTP header sent by the Privatemode components on every request.
+	// It is used to check for version compatibility between client and server.
+	PrivatemodeVersionHeader = "Privatemode-Version"
+
 	// SecretServiceEndpoint is the endpoint of the secret service.
 	SecretServiceEndpoint = "secret.privatemode.ai:443"
 	// APIEndpoint is the endpoint of the Privatemode API.
@@ -63,6 +67,3 @@ func ContinuumBaseDir() string {
 
 // EtcdBasePath is the base path for etcd related files.
 func EtcdBasePath() string { return filepath.Join(ContinuumBaseDir(), "etcd") }
-
-// EtcdPKIPath is the path where the etcd PKI files are stored.
-func EtcdPKIPath() string { return filepath.Join(EtcdBasePath(), "pki") }

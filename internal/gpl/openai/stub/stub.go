@@ -5,13 +5,16 @@
 package stub
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
 
 	crypto "github.com/edgelesssys/continuum/internal/gpl/crypto"
+	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
 	"github.com/edgelesssys/continuum/internal/gpl/openai"
 )
 
@@ -26,18 +29,24 @@ func OpenAIEchoHandler(secrets map[string][]byte, log *slog.Logger) http.Handler
 
 func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		decryptedRequest, id, requestNonce, err := decryptRequest(secrets, r, w)
-		if err != nil {
-			log.Error("Decrypting request", "error", err)
+		requestMutator, responseMutator := getConnectionMutators(secrets, log)
+		if err := requestMutator(r); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		decryptedMsgs, ok := decryptedRequest["messages"].([]message)
-		if !ok {
-			http.Error(w, "Reading messages", http.StatusInternalServerError)
+
+		var request openai.ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		lastMsgContent := decryptedMsgs[len(decryptedMsgs)-1].Content
+
+		if len(request.Messages) == 0 {
+			http.Error(w, "no messages in request", http.StatusBadRequest)
+			return
+		}
+
+		lastMsgContent := request.Messages[len(request.Messages)-1].Content
 		var responseMsg string
 		if lastMsgContent != nil {
 			responseMsg = fmt.Sprintf("Echo: %s", *lastMsgContent)
@@ -45,134 +54,106 @@ func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.Resp
 			responseMsg = "Echo: nil"
 		}
 
-		choices := []choice{
+		choices := []openai.Choice{
 			{
 				Index: 0,
-				Message: message{
+				Message: openai.Message{
 					Role:      "assistant",
 					Content:   &responseMsg,
-					ToolCalls: nil,
+					ToolCalls: make([]any, len(request.Tools)),
 				},
 				FinishReason: "stop",
 			},
 		}
 
-		// if there were tools set, we call all of them, returning the entire tool json with a test field set to "echo"
-		tools := decryptedRequest["tools"]
-		if tools != nil {
-			decryptedTools := tools.([]interface{})
-			toolCalls := make([]string, len(decryptedTools))
-			for i, tool := range decryptedTools {
-				toolMap := tool.(map[string]interface{})
-				toolMap["test"] = "echo"
-				toolJSON, _ := json.Marshal(toolMap)
-				toolCalls[i] = string(toolJSON)
-			}
-			choices[0].Message.ToolCalls = toolCalls
-		}
-
-		marshalledResp, err := json.Marshal(choices)
-		if err != nil {
-			log.Error("Unmarshalling json", "error", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		secret, ok := secrets[id]
-		if !ok {
-			http.Error(w, fmt.Sprintf("unknown secret ID %s", id), http.StatusInternalServerError)
-		}
-		encryptedResponseMsg, err := crypto.EncryptMessage(string(marshalledResp), secret, id, requestNonce, 0)
-		if err != nil {
-			log.Error("Encrypting message", "error", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-
 		inputTokens := 0
-		for _, msg := range decryptedMsgs {
-			if msg.Content != nil {
-				inputTokens += len(*msg.Content)
+
+		// if there were tools set, we call all of them, returning the entire tool json with a test field set to "echo"
+		for i, tool := range request.Tools {
+			toolMap, ok := tool.(map[string]any)
+			if !ok {
+				http.Error(w, fmt.Sprintf("tool call %d is not a map", i), http.StatusBadRequest)
+				return
 			}
-			if msg.ToolCalls != nil {
-				for _, toolCall := range msg.ToolCalls {
-					inputTokens += len(toolCall)
-				}
+			toolMap["test"] = "echo"
+			toolJSON, err := json.Marshal(toolMap)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
 			}
+			choices[0].Message.ToolCalls[i] = string(toolJSON)
+			inputTokens += len(toolJSON)
 		}
-		openAIResp := openai.EncryptedChatResponse{
+
+		openAIResp := openai.ChatResponse{
 			ID:      "chatcmpl-123", // This should be dynamically generated in a real implementation
 			Object:  "chat.completion",
 			Created: int(time.Now().Unix()),
 			Model:   "gpt",
-			Choices: encryptedResponseMsg,
+			Choices: choices,
 			Usage: openai.Usage{
 				PromptTokens:     inputTokens,
 				CompletionTokens: len(responseMsg),
 				TotalTokens:      inputTokens + len(responseMsg),
 			},
 		}
+
+		responseJSON, err := json.Marshal(openAIResp)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(openAIResp); err != nil {
-			log.Error("Encoding response", "error", err)
+		if _, err := io.Copy(w, responseMutator(bytes.NewReader(responseJSON))); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
 }
 
-func decryptRequest(secrets map[string][]byte, r *http.Request, _ http.ResponseWriter) (req map[string]interface{}, id string, nonce []byte, err error) {
-	var openAIReq map[string]interface{}
-	err = json.NewDecoder(r.Body).Decode(&openAIReq)
-	if err != nil {
-		return openAIReq, "", nil, err
-	}
+func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator) {
+	encSeqNumber, decSeqNumber := uint32(0), uint32(0)
+	var id string
+	var nonce []byte
+	var secret []byte
 
-	decryptedMsgRaw, id, nonce, err := decryptField(secrets, openAIReq["messages"].(string), 0)
-	if err != nil {
-		return openAIReq, id, nonce, err
-	}
-	var decryptedMsg []message
-	err = json.Unmarshal([]byte(*decryptedMsgRaw), &decryptedMsg)
-	if err != nil {
-		return openAIReq, id, nonce, err
-	}
-	openAIReq["messages"] = decryptedMsg
-
-	// if tools are there, decrypt them
-	if tools, ok := openAIReq["tools"]; ok {
-		decryptedToolsRaw, id, nonce, err := decryptField(secrets, tools.(string), 1)
+	decrypt := func(cipherText string) (string, error) {
+		var err error
+		id, err = crypto.GetIDFromCipher(cipherText)
 		if err != nil {
-			return openAIReq, id, nonce, err
+			return "", err
 		}
-		var decryptedTools []interface{}
-		if err := json.Unmarshal([]byte(*decryptedToolsRaw), &decryptedTools); err != nil {
-			return openAIReq, id, nonce, err
+		var ok bool
+		secret, ok = secrets[id]
+		if !ok {
+			return "", fmt.Errorf("no secret for ID %q", id)
+		}
+		nonce, err = crypto.GetNonceFromCipher(cipherText)
+		if err != nil {
+			return "", err
 		}
 
-		openAIReq["tools"] = decryptedTools
+		plainText, err := crypto.DecryptMessage(cipherText, secret, nonce, decSeqNumber)
+		if err != nil {
+			return "", err
+		}
+		decSeqNumber++
+		return plainText, nil
 	}
+	requestMutator = forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainRequestFields, log)
 
-	return openAIReq, id, nonce, err
-}
+	encrypt := func(plainText string) (string, error) {
+		cipherText, err := crypto.EncryptMessage(plainText, secret, id, nonce, encSeqNumber)
+		if err != nil {
+			return "", err
+		}
+		encSeqNumber++
+		return cipherText, nil
+	}
+	responseMutator = forwarder.WithFullJSONResponseMutation(encrypt, openai.PlainResponseFields)
 
-func decryptField(secrets map[string][]byte, encrypted string, sequenceNumber uint32) (decrypted *string, id string, nonce []byte, err error) {
-	id, err = crypto.GetIDFromCipher(encrypted)
-	if err != nil {
-		return nil, "", nil, err
-	}
-	secret, ok := secrets[id]
-	if !ok {
-		return nil, id, nil, fmt.Errorf("secret ID %s not found", id)
-	}
-	nonce, err = crypto.GetNonceFromCipher(encrypted)
-	if err != nil {
-		return nil, id, nonce, err
-	}
-	decryptedMsgRaw, err := crypto.DecryptMessage(encrypted, secret, nonce, sequenceNumber)
-	if err != nil {
-		return nil, id, nonce, err
-	}
-
-	return &decryptedMsgRaw, id, nonce, nil
+	return requestMutator, responseMutator
 }
 
 func openAIModelsHandler() func(w http.ResponseWriter, r *http.Request) {

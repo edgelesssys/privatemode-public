@@ -35,15 +35,16 @@ func main() {
 		Flags: setup.Flags{
 			Workspace:      workspace,
 			ManifestPath:   "",
+			APIKey:         nil, // the key is set in the UI. needs to be nil
+			APIEndpoint:    constants.APIEndpoint,
 			SecretEndpoint: constants.SecretServiceEndpoint,
 			ContrastFlags: setup.ContrastFlags{
-				CoordinatorEndpoint:   constants.CoordinatorEndpoint,
-				CoordinatorPolicyHash: "", // Only required when ManifestPath is set
-				CDNBaseURL:            "https://cdn.confidential.cloud/privatemode/v2",
+				CoordinatorEndpoint: constants.CoordinatorEndpoint,
+				CDNBaseURL:          "https://cdn.confidential.cloud/privatemode/v2",
 			},
+			InsecureAPIConnection: false,
 		},
-		APIEndpoint: constants.APIEndpoint,
-		APIKey:      "",
+		runtimeConfig: jsonConfig{}, //nolint:exhaustruct
 	}, log)
 
 	err = wails.Run(&options.App{ //nolint:exhaustruct

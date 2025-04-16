@@ -33,7 +33,7 @@ func (c *Cipher) encryptResponse(id, message string, requestNonce []byte, sequen
 }
 
 // decryptRequest decrypts a message.
-// The message is expected to be in the format 'id:nonce:iv:cipher'.
+// The message is expected to be in the format '"id:nonce:iv:cipher"'.
 // On success, the function returns the plain text and the id.
 func (c *Cipher) decryptRequest(message string, nonce []byte, sequenceNumber uint32) (text, id string, err error) {
 	id, err = crypto.GetIDFromCipher(message)

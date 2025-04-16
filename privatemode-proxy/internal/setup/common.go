@@ -6,10 +6,16 @@ package setup
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
+	"github.com/edgelesssys/continuum/internal/gpl/secretmanager"
+	"github.com/edgelesssys/continuum/privatemode-proxy/internal/server"
 )
 
 const (
@@ -22,16 +28,32 @@ const (
 // Flags are flags that are common to all setups.
 type Flags struct {
 	ContrastFlags
-	Workspace      string
-	ManifestPath   string
-	SecretEndpoint string
+	Workspace             string
+	ManifestPath          string
+	SecretEndpoint        string
+	InsecureAPIConnection bool
+	APIEndpoint           string
+	APIKey                *string
 }
 
 // ContrastFlags holds the configuration for the Contrast deployment.
 type ContrastFlags struct {
-	CoordinatorEndpoint   string
-	CoordinatorPolicyHash string
-	CDNBaseURL            string
+	CoordinatorEndpoint string
+	CDNBaseURL          string
+}
+
+// NewServer creates a new server instance.
+func NewServer(flags Flags, manager *secretmanager.SecretManager, log *slog.Logger) *server.Server {
+	client := http.DefaultClient
+	if flags.InsecureAPIConnection {
+		client = &http.Client{
+			Transport: &http.Transport{
+				Proxy:           http.ProxyFromEnvironment,
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		}
+	}
+	return server.New(client, flags.APIEndpoint, forwarder.SchemeHTTPS, manager, log, flags.APIKey)
 }
 
 func fetchBodyFromURL(ctx context.Context, sourceURL string) ([]byte, error) {

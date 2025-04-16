@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,15 +28,12 @@ type Etcd struct {
 
 // New creates a new etcd client.
 // This function attempts to load client certificates and CA from the filesystem.
-func New(hosts []string, fs afero.Afero, log *slog.Logger) (*Etcd, func(), error) {
-	keyPair, err := tls.LoadX509KeyPair(
-		filepath.Join(constants.EtcdPKIPath(), "client.crt"),
-		filepath.Join(constants.EtcdPKIPath(), "client.key"),
-	)
+func New(hosts []string, etcdMemberCert, etcdMemberKey, etcdCA string, fs afero.Afero, log *slog.Logger) (*Etcd, func(), error) {
+	keyPair, err := tls.LoadX509KeyPair(etcdMemberCert, etcdMemberKey)
 	if err != nil {
 		return nil, nil, err
 	}
-	caCert, err := fs.ReadFile(filepath.Join(constants.EtcdPKIPath(), "ca.crt"))
+	caCert, err := fs.ReadFile(etcdCA)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -86,21 +86,26 @@ func TestEncryptDecrypt(t *testing.T) {
 			const message = "message"
 			const id = "id"
 
-			ciphertext, err := EncryptMessage(message, tc.encSecret, id, tc.encNonce, tc.encSeqNum)
+			cipherText, err := EncryptMessage(message, tc.encSecret, id, tc.encNonce, tc.encSeqNum)
 			if tc.wantEncErr {
 				assert.Error(err)
 				return
 			}
 			require.NoError(err)
 
+			// Check that quotes are added
+			assert.Equal(`"`, string(cipherText[0]))
+			assert.Equal(`"`, string(cipherText[len(cipherText)-1]))
+
 			// Check ID
-			associatedID, _, _ := strings.Cut(ciphertext, ":")
+			cipherTextTrimmed := strings.Trim(cipherText, `"`)
+			associatedID, _, _ := strings.Cut(cipherTextTrimmed, ":")
 			assert.Equal(id, associatedID)
-			encodedID, err := GetIDFromCipher(ciphertext)
+			encodedID, err := GetIDFromCipher(cipherText)
 			assert.NoError(err)
 			assert.Equal(id, encodedID)
 
-			plaintext, err := DecryptMessage(ciphertext, tc.decSecret, tc.decNonce, tc.decSeqNum)
+			plaintext, err := DecryptMessage(cipherText, tc.decSecret, tc.decNonce, tc.decSeqNum)
 			if tc.wantDecErr {
 				assert.Error(err)
 				return

@@ -9,41 +9,38 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"sync"
 
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
-	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
-	"github.com/edgelesssys/continuum/privatemode-proxy/internal/server"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/setup"
 	"github.com/spf13/cobra"
 )
 
 var (
-	logLevel                 string
-	apiKeyStr                string
-	workspace                string
-	secretEndpoint           string
-	apiEndpoint              string
-	port                     string
-	manifestPath             string
-	tlsCertPath              string
-	tlsKeyPath               string
-	insecureAPIConnection    bool
-	coordinatorEndpoint      string
-	hexCoordinatorPolicyHash string
-	cdnBaseURL               string
+	logLevel              string
+	apiKeyStr             string
+	workspace             string
+	secretEndpoint        string
+	apiEndpoint           string
+	port                  string
+	manifestPath          string
+	tlsCertPath           string
+	tlsKeyPath            string
+	insecureAPIConnection bool
+	coordinatorEndpoint   string
+	cdnBaseURL            string
 )
 
 // New returns the root command of the privatemode-proxy.
 func New() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "privatemode-proxy",
-		Short:   "The proxy verifies a third-party Privatemode deployment and handles prompt encryption and API authentication on behalf of its users.",
-		Args:    cobra.NoArgs,
-		Version: constants.Version(),
-		RunE:    runProxy,
+		Use:          "privatemode-proxy",
+		Short:        "The proxy verifies a third-party Privatemode deployment and handles prompt encryption and API authentication on behalf of its users.",
+		Args:         cobra.NoArgs,
+		Version:      constants.Version(),
+		RunE:         runProxy,
+		SilenceUsage: true,
 	}
 
 	cmd.Flags().StringVarP(&logLevel, logging.Flag, logging.FlagShorthand, logging.DefaultFlagValue, logging.FlagInfo)
@@ -63,8 +60,6 @@ func New() *cobra.Command {
 
 	// Contrast flags
 	cmd.Flags().StringVar(&coordinatorEndpoint, "coordinatorEndpoint", constants.CoordinatorEndpoint, "The endpoint for the Contrast coordinator.")
-	cmd.Flags().StringVar(&hexCoordinatorPolicyHash, "coordinatorPolicyHash", "", "The hex-encoded hash of the policy to be enforced by the coordinator.")
-	cmd.MarkFlagsRequiredTogether("manifestPath", "coordinatorPolicyHash")
 	cmd.Flags().StringVar(&cdnBaseURL, "cdnBaseURL", "https://cdn.confidential.cloud/privatemode/v2", "Base URL to retrieve deployment information from.")
 	must(cmd.Flags().MarkHidden("cdnBaseURL"))
 
@@ -92,26 +87,18 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 		ManifestPath:   manifestPath,
 		SecretEndpoint: secretEndpoint,
 		ContrastFlags: setup.ContrastFlags{
-			CoordinatorEndpoint:   coordinatorEndpoint,
-			CoordinatorPolicyHash: hexCoordinatorPolicyHash,
-			CDNBaseURL:            cdnBaseURL,
+			CoordinatorEndpoint: coordinatorEndpoint,
+			CDNBaseURL:          cdnBaseURL,
 		},
+		InsecureAPIConnection: insecureAPIConnection,
+		APIEndpoint:           apiEndpoint,
+		APIKey:                apiKey,
 	}
 	manager, err := setup.SecretManager(cmd.Context(), flags, log)
 	if err != nil {
 		return fmt.Errorf("setting up secret manager configuration: %w", err)
 	}
-
-	// setup server
-	client := http.DefaultClient
-	if insecureAPIConnection {
-		client = &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
-	}
-	server := server.New(client, apiEndpoint, forwarder.SchemeHTTPS, manager, log, apiKey)
+	server := setup.NewServer(flags, manager, log)
 	lis, err := net.Listen("tcp", net.JoinHostPort("", port))
 	if err != nil {
 		return fmt.Errorf("listening on port %q: %w", port, err)

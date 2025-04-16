@@ -11,6 +11,8 @@
 // [sjson.SetBytes]: https://pkg.go.dev/github.com/tidwall/sjson#SetBytes
 package openai
 
+import "github.com/edgelesssys/continuum/internal/gpl/forwarder"
+
 const (
 	// ChatRequestMessagesField is the messages field in the request that is encrypted / decrypted.
 	ChatRequestMessagesField = "messages"
@@ -24,20 +26,53 @@ const (
 	ModelsEndpoint = "/v1/models"
 )
 
+// PlainRequestFields is a field selector for all fields in an OpenAI chat completions request that are not encrypted.
+var PlainRequestFields = forwarder.FieldSelector{
+	{"model"},
+	{"stream_options"},
+	{"max_tokens"},
+	{"max_completion_tokens"},
+	{"n"},
+	{"stream"},
+}
+
+// PlainResponseFields is a field selector for all fields in an OpenAI chat completions response that are not encrypted.
+var PlainResponseFields = forwarder.FieldSelector{
+	{"id"},
+	{"usage"},
+}
+
 // EncryptedChatRequest is the request structure for an OpenAI chat completion call,
-// with encrypted "messages" and "tools" fields.
+// with encrypted fields.
+// Fields that should not be encrypted need to be added to [PlainRequestFields].
+// See [ChatRequest] for the unencrypted request structure.
 //
 // Don't send the marshalled type to clients/servers. Read package docs for more info.
 type EncryptedChatRequest struct {
-	Messages            string         `json:"messages"` // The whole messages array from Request as an encrypted blob.
+	ChatRequestPlainData
+	Messages    string  `json:"messages"` // The whole messages array from Request as an encrypted blob.
+	Temperature string  `json:"temperature,omitzero"`
+	Tools       *string `json:"tools,omitempty"` // The whole tools array from Request as an encrypted blob.
+}
+
+// ChatRequest is the request structure for an OpenAI chat completion call.
+//
+// Don't send the marshalled type to clients/servers. Read package docs for more info.
+type ChatRequest struct {
+	ChatRequestPlainData
+	Messages    []Message `json:"messages"`
+	Temperature float32   `json:"temperature,omitzero"`
+	Tools       []any     `json:"tools,omitempty"`
+}
+
+// ChatRequestPlainData contains fields that are not encrypted for [ChatRequest] and [EncryptedChatRequest].
+type ChatRequestPlainData struct {
 	Model               string         `json:"model"`
-	Temperature         float32        `json:"temperature"`
-	N                   int            `json:"n,omitzero"`
 	MaxTokens           int            `json:"max_tokens,omitzero"` // deprecated in favor of max_completion_tokens
 	MaxCompletionTokens int            `json:"max_completion_tokens,omitzero"`
+	N                   int            `json:"n,omitzero"`
 	Stream              bool           `json:"stream"`
 	StreamOptions       *StreamOptions `json:"stream_options,omitempty"`
-	Tools               *string        `json:"tools,omitempty"` // The whole tools array from Request as an encrypted blob.
 }
 
 // StreamOptions contains options for streaming completions. It is an extended version of the OpenAI StreamOptions type.
@@ -47,25 +82,27 @@ type StreamOptions struct {
 }
 
 // EncryptedChatResponse is the response structure for an OpenAI chat completion call,
-// with an encrypted "choices" field.
+// with an encrypted fields.
+// Fields that should not be encrypted need to be added to [PlainResponseFields].
+// See [ChatResponse] for the unencrypted response structure.
 //
 // Don't send the marshalled type to clients/servers. Read package docs for more info.
 type EncryptedChatResponse struct {
 	// Choices is the whole choices array from Response as an encrypted blob.
 	// The field is marked as omitzero to avoid adding empty strings in unit tests.
 	Choices string `json:"choices,omitzero"`
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int    `json:"created"`
-	Model   string `json:"model"`
-	Usage   Usage  `json:"usage"`
+	ID      string `json:"id,omitzero"`
+	Object  string `json:"object,omitzero"`
+	Created string `json:"created,omitzero"`
+	Model   string `json:"model,omitzero"`
+	Usage   Usage  `json:"usage,omitzero"`
 }
 
 // ChatResponse is the response structure for an OpenAI chat completion call.
 //
 // Don't send the marshalled type to clients/servers. Read package docs for more info.
 type ChatResponse struct {
-	Choices []choice `json:"choices"`
+	Choices []Choice `json:"choices"`
 	ID      string   `json:"id"`
 	Object  string   `json:"object"`
 	Created int      `json:"created"`
@@ -88,13 +125,15 @@ type Model struct {
 	OwnedBy string `json:"owned_by"`
 }
 
-type choice struct {
+// Choice is a choice in an OpenAI chat completion call.
+type Choice struct {
 	Index        int     `json:"index"`
-	Message      message `json:"message"`
+	Message      Message `json:"message"`
 	FinishReason string  `json:"finish_reason"`
 }
 
-type message struct {
+// Message is a message in an OpenAI chat completion call.
+type Message struct {
 	Role      string  `json:"role"`
 	Content   *string `json:"content"`
 	ToolCalls []any   `json:"tool_calls,omitempty"`

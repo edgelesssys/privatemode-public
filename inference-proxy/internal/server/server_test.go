@@ -94,12 +94,12 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 	require.NoError(err)
 	m, err := requestCipher.Encrypt(plain)
 	require.NoError(err)
-	payload := []byte(fmt.Sprintf(`{"model": "model","messages": "%s"}`, m))
+	payload := fmt.Sprintf(`{"model": "model","messages": %s}`, m)
 
 	adapter, err := adapter.New(apiType, c, fw, log)
 	require.NoError(err)
 
 	server := New(adapter, log)
 
-	return payload, server
+	return []byte(payload), server
 }

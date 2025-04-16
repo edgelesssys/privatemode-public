@@ -9,14 +9,13 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 
-	"github.com/edgelesssys/continuum/internal/etcd"
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/contrast"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
-	"github.com/edgelesssys/continuum/internal/pki"
-	"github.com/edgelesssys/continuum/secret-service/internal/backendapi"
+	"github.com/edgelesssys/continuum/secret-service/internal/etcd"
 	"github.com/edgelesssys/continuum/secret-service/internal/health"
 	"github.com/edgelesssys/continuum/secret-service/internal/userapi"
 	"github.com/spf13/afero"
@@ -29,7 +28,10 @@ const (
 func main() {
 	port := flag.String("port", constants.SecretServiceUserPort, "port to listen on")
 	healthPort := flag.String("health-port", constants.AttestationServiceHealthPort, "port for health probes")
-	etcdCertSANs := flag.String("etcd-cert-sans", "secret-service-internal.continuum.svc.cluster.local", "subjective alternative names to use for the secret service's etcd TLS certificate")
+	etcdHost := flag.String("etcd-host", "secret-service-internal.continuum.svc.cluster.local", "host name to set up the initial etcd cluster")
+	etcdServerCert := flag.String("etcd-server-cert", filepath.Join(constants.EtcdBasePath(), "etcd.crt"), "path to the etcd server certificate")
+	etcdServerKey := flag.String("etcd-server-key", filepath.Join(constants.EtcdBasePath(), "etcd.key"), "path to the etcd server key")
+	etcdCA := flag.String("etcd-ca", filepath.Join(constants.EtcdBasePath(), "ca.crt"), "path to the etcd CA certificate")
 	logLevel := flag.String(logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
 	flag.Parse()
 
@@ -39,24 +41,19 @@ func main() {
 	log := logging.NewLogger(*logLevel)
 	log.Info("Continuum Secret Service", "version", constants.Version())
 
-	if err := run(ctx, *etcdCertSANs, *port, *healthPort, afero.Afero{Fs: afero.NewOsFs()}, log); err != nil {
+	if err := run(ctx, *etcdHost, *port, *healthPort, *etcdServerCert, *etcdServerKey, *etcdCA, afero.Afero{Fs: afero.NewOsFs()}, log); err != nil {
 		log.Error(err.Error())
 		os.Exit(1)
 	}
 }
 
 func run(
-	ctx context.Context, etcdCertSANs, serverPort, healthPort string,
+	ctx context.Context, etcdHost, serverPort, healthPort string,
+	etcdServerCert, etcdServerKey, etcdCA string,
 	fs afero.Afero, log *slog.Logger,
 ) error {
-	// Set up a new PKI
-	pki, err := pki.New(nil, nil, fs, log)
-	if err != nil {
-		return err
-	}
-
 	// Set up etcd
-	etcd, etcdClose, err := etcd.New(ctx, etcdCertSANs, pki, fs, log)
+	etcd, etcdClose, err := etcd.New(ctx, etcdHost, etcdServerCert, etcdServerKey, etcdCA, fs, log)
 	if err != nil {
 		return err
 	}
@@ -66,7 +63,6 @@ func run(
 	if err != nil {
 		return fmt.Errorf("setting up Contrast TLS config: %w", err)
 	}
-	backendServer := backendapi.New(etcdCertSANs, contrastMTLS, pki, log)
 	contrastTLS := contrastMTLS.Clone()
 	contrastTLS.ClientAuth = tls.NoClientCert // the user API should not enforce mTLS
 	userServer := userapi.New(contrastTLS, etcd, log)
@@ -83,18 +79,6 @@ func run(
 		log.Info("Starting user server", "endpoint", net.JoinHostPort(defaultHost, serverPort))
 		if srvErr := userServer.Serve(net.JoinHostPort(defaultHost, serverPort)); srvErr != nil {
 			err = srvErr
-			backendServer.Stop()
-			healthServer.Stop()
-		}
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		log.Info("Starting backend server", "endpoint", net.JoinHostPort(defaultHost, constants.AttestationServiceBackendPort))
-		if srvErr := backendServer.Serve(net.JoinHostPort(defaultHost, constants.AttestationServiceBackendPort)); srvErr != nil {
-			err = srvErr
-			userServer.Stop()
 			healthServer.Stop()
 		}
 	}()
@@ -106,7 +90,6 @@ func run(
 		if srvErr := healthServer.Serve(net.JoinHostPort(defaultHost, healthPort)); srvErr != nil {
 			err = srvErr
 			userServer.Stop()
-			backendServer.Stop()
 		}
 	}()
 

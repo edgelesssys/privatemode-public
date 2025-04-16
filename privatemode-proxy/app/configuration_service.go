@@ -7,5 +7,5 @@ type ConfigurationService struct {
 
 // GetConfiguredAPIKey returns the API key set in the config file.
 func (s *ConfigurationService) GetConfiguredAPIKey() string {
-	return s.config.APIKey
+	return s.config.GetConfiguredAPIKey()
 }

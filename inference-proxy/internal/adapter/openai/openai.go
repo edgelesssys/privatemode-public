@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
+	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
 	"github.com/edgelesssys/continuum/internal/gpl/openai"
 )
@@ -40,11 +41,10 @@ func (t *Adapter) ServeMux() *http.ServeMux {
 
 	// Create chat completion: https://platform.openai.com/docs/api-reference/chat/create
 	srv.HandleFunc("/v1/chat/completions", t.forwardWithFieldMutation(
-		forwarder.FieldSelector{
-			openai.ChatRequestMessagesField: forwarder.NestedValue,
-			openai.ChatRequestToolsField:    forwarder.NestedValue,
-		}, // Decrypting should yield an OpenAI response struct
-		forwarder.FieldSelector{openai.ChatResponseEncryptionField: forwarder.SimpleValue}, // Encrypting the response field results in a simple string
+		forwarder.FieldSelector{{openai.ChatRequestMessagesField}, {openai.ChatRequestToolsField}}, // Decrypting should yield an OpenAI response struct
+		openai.PlainRequestFields,
+		forwarder.FieldSelector{{openai.ChatResponseEncryptionField}}, // Encrypting the response field results in a simple string
+		openai.PlainResponseFields,
 	)) // cannot restrict to POST method because OPTIONS is needed for CORS by the browser
 
 	// TODO: vllm only supports /v1/chat/completions and /v1/models
@@ -132,16 +132,27 @@ func (t *Adapter) unsupportedEndpoint(w http.ResponseWriter, _ *http.Request) {
 }
 
 // forwardWithFieldMutation returns a handler to forward requests with field mutation using the given selectors.
-func (t *Adapter) forwardWithFieldMutation(inputSelector, outputSelector forwarder.FieldSelector) func(http.ResponseWriter, *http.Request) {
+func (t *Adapter) forwardWithFieldMutation(inputEncryptSelector, inputSkipSelector, outputEncryptSelector, outputSkipSelector forwarder.FieldSelector) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := t.cipher.NewResponseCipher()
 
-		t.forwarder.Forward(
-			w, r,
-			forwarder.WithJSONRequestMutation(session.DecryptRequest, inputSelector, t.log),
-			forwarder.WithJSONResponseMutation(session.EncryptResponse, outputSelector),
-			forwarder.NoHeaderMutation,
-		)
+		clientVersion := r.Header.Get(constants.PrivatemodeVersionHeader)
+		// If no version is supplied, assume the client is running an old version that only supports encrypting select fields
+		if clientVersion == "" {
+			t.forwarder.Forward(
+				w, r,
+				forwarder.WithSelectJSONRequestMutation(session.DecryptRequest, inputEncryptSelector, t.log),
+				forwarder.WithSelectJSONResponseMutation(session.EncryptResponse, outputEncryptSelector),
+				forwarder.NoHeaderMutation,
+			)
+		} else {
+			t.forwarder.Forward(
+				w, r,
+				forwarder.WithFullJSONRequestMutation(session.DecryptRequest, inputSkipSelector, t.log),
+				forwarder.WithFullJSONResponseMutation(session.EncryptResponse, outputSkipSelector),
+				forwarder.NoHeaderMutation,
+			)
+		}
 	}
 }
 

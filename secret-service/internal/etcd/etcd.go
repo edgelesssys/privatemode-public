@@ -12,14 +12,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/crypto"
-	"github.com/edgelesssys/continuum/internal/etcd/builder"
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
+	"github.com/edgelesssys/continuum/secret-service/internal/etcd/builder"
 	"github.com/spf13/afero"
 	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -40,21 +38,21 @@ type Etcd struct {
 
 // New sets up etcd on the node and returns a client to securely interact with it.
 // The returned close function gracefully shuts down the etcd server.
-func New(ctx context.Context, host string, ca pki, fs afero.Afero, log *slog.Logger) (*Etcd, func(), error) {
-	if err := fs.MkdirAll(constants.EtcdBasePath(), 0o600); err != nil {
+func New(ctx context.Context, host, serverCrt, serverKey, caCrt string, fs afero.Afero, log *slog.Logger) (*Etcd, func(), error) {
+	if err := fs.MkdirAll(constants.EtcdBasePath(), 0o700); err != nil {
 		return nil, nil, fmt.Errorf("creating etcd base directory: %w", err)
 	}
 
-	memberCertPEM, err := createEtcdMemberKeyPair(host, ca, fs, log)
+	serverCertPEM, err := fs.ReadFile(serverCrt)
 	if err != nil {
-		return nil, nil, fmt.Errorf("generating etcd member certificate: %w", err)
+		return nil, nil, fmt.Errorf("reading etcd server certificate: %w", err)
 	}
-	memberCert, err := crypto.ParseCertificateFromPEM(memberCertPEM)
+	memberCert, err := crypto.ParseCertificateFromPEM(serverCertPEM)
 	if err != nil {
-		return nil, nil, fmt.Errorf("parsing etcd member certificate: %w", err)
+		return nil, nil, fmt.Errorf("parsing etcd server certificate: %w", err)
 	}
 
-	server, err := builder.StartNewCluster(authCtx(ctx, memberCert), host)
+	server, err := builder.StartNewCluster(authCtx(ctx, memberCert), host, serverCrt, serverKey, caCrt)
 	if err != nil {
 		return nil, nil, fmt.Errorf("setting up etcd: %w", err)
 	}
@@ -220,69 +218,6 @@ func authCtx(ctx context.Context, etcdMemberCert *x509.Certificate) context.Cont
 	}), nil)
 }
 
-func createEtcdMemberKeyPair(host string, ca pki, fs afero.Afero, log *slog.Logger) ([]byte, error) {
-	var keyExists, certExists bool
-	if _, err := fs.Stat(filepath.Join(constants.EtcdPKIPath(), "etcd.crt")); err == nil {
-		certExists = true
-	}
-	if _, err := fs.Stat(filepath.Join(constants.EtcdPKIPath(), "etcd.key")); err == nil {
-		keyExists = true
-	}
-	if certExists && keyExists {
-		log.Info("etcd member key pair already exists, skipping generation")
-
-		return fs.ReadFile(filepath.Join(constants.EtcdPKIPath(), "etcd.crt"))
-	}
-
-	if certExists || keyExists {
-		log.Warn("Incomplete etcd member key pair found. Creating new key pair.", "certificateExists", certExists, "keyExists", keyExists)
-	} else {
-		log.Info("Creating new etcd member key pair")
-	}
-
-	// Generate certificate for the etcd server
-	etcdSANs := []string{
-		"localhost",
-	}
-	// Inspired by the default SANs given to etcd certs by kubeadm: https://kubernetes.io/docs/setup/best-practices/certificates/#all-certificates
-	etcdIPs := []net.IP{
-		net.IPv4zero,
-		net.ParseIP("127.0.0.1"),
-		net.IPv6zero,
-		net.IPv6loopback,
-	}
-
-	if hostIP := net.ParseIP(host); hostIP != nil {
-		etcdIPs = append(etcdIPs, hostIP)
-	} else {
-		etcdSANs = append(etcdSANs, host)
-	}
-
-	etcdCommonName := "root"
-	// etcd certificates are valid for one year. This is the same default as used by Kubernetes
-	// TODO: certificates should be renewed on Continuum node image upgrades
-	// TODO: consider implementing an API endpoint to renew certificates
-	validity := time.Hour * 24 * 365
-
-	etcdCert, etcdKey, err := ca.CreateCertificate(etcdCommonName, etcdSANs, etcdIPs, validity)
-	if err != nil {
-		return nil, err
-	}
-
-	// Save the certificate and key to disk
-	if err := fs.MkdirAll(constants.EtcdPKIPath(), 0o600); err != nil {
-		return nil, fmt.Errorf("creating etcd PKI directory: %w", err)
-	}
-	if err := fs.WriteFile(filepath.Join(constants.EtcdPKIPath(), "etcd.crt"), etcdCert, 0o600); err != nil {
-		return nil, fmt.Errorf("writing etcd member certificate: %w", err)
-	}
-	if err := fs.WriteFile(filepath.Join(constants.EtcdPKIPath(), "etcd.key"), etcdKey, 0o600); err != nil {
-		return nil, fmt.Errorf("writing etcd member key: %w", err)
-	}
-
-	return etcdCert, nil
-}
-
 type etcdServer struct {
 	*embed.Etcd
 }
@@ -308,8 +243,4 @@ type etcdInf interface {
 	LeaseGrant(context.Context, *pb.LeaseGrantRequest) (*pb.LeaseGrantResponse, error)
 	LeaseRevoke(context.Context, *pb.LeaseRevokeRequest) (*pb.LeaseRevokeResponse, error)
 	Close()
-}
-
-type pki interface {
-	CreateCertificate(commonName string, sans []string, ips []net.IP, validity time.Duration) (certPEM []byte, keyPEM []byte, err error)
 }

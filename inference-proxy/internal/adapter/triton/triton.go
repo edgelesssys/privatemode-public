@@ -14,6 +14,7 @@ import (
 	"net/http"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
+	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
 )
 
@@ -52,7 +53,7 @@ func (t *Adapter) ServeMux() *http.ServeMux {
 }
 
 func (t *Adapter) generateHandler() func(w http.ResponseWriter, r *http.Request) {
-	return t.forwardWithFieldMutation(forwarder.FieldSelector{"text_input": forwarder.SimpleValue}, forwarder.FieldSelector{"text_output": forwarder.SimpleValue})
+	return t.forwardWithFieldMutation(forwarder.FieldSelector{{"text_input"}}, forwarder.FieldSelector{}, forwarder.FieldSelector{{"text_output"}}, forwarder.FieldSelector{})
 }
 
 // forwardRequest forwards a request without mutation.
@@ -61,15 +62,26 @@ func (t *Adapter) forwardRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 // forwardWithFieldMutation returns a handler to forward requests with field mutation using the given selectors.
-func (t *Adapter) forwardWithFieldMutation(inputSelector, outputSelector forwarder.FieldSelector) func(http.ResponseWriter, *http.Request) {
+func (t *Adapter) forwardWithFieldMutation(inputEncryptSelector, inputSkipSelector, outputEncryptSelector, outputSkipSelector forwarder.FieldSelector) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := t.cipher.NewResponseCipher()
-		t.forwarder.Forward(
-			w, r,
-			forwarder.WithJSONRequestMutation(session.DecryptRequest, inputSelector, t.log),
-			forwarder.WithJSONResponseMutation(session.EncryptResponse, outputSelector),
-			forwarder.NoHeaderMutation,
-		)
+
+		clientVersion := r.Header.Get(constants.PrivatemodeVersionHeader)
+		if clientVersion == "" {
+			t.forwarder.Forward(
+				w, r,
+				forwarder.WithSelectJSONRequestMutation(session.DecryptRequest, inputEncryptSelector, t.log),
+				forwarder.WithSelectJSONResponseMutation(session.EncryptResponse, outputEncryptSelector),
+				forwarder.NoHeaderMutation,
+			)
+		} else {
+			t.forwarder.Forward(
+				w, r,
+				forwarder.WithFullJSONRequestMutation(session.DecryptRequest, inputSkipSelector, t.log),
+				forwarder.WithFullJSONResponseMutation(session.EncryptResponse, outputSkipSelector),
+				forwarder.NoHeaderMutation,
+			)
+		}
 	}
 }
 
