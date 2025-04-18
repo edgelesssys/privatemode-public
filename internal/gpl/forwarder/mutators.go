@@ -49,29 +49,30 @@ func WithFullJSONRequestMutation(mutate MutationFunc, skipFields FieldSelector, 
 	return withRequestMutation(mutate, skipFields, mutateAllJSONFields, log)
 }
 
+const (
+	eventStreamSuffix    = "\n\n"
+	eventStreamSeparator = ": "
+)
+
 // WithSelectJSONResponseMutation returns a [ResponseMutator] which mutates the data read from the given [io.Reader].
 func WithSelectJSONResponseMutation(mutate MutationFunc, fields FieldSelector) ResponseMutator {
-	return func(reader io.Reader) io.Reader {
-		return &mutatingReader{
-			scanner:       bufio.NewScanner(reader),
-			mutate:        mutate,
-			jsonParseFunc: mutateSelectJSONFields,
-			fields:        fields,
-			leftover:      nil,
-		}
+	return &mutatingReader{
+		scanner:       nil,
+		mutate:        mutate,
+		jsonParseFunc: mutateSelectJSONFields,
+		fields:        fields,
+		leftover:      nil,
 	}
 }
 
 // WithFullJSONResponseMutation returns a [ResponseMutator] which mutates the data read from the given [io.Reader].
 func WithFullJSONResponseMutation(mutate MutationFunc, skipFields FieldSelector) ResponseMutator {
-	return func(reader io.Reader) io.Reader {
-		return &mutatingReader{
-			scanner:       bufio.NewScanner(reader),
-			mutate:        mutate,
-			jsonParseFunc: mutateAllJSONFields,
-			fields:        skipFields,
-			leftover:      nil,
-		}
+	return &mutatingReader{
+		scanner:       nil,
+		mutate:        mutate,
+		jsonParseFunc: mutateAllJSONFields,
+		fields:        skipFields,
+		leftover:      nil,
 	}
 }
 
@@ -115,6 +116,17 @@ type mutatingReader struct {
 	jsonParseFunc func(data []byte, mutate MutationFunc, fields FieldSelector) ([]byte, error)
 }
 
+// Reader returns a mutating [io.Reader].
+func (r *mutatingReader) Reader(reader io.Reader) io.Reader {
+	r.scanner = bufio.NewScanner(reader)
+	return r
+}
+
+// Mutate performs mutation on the given data.
+func (r *mutatingReader) Mutate(body []byte) ([]byte, error) {
+	return r.jsonParseFunc(body, r.mutate, r.fields)
+}
+
 // Read reads from the underlying reader, performs mutation on the data chunks, and returns the mutated data.
 func (r *mutatingReader) Read(b []byte) (int, error) {
 	// The data read from the underlying reader and/or the final mutated data may be larger than the given buffer
@@ -144,13 +156,30 @@ func (r *mutatingReader) Read(b []byte) (int, error) {
 		return 0, nil
 	}
 
+	// Remove the event stream prefix, since it breaks JSON parsing
+	bufCpy := make([]byte, len(buf))
+	copy(bufCpy, buf)
+	before, after, found := bytes.Cut(bufCpy, []byte(eventStreamSeparator))
+	var toMutate, prefix []byte
+	if found {
+		// Copy the values over to avoid working on the original buffer
+		// since [bytes.Cut] returns slices of the original buffer
+		toMutate = make([]byte, len(after))
+		copy(toMutate, after)
+		prefix = append(before, []byte(eventStreamSeparator)...)
+	} else {
+		toMutate = make([]byte, len(before))
+		copy(toMutate, before)
+	}
+
 	// Mutate the data chunk
-	mutated, err := r.jsonParseFunc(buf, r.mutate, r.fields)
+	mutated, err := r.jsonParseFunc(toMutate, r.mutate, r.fields)
 	if err != nil {
 		return 0, err
 	}
 
-	mutated = append(mutated, []byte("\n\n")...) // append newlines which were removed by the scanner
+	// Add back event stream prefix and append newlines which were removed by the scanner
+	mutated = append(prefix, append(mutated, []byte(eventStreamSuffix)...)...)
 
 	// Copy the mutated data to the given buffer
 	// If the buffer is too small, store the remaining data for the next call to Read

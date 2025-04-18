@@ -15,7 +15,9 @@ let
     src = lib.continuumRepoRootSrc [
       "go.mod"
       "go.sum"
-      "privatemode-proxy"
+      "privatemode-proxy/cmd"
+      "privatemode-proxy/internal"
+      "privatemode-proxy/main.go"
       "internal/gpl"
     ];
 

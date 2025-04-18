@@ -5,10 +5,8 @@
 package stub
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -105,7 +103,12 @@ func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.Resp
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		if _, err := io.Copy(w, responseMutator(bytes.NewReader(responseJSON))); err != nil {
+		response, err := responseMutator.Mutate(responseJSON)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if _, err := w.Write(response); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

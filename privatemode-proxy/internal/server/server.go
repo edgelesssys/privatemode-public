@@ -120,7 +120,7 @@ func (s *Server) noEncryptionHandler(w http.ResponseWriter, r *http.Request) {
 	s.forwarder.Forward(
 		w, r,
 		forwarder.NoRequestMutation,
-		forwarder.NoResponseMutation,
+		forwarder.NoResponseMutation{},
 		allowWails,
 	)
 }

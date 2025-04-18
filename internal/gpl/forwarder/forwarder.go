@@ -31,9 +31,6 @@ const (
 // ProtocolScheme is the protocol scheme used for the forwarding.
 type ProtocolScheme string
 
-// NoResponseMutation skips any mutation of the given [io.ReadCloser].
-func NoResponseMutation(rc io.Reader) io.Reader { return rc }
-
 // NoRequestMutation skips any mutation on the [*http.Request].
 func NoRequestMutation(*http.Request) error { return nil }
 
@@ -41,7 +38,10 @@ func NoRequestMutation(*http.Request) error { return nil }
 func NoHeaderMutation(http.Header, http.Header) error { return nil }
 
 // ResponseMutator performs mutations on the given [io.Reader].
-type ResponseMutator func(reader io.Reader) io.Reader
+type ResponseMutator interface {
+	Reader(reader io.Reader) io.Reader
+	Mutate(body []byte) ([]byte, error)
+}
 
 // RequestMutator mutates an [*http.Request].
 type RequestMutator func(request *http.Request) error
@@ -50,6 +50,15 @@ type RequestMutator func(request *http.Request) error
 // response is the header object of the response. Writes should usually go here.
 // request is the header object of the request.
 type HeaderMutator func(response http.Header, request http.Header) error
+
+// NoResponseMutation skips any mutation of the given [io.ReadCloser].
+type NoResponseMutation struct{}
+
+// Reader returns the given [io.Reader] without any mutation.
+func (NoResponseMutation) Reader(rc io.Reader) io.Reader { return rc }
+
+// Mutate returns the given byte slice without any mutation.
+func (NoResponseMutation) Mutate(body []byte) ([]byte, error) { return body, nil }
 
 // Forwarder implements a simple http proxy to forward http requests over a unix socket.
 type Forwarder struct {
@@ -143,17 +152,40 @@ func (f *Forwarder) Forward(
 
 	w.WriteHeader(resp.StatusCode)
 
-	responseReader := responseMutator(resp.Body)
-
-	// Write response to client using a small buffer to ensure smooth streaming.
-	if _, err := io.CopyBuffer(w, responseReader, make([]byte, copyBufferSize)); err != nil {
-		if errors.Is(err, context.Canceled) {
-			f.log.Warn("Connection closed by client before forwarding finished", "error", err)
-		} else {
-			f.log.Error("Failed creating new body for forwarded message", "error", err)
+	if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
+		// Write response to client using a small buffer to ensure smooth streaming.
+		if _, err := io.CopyBuffer(w, responseMutator.Reader(resp.Body), make([]byte, copyBufferSize)); err != nil {
+			if errors.Is(err, context.Canceled) {
+				f.log.Warn("Connection closed by client before forwarding finished", "error", err)
+			} else {
+				f.log.Error("Failed creating new body for forwarded message", "error", err)
+			}
+			return
 		}
-		return
+	} else {
+		// Read the entire response body, mutate it and write it to the client.
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			f.log.Error("Failed reading response body", "error", err)
+			HTTPError(w, req, http.StatusInternalServerError, "reading response body: %s", err)
+			return
+		}
+		responseBody, err := responseMutator.Mutate(body)
+		if err != nil {
+			f.log.Error("Failed mutating response body", "error", err)
+			HTTPError(w, req, http.StatusInternalServerError, "mutating response body: %s", err)
+			return
+		}
+		if _, err := w.Write(responseBody); err != nil {
+			if errors.Is(err, context.Canceled) {
+				f.log.Warn("Connection closed by client before forwarding finished", "error", err)
+			} else {
+				f.log.Error("Failed creating new body for forwarded message", "error", err)
+			}
+			return
+		}
 	}
+
 	f.log.Info("Forwarding finished successfully")
 }
 

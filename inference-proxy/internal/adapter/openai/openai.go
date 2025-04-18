@@ -122,7 +122,7 @@ func (t *Adapter) ServeMux() *http.ServeMux {
 
 // forwardRequest forwards a request without mutation.
 func (t *Adapter) forwardRequest(w http.ResponseWriter, r *http.Request) {
-	t.forwarder.Forward(w, r, forwarder.NoRequestMutation, forwarder.NoResponseMutation, forwarder.NoHeaderMutation)
+	t.forwarder.Forward(w, r, forwarder.NoRequestMutation, forwarder.NoResponseMutation{}, forwarder.NoHeaderMutation)
 }
 
 // unsupportedEndpoint returns 501 Not Implemented.

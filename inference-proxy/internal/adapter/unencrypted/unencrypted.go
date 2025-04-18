@@ -38,5 +38,5 @@ func (t *Adapter) ServeMux() *http.ServeMux {
 }
 
 func (t *Adapter) forwardRequest(w http.ResponseWriter, r *http.Request) {
-	t.forwarder.Forward(w, r, forwarder.NoRequestMutation, forwarder.NoResponseMutation, forwarder.NoHeaderMutation)
+	t.forwarder.Forward(w, r, forwarder.NoRequestMutation, forwarder.NoResponseMutation{}, forwarder.NoHeaderMutation)
 }

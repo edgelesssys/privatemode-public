@@ -274,7 +274,7 @@ func TestNewlinePreservationForStreamEventData(t *testing.T) {
 		}.mutate,
 		FieldSelector{{"field1"}},
 	)
-	sut := responseMutator(readCloser)
+	sut := responseMutator.Reader(readCloser)
 
 	res := &bytes.Buffer{}
 	_, err := io.Copy(res, sut)
@@ -353,9 +353,8 @@ func TestWithSelectResponseMutation(t *testing.T) {
 			assert := assert.New(t)
 
 			mutator := WithSelectJSONResponseMutation(tc.mutator.mutate, tc.fields)
-			response := io.NopCloser(bytes.NewBufferString(tc.responseBody))
 
-			body, err := io.ReadAll(mutator(response))
+			body, err := mutator.Mutate([]byte(tc.responseBody))
 			if tc.wantErr {
 				assert.Error(err)
 				return
@@ -400,7 +399,7 @@ func TestWithSelectResponseMutation(t *testing.T) {
 			}()
 
 			response := &bytes.Buffer{}
-			_, err := io.Copy(response, mutator(reader))
+			_, err := io.Copy(response, mutator.Reader(reader))
 			assert.NoError(err)
 			responseParts := strings.Split(strings.TrimRight(response.String(), "\n"), "\n\n") // trim the last newline, so that we don't get an empty final part
 			assert.Len(responseParts, messageParts)
