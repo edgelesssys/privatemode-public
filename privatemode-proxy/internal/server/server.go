@@ -74,9 +74,6 @@ func (s *Server) GetHandler() http.Handler {
 	mux.HandleFunc("/", s.encryptionHandler)
 	mux.HandleFunc("/v1/chat/completions", s.chatCompletionsHandler)
 	mux.HandleFunc("/v1/models", s.noEncryptionHandler)
-
-	// unstructured currently not encrypted
-	mux.HandleFunc("/unstructured/", s.noEncryptionHandler)
 	return mux
 }
 
@@ -108,7 +105,8 @@ func (s *Server) encryptionHandler(w http.ResponseWriter, r *http.Request) {
 
 	s.forwarder.Forward(
 		w, r,
-		forwarder.WithFullJSONRequestMutation(rc.Encrypt, nil, s.log),
+		forwarder.WithFullRequestMutation(rc.Encrypt, s.log),
+		// currently only json response mutation is supported
 		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, nil),
 		allowWails,
 	)

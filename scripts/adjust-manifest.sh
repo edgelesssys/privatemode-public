@@ -25,8 +25,9 @@ yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")
 # The secret-service acts as our etcd root user, therefore requires root as the certs CN.
 yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) |= ["root"] + .' "$manifest"
 
-# Workloads act as etcd clients, therefore require the name of a registered etcd user as the certs CN.
+# Workloads and Unstructured API act as etcd clients, therefore require the name of a registered etcd user as the certs CN.
 yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("workload-")).SANs) |= ["continuum-etcd-client"] + .' "$manifest"
+yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("unstructured")).SANs) |= ["continuum-etcd-client"] + .' "$manifest"
 
 # remove workload owner key because we don't use the functionality and it makes the trust story clearer
 yq eval -i 'del(.WorkloadOwnerKeyDigests)' "$manifest"

@@ -89,3 +89,32 @@ func TestForwardNonStreaming(t *testing.T) {
 	expectedResponse := `{"field": "plainText"}`
 	assert.Equal(expectedResponse, resp.Body.String())
 }
+
+func TestForwardHeaderCopying(t *testing.T) {
+	failingMutator := &stubMutator{
+		mutateErr: assert.AnError,
+	}
+	responseMutator := WithFullJSONResponseMutation(failingMutator.mutate, nil)
+
+	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"field": "AB"}`))
+	}))
+	defer stubServer.Close()
+
+	forwarder := New("tcp", stubServer.Listener.Addr().String(), slog.Default())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	resp := httptest.NewRecorder()
+
+	forwarder.Forward(
+		resp,
+		req,
+		NoRequestMutation,
+		responseMutator,
+		NoHeaderMutation,
+	)
+
+	assert := assert.New(t)
+	assert.Equal(http.StatusInternalServerError, resp.Code)
+}

@@ -150,9 +150,11 @@ func (f *Forwarder) Forward(
 		}
 	}
 
-	w.WriteHeader(resp.StatusCode)
-
 	if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
+		// Copy headers before streaming the body, as this calls WriteHeader(200) otherwise.
+		// No further calls to WriteHeader, e.g. through [HTTPError], may be made after this.
+		w.WriteHeader(resp.StatusCode)
+
 		// Write response to client using a small buffer to ensure smooth streaming.
 		if _, err := io.CopyBuffer(w, responseMutator.Reader(resp.Body), make([]byte, copyBufferSize)); err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -176,6 +178,10 @@ func (f *Forwarder) Forward(
 			HTTPError(w, req, http.StatusInternalServerError, "mutating response body: %s", err)
 			return
 		}
+
+		// Copy headers before writing the body, as this implicitly calls WriteHeader(200) otherwise.
+		// No further calls to WriteHeader, e.g. through [HTTPError], may be made after this.
+		w.WriteHeader(resp.StatusCode)
 		if _, err := w.Write(responseBody); err != nil {
 			if errors.Is(err, context.Canceled) {
 				f.log.Warn("Connection closed by client before forwarding finished", "error", err)

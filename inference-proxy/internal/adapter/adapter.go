@@ -10,6 +10,7 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/openai"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/triton"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/unencrypted"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/unstructured"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
 )
@@ -21,12 +22,14 @@ const (
 	InferenceAPIOpenAI = "openai"
 	// InferenceAPIUnencrypted is a meta-adapter used for testing without encryption.
 	InferenceAPIUnencrypted = "unencrypted"
+	// InferenceAPIUnstructured is an adapter for the Unstructured API.
+	InferenceAPIUnstructured = "unstructured"
 )
 
 // IsSupportedInferenceAPI returns whether the given API type is supported by the Continuum.
 func IsSupportedInferenceAPI(apiType string) bool {
 	switch strings.ToLower(apiType) {
-	case InferenceAPITriton, InferenceAPIOpenAI:
+	case InferenceAPITriton, InferenceAPIOpenAI, InferenceAPIUnstructured:
 		return true
 	case InferenceAPIUnencrypted:
 		// Special case we always support for testing
@@ -43,6 +46,8 @@ func New(apiType string, cipher *cipher.Cipher, forwarder mutatingForwarder, log
 		return triton.New(cipher, forwarder, log)
 	case InferenceAPIOpenAI:
 		return openai.New(cipher, forwarder, log)
+	case InferenceAPIUnstructured:
+		return unstructured.New(cipher, forwarder, log)
 	case InferenceAPIUnencrypted:
 		return unencrypted.New(forwarder, log)
 	default:

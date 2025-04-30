@@ -115,7 +115,9 @@ func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.Resp
 	}
 }
 
-func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator) {
+// GetEncryptionFunctions returns the encryption and decryption functions for the given secrets.
+// It uses the first secret found in the map for both encryption and decryption.
+func GetEncryptionFunctions(secrets map[string][]byte) (encryptFunc forwarder.MutationFunc, decryptFunc forwarder.MutationFunc) {
 	encSeqNumber, decSeqNumber := uint32(0), uint32(0)
 	var id string
 	var nonce []byte
@@ -144,7 +146,6 @@ func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (request
 		decSeqNumber++
 		return plainText, nil
 	}
-	requestMutator = forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainRequestFields, log)
 
 	encrypt := func(plainText string) (string, error) {
 		cipherText, err := crypto.EncryptMessage(plainText, secret, id, nonce, encSeqNumber)
@@ -154,9 +155,15 @@ func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (request
 		encSeqNumber++
 		return cipherText, nil
 	}
-	responseMutator = forwarder.WithFullJSONResponseMutation(encrypt, openai.PlainResponseFields)
 
-	return requestMutator, responseMutator
+	return encrypt, decrypt
+}
+
+func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator) {
+	encrypt, decrypt := GetEncryptionFunctions(secrets)
+
+	return forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainRequestFields, log),
+		forwarder.WithFullJSONResponseMutation(encrypt, openai.PlainResponseFields)
 }
 
 func openAIModelsHandler() func(w http.ResponseWriter, r *http.Request) {

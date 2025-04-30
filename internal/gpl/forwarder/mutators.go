@@ -41,12 +41,37 @@ type MutationFunc func(request string) (mutatedRequest string, err error)
 
 // WithSelectJSONRequestMutation returns a [RequestMutator] which mutates the request.
 func WithSelectJSONRequestMutation(mutate MutationFunc, fields FieldSelector, log *slog.Logger) RequestMutator {
-	return withRequestMutation(mutate, fields, mutateSelectJSONFields, log)
+	return withJSONRequestMutation(mutate, fields, mutateSelectJSONFields, log)
+}
+
+// WithFullRequestMutation returns a [RequestMutator] which performs mutation on the entire request body,
+// regardless of content type. It uses the provided MutationFunc to mutate the raw request body.
+func WithFullRequestMutation(mutate MutationFunc, log *slog.Logger) RequestMutator {
+	return func(r *http.Request) error {
+		log.Info("Mutating full request body")
+
+		bodyBytes, err := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		if err != nil {
+			return fmt.Errorf("reading request body: %w", err)
+		}
+
+		mutatedStr, err := mutate(string(bodyBytes))
+		if err != nil {
+			return fmt.Errorf("mutating request: %w", err)
+		}
+
+		mutatedBytes := []byte(mutatedStr)
+		r.ContentLength = int64(len(mutatedBytes))
+		r.Body = io.NopCloser(bytes.NewBuffer(mutatedBytes))
+
+		return nil
+	}
 }
 
 // WithFullJSONRequestMutation returns a [RequestMutator] which mutates the request.
 func WithFullJSONRequestMutation(mutate MutationFunc, skipFields FieldSelector, log *slog.Logger) RequestMutator {
-	return withRequestMutation(mutate, skipFields, mutateAllJSONFields, log)
+	return withJSONRequestMutation(mutate, skipFields, mutateAllJSONFields, log)
 }
 
 const (
@@ -76,7 +101,7 @@ func WithFullJSONResponseMutation(mutate MutationFunc, skipFields FieldSelector)
 	}
 }
 
-func withRequestMutation(
+func withJSONRequestMutation(
 	mutate MutationFunc, fields FieldSelector,
 	mutateFunc func([]byte, MutationFunc, FieldSelector) ([]byte, error),
 	log *slog.Logger,

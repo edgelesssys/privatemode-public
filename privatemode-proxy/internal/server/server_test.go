@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -227,6 +229,107 @@ func TestTools(t *testing.T) {
 	}
 }
 
+func TestUnstructuredEncrypted(t *testing.T) {
+	secret := secretmanager.Secret{
+		ID:   "456",
+		Data: bytes.Repeat([]byte{0x24}, 32),
+	}
+
+	formDataHandler := func(r *http.Request) (map[string]string, error) {
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			return nil, fmt.Errorf("parse form: %w", err)
+		}
+
+		fieldVal := r.FormValue("testField")
+
+		file, _, err := r.FormFile("testContent")
+		if err != nil {
+			return nil, fmt.Errorf("reading file: %w", err)
+		}
+		defer file.Close()
+
+		content, err := io.ReadAll(file)
+		if err != nil {
+			return nil, fmt.Errorf("reading file content: %w", err)
+		}
+
+		return map[string]string{
+			"testField":   fieldVal,
+			"testContent": string(content),
+		}, nil
+	}
+
+	jsonHandler := func(r *http.Request) (map[string]string, error) {
+		var body struct {
+			TestField   string `json:"testField"`
+			TestContent string `json:"testContent"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			return nil, fmt.Errorf("decode json: %w", err)
+		}
+		return map[string]string{
+			"testField":   body.TestField,
+			"testContent": body.TestContent,
+		}, nil
+	}
+
+	testCases := map[string]struct {
+		buildBody func(t *testing.T) (*bytes.Buffer, string)
+		handler   func(r *http.Request) (map[string]string, error)
+	}{
+		"MultipartForm": {
+			buildBody: func(t *testing.T) (*bytes.Buffer, string) {
+				var buf bytes.Buffer
+				writer := multipart.NewWriter(&buf)
+				require.NoError(t, writer.WriteField("testField", "test field"))
+				part, err := writer.CreateFormFile("testContent", "test.txt")
+				require.NoError(t, err)
+				_, err = part.Write([]byte("some content"))
+				require.NoError(t, err)
+				require.NoError(t, writer.Close())
+				return &buf, writer.FormDataContentType()
+			},
+			handler: formDataHandler,
+		},
+		"JSON": {
+			buildBody: func(t *testing.T) (*bytes.Buffer, string) {
+				payload := map[string]string{
+					"testField":   "test field",
+					"testContent": "some content",
+				}
+				var buf bytes.Buffer
+				require.NoError(t, json.NewEncoder(&buf).Encode(payload))
+				return &buf, "application/json"
+			},
+			handler: jsonHandler,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			stub := fullEncryptionStubServer(secret, tc.handler)
+			t.Cleanup(func() { stub.Close() })
+
+			sut := newTestServer(nil, secret, stub.Listener.Addr().String())
+
+			body, contentType := tc.buildBody(t)
+
+			req := httptest.NewRequest(http.MethodPost, "/echo", body)
+			req.Header.Set("Content-Type", contentType)
+
+			resp := httptest.NewRecorder()
+			sut.GetHandler().ServeHTTP(resp, req)
+			require.Equal(t, http.StatusOK, resp.Code)
+
+			var jsonResp map[string]string
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&jsonResp))
+
+			assert.Equal(t, "test field", jsonResp["testField"])
+			assert.Equal(t, "some content", jsonResp["testContent"])
+		})
+	}
+}
+
 // newTestServer returns a stub server for testing.
 func newTestServer(apiKey *string, secret secretmanager.Secret, openAIServerAddr string) *Server {
 	return &Server{
@@ -235,6 +338,41 @@ func newTestServer(apiKey *string, secret secretmanager.Secret, openAIServerAddr
 		forwarder: forwarder.New("tcp", openAIServerAddr, slog.Default()),
 		log:       slog.Default(),
 	}
+}
+
+func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.Request) (map[string]string, error)) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		encrypt, decrypt := stub.GetEncryptionFunctions(secret.Map())
+		log := slog.Default()
+
+		// Use JSON request mutation if the request is a JSON request
+		requestMutator := forwarder.WithFullRequestMutation(decrypt, log)
+		responseMutator := forwarder.WithFullJSONResponseMutation(encrypt, nil)
+
+		if err := requestMutator(r); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		data, err := handler(r)
+		if err != nil {
+			log.Error("handler error", "error", err)
+			http.Error(w, fmt.Sprintf("handler error: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		responseJSON, err := json.Marshal(data)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := io.Copy(w, responseMutator.Reader(bytes.NewReader(responseJSON))); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}))
 }
 
 func prepareRequest(ctx context.Context, require *require.Assertions, prompt *string, tools []any) *http.Request {
@@ -259,6 +397,8 @@ func prepareRequest(ctx context.Context, require *require.Assertions, prompt *st
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payloadBytes))
 	require.NoError(err)
+
+	req.Header.Set("Content-Type", "application/json")
 	return req
 }
 

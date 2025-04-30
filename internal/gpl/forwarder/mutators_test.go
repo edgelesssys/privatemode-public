@@ -5,6 +5,7 @@ package forwarder
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -81,6 +82,74 @@ func TestWithSelectJSONRequestMutation(t *testing.T) {
 			request := &http.Request{
 				Body: io.NopCloser(bytes.NewBufferString(tc.requestBody)),
 			}
+
+			err := mutate(request)
+			if tc.wantErr {
+				assert.Error(err)
+				return
+			}
+
+			assert.NoError(err)
+			body, err := io.ReadAll(request.Body)
+			assert.NoError(err)
+			assert.Equal(tc.expectedResponse, string(body))
+		})
+	}
+}
+
+func TestWithFullRequestMutation(t *testing.T) {
+	testCases := map[string]struct {
+		mutator          stubMutator
+		requestBody      string
+		expectedResponse string
+		contentType      string
+		wantErr          bool
+	}{
+		"plain text mutation": {
+			mutator: stubMutator{
+				mutateResponse: "mutated text",
+			},
+			requestBody:      "original text",
+			expectedResponse: "mutated text",
+			contentType:      "text/plain",
+		},
+		"JSON body mutation": {
+			mutator: stubMutator{
+				mutateResponse: `mutated`,
+			},
+			requestBody:      `{"field": "original"}`,
+			expectedResponse: `mutated`,
+			contentType:      "application/json",
+		},
+		"empty body": {
+			mutator: stubMutator{
+				mutateResponse: "",
+			},
+			requestBody:      "",
+			expectedResponse: "",
+			contentType:      "text/plain",
+		},
+		"mutation error": {
+			mutator: stubMutator{
+				mutateErr: errors.New("mutation failed"),
+			},
+			requestBody: "some data",
+			wantErr:     true,
+			contentType: "text/plain",
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+
+			mutate := WithFullRequestMutation(tc.mutator.mutate, slog.Default())
+
+			request := &http.Request{
+				Header: make(http.Header),
+				Body:   io.NopCloser(bytes.NewBufferString(tc.requestBody)),
+			}
+			request.Header.Set("Content-Type", tc.contentType)
 
 			err := mutate(request)
 			if tc.wantErr {
