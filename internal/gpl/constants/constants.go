@@ -17,6 +17,11 @@ func Version() string { return version }
 const (
 	// ServedModel is the deployed model for the SaaS.
 	ServedModel = "ibnzterrell/Meta-Llama-3.3-70B-Instruct-AWQ-INT4"
+	// WorkloadTaskGenerate is the vLLM task for text generation.
+	WorkloadTaskGenerate = "generate"
+	// WorkloadTaskEmbed is the vLLM task for creating embeddings.
+	WorkloadTaskEmbed = "embed"
+
 	// CacheDirEnv is the environment variable that specifies the cache directory of Continuum.
 	// If unset, [os.UserCacheDir()] is used.
 	// This defaults to $XDG_CACHE_HOME/continuum or $HOME/.cache/continuum on Unix systems, and $HOME/Library/Caches/continuum on Darwin.

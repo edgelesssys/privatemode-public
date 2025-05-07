@@ -69,11 +69,13 @@ func (s *Server) Serve(ctx context.Context, lis net.Listener, tlsConfig *tls.Con
 // GetHandler returns an HTTP handler that routes requests to the appropriate handler.
 func (s *Server) GetHandler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc(openai.ChatCompletionsEndpoint, s.chatCompletionsHandler)
+	mux.HandleFunc("/unstructured/", s.unstructuredHandler)
+	mux.HandleFunc(openai.ModelsEndpoint, s.noEncryptionHandler)
+	mux.HandleFunc(openai.EmbeddingsEndpoint, s.embeddingsHandler)
 
-	// by default encrypt
-	mux.HandleFunc("/", s.encryptionHandler)
-	mux.HandleFunc("/v1/chat/completions", s.chatCompletionsHandler)
-	mux.HandleFunc("/v1/models", s.noEncryptionHandler)
+	mux.HandleFunc("/", http.NotFound) // Reject requests to unknown endpoints
+
 	return mux
 }
 
@@ -88,13 +90,30 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 
 	s.forwarder.Forward(
 		w, r,
-		forwarder.WithFullJSONRequestMutation(rc.Encrypt, openai.PlainRequestFields, s.log),
-		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, openai.PlainResponseFields),
+		forwarder.WithFullJSONRequestMutation(rc.Encrypt, openai.PlainCompletionsRequestFields, s.log),
+		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, openai.PlainCompletionsResponseFields, false),
 		allowWails,
 	)
 }
 
-func (s *Server) encryptionHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) embeddingsHandler(w http.ResponseWriter, r *http.Request) {
+	s.setRequestHeaders(r)
+
+	rc, err := s.getRequestCipher(r)
+	if err != nil {
+		forwarder.HTTPError(w, r, http.StatusInternalServerError, "creating request cipher: %s", err)
+		return
+	}
+
+	s.forwarder.Forward(
+		w, r,
+		forwarder.WithFullJSONRequestMutation(rc.Encrypt, openai.PlainEmbeddingsRequestFields, s.log),
+		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, openai.PlainEmbeddingsResponseFields, false),
+		allowWails,
+	)
+}
+
+func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
 	s.setRequestHeaders(r)
 
 	rc, err := s.getRequestCipher(r)
@@ -107,7 +126,7 @@ func (s *Server) encryptionHandler(w http.ResponseWriter, r *http.Request) {
 		w, r,
 		forwarder.WithFullRequestMutation(rc.Encrypt, s.log),
 		// currently only json response mutation is supported
-		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, nil),
+		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, nil, false),
 		allowWails,
 	)
 }

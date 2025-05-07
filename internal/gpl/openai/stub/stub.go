@@ -162,8 +162,8 @@ func GetEncryptionFunctions(secrets map[string][]byte) (encryptFunc forwarder.Mu
 func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator) {
 	encrypt, decrypt := GetEncryptionFunctions(secrets)
 
-	return forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainRequestFields, log),
-		forwarder.WithFullJSONResponseMutation(encrypt, openai.PlainResponseFields)
+	return forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainCompletionsRequestFields, log),
+		forwarder.WithFullJSONResponseMutation(encrypt, openai.PlainCompletionsResponseFields, false)
 }
 
 func openAIModelsHandler() func(w http.ResponseWriter, r *http.Request) {
@@ -176,6 +176,7 @@ func openAIModelsHandler() func(w http.ResponseWriter, r *http.Request) {
 					Object:  "model",
 					Created: int(time.Time{}.Unix()),
 					OwnedBy: "stub",
+					Tasks:   nil,
 				},
 			},
 		}

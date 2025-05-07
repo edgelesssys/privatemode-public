@@ -6,6 +6,7 @@ package forwarder
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,8 @@ const (
 	// to ensure streaming responses are comparatively smooth to directly interacting with the server.
 	// Size was chosen through experimentation with vllm benchmarks.
 	copyBufferSize = 1024 * 8
+	// privateModeEncryptedHeader is the header used to indicate that the response is not encrypted.
+	privateModeEncryptedHeader = "Privatemode-Encrypted"
 )
 
 // ProtocolScheme is the protocol scheme used for the forwarding.
@@ -59,6 +62,19 @@ func (NoResponseMutation) Reader(rc io.Reader) io.Reader { return rc }
 
 // Mutate returns the given byte slice without any mutation.
 func (NoResponseMutation) Mutate(body []byte) ([]byte, error) { return body, nil }
+
+// ErrorMessage represents an error response in the OpenAI API format for v1/chat/completions.
+type ErrorMessage struct {
+	Error APIError `json:"error"`
+}
+
+// APIError is the error for the OpenAI error format.
+type APIError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+	Param   string `json:"param"`
+	Code    string `json:"code"`
+}
 
 // Forwarder implements a simple http proxy to forward http requests over a unix socket.
 type Forwarder struct {
@@ -150,6 +166,10 @@ func (f *Forwarder) Forward(
 		}
 	}
 
+	if resp.Header.Get(privateModeEncryptedHeader) == "false" {
+		responseMutator = NoResponseMutation{}
+	}
+
 	if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
 		// Copy headers before streaming the body, as this calls WriteHeader(200) otherwise.
 		// No further calls to WriteHeader, e.g. through [HTTPError], may be made after this.
@@ -226,15 +246,27 @@ func updateForwardedHeader(header http.Header, remoteAddr string) {
 // HTTPError writes an error response to the client.
 // Functions similarly to [http.Error], but also handles error reporting for SSE requests.
 func HTTPError(w http.ResponseWriter, r *http.Request, code int, msg string, args ...any) {
-	msg = fmt.Sprintf(msg, args...)
+	errObj := APIError{
+		Message: fmt.Sprintf(msg, args...),
+		Type:    "",
+		Param:   "",
+		Code:    "",
+	}
+	formattedMsgBytes, err := json.Marshal(ErrorMessage{Error: errObj})
+	formattedMsg := string(formattedMsgBytes)
+	if err != nil {
+		// Only fall back to non-JSON error when we cannot even marshal the error (which is pretty bad)
+		formattedMsg = fmt.Sprintf(msg, args...)
+	}
 	if expectedContentType := r.Header.Get("accept"); expectedContentType == "text/event-stream" {
 		// If the client requested streaming we need to return the error correctly encoded.
 		w.Header().Set("Content-Type", "text/event-stream")
-		msg = fmt.Sprintf("event: error\n\ndata: %s\n\n", msg)
+		formattedMsg = fmt.Sprintf("event: error\n\ndata: %s\n\n", formattedMsg)
 	} else {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Type", "application/json")
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set(privateModeEncryptedHeader, "false")
 	w.WriteHeader(code)
-	fmt.Fprintln(w, msg)
+	fmt.Fprint(w, formattedMsg)
 }

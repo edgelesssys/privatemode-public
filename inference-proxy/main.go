@@ -29,6 +29,7 @@ var (
 	etcdMemberCert  = flag.String("etcd-member-cert", filepath.Join(constants.EtcdBasePath(), "etcd.crt"), "path to the etcd member certificate")
 	etcdMemberKey   = flag.String("etcd-member-key", filepath.Join(constants.EtcdBasePath(), "etcd.key"), "path to the etcd member key")
 	etcdCA          = flag.String("etcd-ca", filepath.Join(constants.EtcdBasePath(), "ca.crt"), "path to the etcd CA certificate")
+	workloadTask    = flag.String("workload-task", "", "task the workload is running")
 	logLevel        = flag.String(logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
 )
 
@@ -74,7 +75,7 @@ func main() {
 
 	forwarder := forwarder.New("tcp", net.JoinHostPort(*workloadAddress, *workloadPort), log)
 
-	adapter, err := adapter.New(*adapterType, cipher.New(secrets), forwarder, log)
+	adapter, err := adapter.New(*adapterType, *workloadTask, cipher.New(secrets), forwarder, log)
 	if err != nil {
 		log.Error("Failed to create adapter", "error", err)
 		os.Exit(1)

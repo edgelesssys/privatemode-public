@@ -96,7 +96,7 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 	require.NoError(err)
 	payload := fmt.Sprintf(`{"model": "model","messages": %s}`, m)
 
-	adapter, err := adapter.New(apiType, c, fw, log)
+	adapter, err := adapter.New(apiType, "generate", c, fw, log)
 	require.NoError(err)
 
 	server := New(adapter, log)

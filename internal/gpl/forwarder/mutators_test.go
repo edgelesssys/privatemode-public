@@ -416,6 +416,22 @@ func TestWithSelectResponseMutation(t *testing.T) {
 			fields:       FieldSelector{{"field1"}},
 			wantErr:      true,
 		},
+		"mutate array fields": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			responseBody:     `{"field1": [{"key": "plainText"}, {"key": "plainText"}]}`,
+			fields:           FieldSelector{{"field1", "#", "key"}},
+			expectedResponse: `{"field1": [{"key": "encryptedText"}, {"key": "encryptedText"}]}`,
+		},
+		"mutate deeply nested arrays": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			responseBody:     `{"field1": [{"nested": [{"skip": "plainText", "mutate": "plainText1"}]}, {"nested": [{"skip": "plainText", "mutate": "plainText2"}]}]}`,
+			fields:           FieldSelector{{"field1", "#", "nested", "#", "mutate"}},
+			expectedResponse: `{"field1": [{"nested": [{"skip": "plainText", "mutate": "encryptedText"}]}, {"nested": [{"skip": "plainText", "mutate": "encryptedText"}]}]}`,
+		},
 	}
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
@@ -475,6 +491,154 @@ func TestWithSelectResponseMutation(t *testing.T) {
 			for i, part := range responseParts {
 				assert.Equal(fmt.Sprintf(`%d: {"field1": %s}`, i, tc.mutator.mutateResponse), part)
 			}
+		})
+	}
+}
+
+func TestWithFullJSONResponseMutation(t *testing.T) {
+	testCases := map[string]struct {
+		mutator          stubMutator
+		responseBody     string
+		skipFields       FieldSelector
+		expectedResponse string
+		wantErr          bool
+	}{
+		"single field mutation": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			responseBody:     `{"field1": "plainText"}`,
+			expectedResponse: `{"field1": "encryptedText"}`,
+		},
+		"multiple fields": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			responseBody:     `{"field1": "plainText1", "field2": "plainText2"}`,
+			expectedResponse: `{"field1": "encryptedText", "field2": "encryptedText"}`,
+		},
+		"fields can be skipped": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			responseBody:     `{"field1": "plainText"}`,
+			skipFields:       FieldSelector{{"field1"}},
+			expectedResponse: `{"field1": "plainText"}`,
+		},
+		"missing fields can be skipped": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			responseBody:     `{"field1": "plainText"}`,
+			skipFields:       FieldSelector{{"field2"}},
+			expectedResponse: `{"field1": "encryptedText"}`,
+		},
+		"selected fields are skipped": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			responseBody:     `{"field1": "plainText", "field2": "plainText2"}`,
+			skipFields:       FieldSelector{{"field1"}},
+			expectedResponse: `{"field1": "plainText", "field2": "encryptedText"}`,
+		},
+		"mutate from nested JSON": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			responseBody:     `{"field1": {"nestedField": "plainText"}}`,
+			expectedResponse: `{"field1": "encryptedText"}`,
+		},
+		"mutate to nested JSON": {
+			mutator: stubMutator{
+				mutateResponse: `{"nestedField": "plainText"}`,
+			},
+			responseBody:     `{"field1": "encryptedText"}`,
+			expectedResponse: `{"field1": {"nestedField": "plainText"}}`,
+		},
+		"mutate error": {
+			mutator: stubMutator{
+				mutateErr: assert.AnError,
+			},
+			responseBody: `{"field1": "plainText"}`,
+			wantErr:      true,
+		},
+		"mutate array fields": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			responseBody:     `{"field1": [{"key": "plainText", "skip": "plainText"}, {"key": "plainText", "skip": "plainText"}]}`,
+			skipFields:       FieldSelector{{"field1", "#", "skip"}},
+			expectedResponse: `{"field1": [{"key": "encryptedText", "skip": "plainText"}, {"key": "encryptedText", "skip": "plainText"}]}`,
+		},
+		"skip deeply nested arrays": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+			responseBody:     `{"field1": [{"nested": [{"skip": "plainText", "mutate": "plainText1"}]}, {"nested": [{"skip": "plainText", "mutate": "plainText2"}]}]}`,
+			skipFields:       FieldSelector{{"field1", "#", "nested", "#", "skip"}},
+			expectedResponse: `{"field1": [{"nested": [{"skip": "plainText", "mutate": "encryptedText"}]}, {"nested": [{"skip": "plainText", "mutate": "encryptedText"}]}]}`,
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+
+			mutator := WithFullJSONResponseMutation(tc.mutator.mutate, tc.skipFields, false)
+
+			body, err := mutator.Mutate([]byte(tc.responseBody))
+			if tc.wantErr {
+				assert.Error(err)
+				return
+			}
+
+			assert.NoError(err)
+			assert.JSONEq(tc.expectedResponse, string(body))
+		})
+	}
+
+	streamingCases := map[string]struct {
+		mutator stubMutator
+	}{
+		"streaming mutation": {
+			mutator: stubMutator{
+				mutateResponse: `"encryptedText"`,
+			},
+		},
+		"streaming large field mutation": {
+			mutator: stubMutator{
+				mutateResponse: fmt.Sprintf("\"%s\"", bytes.Repeat([]byte("encryptedText"), 10000)),
+			},
+		},
+	}
+	for name, tc := range streamingCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+
+			mutator := WithFullJSONResponseMutation(tc.mutator.mutate, nil, false)
+
+			msgChan := make(chan string)
+			reader := &fakeReader{
+				msgChan: msgChan,
+			}
+
+			messageParts := 10
+			go func() {
+				for i := range messageParts {
+					msgChan <- fmt.Sprintf(`%d: {"field1": "plainText"}`, i) + "\n\n"
+				}
+				msgChan <- "data: [DONE]\n\n"
+				close(msgChan)
+			}()
+
+			response := &bytes.Buffer{}
+			_, err := io.Copy(response, mutator.Reader(reader))
+			assert.NoError(err)
+			responseParts := strings.Split(strings.TrimRight(response.String(), "\n"), "\n\n") // trim the last newline, so that we don't get an empty final part
+			assert.Len(responseParts, messageParts+1)
+			for i := range messageParts {
+				assert.Equal(fmt.Sprintf(`%d: {"field1": %s}`, i, tc.mutator.mutateResponse), responseParts[i])
+			}
+			assert.Equal("data: [DONE]", responseParts[messageParts]) // assert the event stream message is not mutated
 		})
 	}
 }

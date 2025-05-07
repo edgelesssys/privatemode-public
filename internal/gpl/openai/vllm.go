@@ -24,10 +24,12 @@ const (
 	ChatCompletionsEndpoint = "/v1/chat/completions"
 	// ModelsEndpoint is the endpoint to list the currently available models.
 	ModelsEndpoint = "/v1/models"
+	// EmbeddingsEndpoint is the endpoint for embeddings.
+	EmbeddingsEndpoint = "/v1/embeddings"
 )
 
-// PlainRequestFields is a field selector for all fields in an OpenAI chat completions request that are not encrypted.
-var PlainRequestFields = forwarder.FieldSelector{
+// PlainCompletionsRequestFields is a field selector for all fields in an OpenAI chat completions request that are not encrypted.
+var PlainCompletionsRequestFields = forwarder.FieldSelector{
 	{"model"},
 	{"stream_options"},
 	{"max_tokens"},
@@ -36,15 +38,26 @@ var PlainRequestFields = forwarder.FieldSelector{
 	{"stream"},
 }
 
-// PlainResponseFields is a field selector for all fields in an OpenAI chat completions response that are not encrypted.
-var PlainResponseFields = forwarder.FieldSelector{
+// PlainCompletionsResponseFields is a field selector for all fields in an OpenAI chat completions response that are not encrypted.
+var PlainCompletionsResponseFields = forwarder.FieldSelector{
+	{"id"},
+	{"usage"},
+}
+
+// PlainEmbeddingsRequestFields is a field selector for all fields in an OpenAI embeddings request that are not encrypted.
+var PlainEmbeddingsRequestFields = forwarder.FieldSelector{
+	{"model"},
+}
+
+// PlainEmbeddingsResponseFields is a field selector for all fields in an OpenAI embeddings response that are not encrypted.
+var PlainEmbeddingsResponseFields = forwarder.FieldSelector{
 	{"id"},
 	{"usage"},
 }
 
 // EncryptedChatRequest is the request structure for an OpenAI chat completion call,
 // with encrypted fields.
-// Fields that should not be encrypted need to be added to [PlainRequestFields].
+// Fields that should not be encrypted need to be added to [PlainCompletionsRequestFields].
 // See [ChatRequest] for the unencrypted request structure.
 //
 // Don't send the marshalled type to clients/servers. Read package docs for more info.
@@ -75,6 +88,38 @@ type ChatRequestPlainData struct {
 	StreamOptions       *StreamOptions `json:"stream_options,omitempty"`
 }
 
+// EncryptedEmbeddingsRequest is the request structure for an OpenAI embeddings call.
+// Fields we currently don't use are omitted.
+type EncryptedEmbeddingsRequest struct {
+	EmbeddingsRequestPlainData
+	Input          string `json:"input"`
+	Dimensions     string `json:"dimensions,omitzero"`
+	EncodingFormat string `json:"encoding_format,omitzero"`
+	User           string `json:"user,omitzero"`
+}
+
+// EmbeddingsRequest is the request structure for an OpenAI embeddings call.
+type EmbeddingsRequest struct {
+	EmbeddingsRequestPlainData
+	Input          []string `json:"input"`
+	Dimensions     int      `json:"dimensions,omitzero"`
+	EncodingFormat string   `json:"encoding_format,omitzero"`
+	User           string   `json:"user,omitzero"`
+}
+
+// EmbeddingsRequestPlainData contains fields that are not encrypted for [EncryptedEmbeddingsRequest].
+type EmbeddingsRequestPlainData struct {
+	Model string `json:"model"`
+}
+
+// EncryptedEmbeddingsResponse is the response structure for an OpenAI embeddings call.
+type EncryptedEmbeddingsResponse struct {
+	Data   string `json:"data,omitzero"`
+	Object string `json:"object,omitzero"`
+	Model  string `json:"model,omitzero"`
+	Usage  Usage  `json:"usage,omitzero"`
+}
+
 // StreamOptions contains options for streaming completions. It is an extended version of the OpenAI StreamOptions type.
 type StreamOptions struct {
 	IncludeUsage         bool `json:"include_usage"`
@@ -83,7 +128,7 @@ type StreamOptions struct {
 
 // EncryptedChatResponse is the response structure for an OpenAI chat completion call,
 // with an encrypted fields.
-// Fields that should not be encrypted need to be added to [PlainResponseFields].
+// Fields that should not be encrypted need to be added to [PlainCompletionsResponseFields].
 // See [ChatResponse] for the unencrypted response structure.
 //
 // Don't send the marshalled type to clients/servers. Read package docs for more info.
@@ -119,10 +164,11 @@ type ModelsResponse struct {
 // Model is the response structure for an OpenAI v1/models/{model} call.
 // It is also used by [ModelsResponse].
 type Model struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	Created int    `json:"created"`
-	OwnedBy string `json:"owned_by"`
+	ID      string   `json:"id,omitzero"`
+	Object  string   `json:"object,omitzero"`
+	Created int      `json:"created,omitzero"`
+	OwnedBy string   `json:"owned_by,omitzero"`
+	Tasks   []string `json:"tasks,omitzero"` // Custom parameter we add through the inference-proxy to differentiate workload capabilities
 }
 
 // Choice is a choice in an OpenAI chat completion call.

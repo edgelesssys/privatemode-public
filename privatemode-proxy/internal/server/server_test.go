@@ -28,17 +28,24 @@ const testAPIKey string = "testkey"
 func TestPromptEncryption(t *testing.T) {
 	apiKey := testAPIKey
 	testCases := map[string]struct {
-		apiKey           *string
+		proxyAPIKey      *string
 		expectStatusCode int
 		expectedHeaders  map[string]string
+		expectedBody     string
 		requestMutator   func(*http.Request)
 	}{
 		"with privatemode-proxy API key": {
-			apiKey:           &apiKey,
+			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
 		},
-		"without privatemode-proxy API key": {
+		"without any API key": {
 			expectStatusCode: http.StatusUnauthorized,
+			expectedBody:     makeErrorMsg("no auth found: expected Authorization header with 'Bearer <auth>'"),
+		},
+		"with wrong API key": {
+			expectStatusCode: http.StatusUnauthorized,
+			expectedBody:     makeErrorMsg("invalid API key: invalid API key"),
+			proxyAPIKey:      toPtr("wrongkey"),
 		},
 		"without privatemode-proxy API key but request contains Auth header": {
 			expectStatusCode: http.StatusOK,
@@ -47,7 +54,7 @@ func TestPromptEncryption(t *testing.T) {
 			},
 		},
 		"ACAO header is set for wails origin": {
-			apiKey:           &apiKey,
+			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
 			requestMutator: func(req *http.Request) {
 				req.Header.Set("Origin", "wails://wails.localhost")
@@ -57,7 +64,7 @@ func TestPromptEncryption(t *testing.T) {
 			},
 		},
 		"ACAO header is unset for unknown origin": {
-			apiKey:           &apiKey,
+			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
 			requestMutator: func(req *http.Request) {
 				req.Header.Set("Origin", "http://localhost")
@@ -77,15 +84,20 @@ func TestPromptEncryption(t *testing.T) {
 				Data: bytes.Repeat([]byte{0x42}, 32),
 			}
 			stubAuthOpenAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Header.Get("Authorization") != fmt.Sprintf("Bearer %s", testAPIKey) {
-					http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				token := r.Header.Get("Authorization")
+				if token == "" {
+					forwarder.HTTPError(w, r, http.StatusUnauthorized, "no auth found: expected Authorization header with 'Bearer <auth>'")
+					return
+				}
+				if token != fmt.Sprintf("Bearer %s", testAPIKey) {
+					forwarder.HTTPError(w, r, http.StatusUnauthorized, "invalid API key: invalid API key")
 					return
 				}
 				stub.OpenAIEchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
 			}))
 			defer stubAuthOpenAIServer.Close()
 
-			sut := newTestServer(tc.apiKey, secret, stubAuthOpenAIServer.Listener.Addr().String())
+			sut := newTestServer(tc.proxyAPIKey, secret, stubAuthOpenAIServer.Listener.Addr().String())
 
 			// Act
 			prompt := "Hello"
@@ -104,6 +116,11 @@ func TestPromptEncryption(t *testing.T) {
 				require.NoError(json.NewDecoder(resp.Body).Decode(&res))
 				require.Len(res.Choices, 1)
 				assert.Equal("Echo: Hello", *res.Choices[0].Message.Content)
+			}
+			if tc.expectedBody != "" {
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(err)
+				assert.Contains(string(body), tc.expectedBody)
 			}
 
 			for key, value := range tc.expectedHeaders {
@@ -314,7 +331,7 @@ func TestUnstructuredEncrypted(t *testing.T) {
 
 			body, contentType := tc.buildBody(t)
 
-			req := httptest.NewRequest(http.MethodPost, "/echo", body)
+			req := httptest.NewRequest(http.MethodPost, "/unstructured/general/v0/general", body)
 			req.Header.Set("Content-Type", contentType)
 
 			resp := httptest.NewRecorder()
@@ -347,7 +364,7 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 
 		// Use JSON request mutation if the request is a JSON request
 		requestMutator := forwarder.WithFullRequestMutation(decrypt, log)
-		responseMutator := forwarder.WithFullJSONResponseMutation(encrypt, nil)
+		responseMutator := forwarder.WithFullJSONResponseMutation(encrypt, nil, false)
 
 		if err := requestMutator(r); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -408,4 +425,19 @@ type stubSecretManager struct {
 
 func (s stubSecretManager) LatestSecret(_ context.Context) (secretmanager.Secret, error) {
 	return s.Secret, nil
+}
+
+func toPtr(s string) *string {
+	return &s
+}
+
+func makeErrorMsg(message string) string {
+	errObj := forwarder.APIError{
+		Message: message,
+	}
+	msgBytes, err := json.Marshal(forwarder.ErrorMessage{Error: errObj})
+	if err != nil {
+		panic(err)
+	}
+	return string(msgBytes)
 }
