@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime"
 	"strings"
 
 	"github.com/edgelesssys/continuum/internal/gpl/auth"
@@ -25,10 +26,12 @@ import (
 
 // Server implements the HTTP server for the API gateway.
 type Server struct {
-	apiKey    *string
-	forwarder apiForwarder
-	sm        secretManager
-	log       *slog.Logger
+	apiKey           *string
+	defaultCacheSalt string // if no salt is set, a random salt will be used
+	forwarder        apiForwarder
+	sm               secretManager
+	log              *slog.Logger
+	isApp            bool
 }
 
 type apiForwarder interface {
@@ -44,13 +47,17 @@ type secretManager interface {
 
 // New sets up a new Server.
 func New(
-	client *http.Client, apiEndpoint string, protocolScheme forwarder.ProtocolScheme, sm secretManager, log *slog.Logger, apiKey *string,
+	client *http.Client, apiEndpoint string, protocolScheme forwarder.ProtocolScheme, sm secretManager,
+	log *slog.Logger, apiKey *string, promptCacheSalt string, isApp bool,
 ) *Server {
+	log.Info("version", slog.String("version", constants.Version()))
 	return &Server{
-		apiKey:    apiKey,
-		forwarder: forwarder.NewWithClient(client, apiEndpoint, protocolScheme, log),
-		sm:        sm,
-		log:       log,
+		apiKey:           apiKey,
+		defaultCacheSalt: promptCacheSalt,
+		forwarder:        forwarder.NewWithClient(client, apiEndpoint, protocolScheme, log),
+		sm:               sm,
+		log:              log,
+		isApp:            isApp,
 	}
 }
 
@@ -73,10 +80,24 @@ func (s *Server) GetHandler() http.Handler {
 	mux.HandleFunc("/unstructured/", s.unstructuredHandler)
 	mux.HandleFunc(openai.ModelsEndpoint, s.noEncryptionHandler)
 	mux.HandleFunc(openai.EmbeddingsEndpoint, s.embeddingsHandler)
+	mux.HandleFunc(openai.TranscriptionsEndpoint, s.transcriptionsHandler)
 
 	mux.HandleFunc("/", http.NotFound) // Reject requests to unknown endpoints
 
 	return mux
+}
+
+func (s *Server) cacheSaltInjector() forwarder.RequestMutator {
+	var cacheSaltGenerator func() (string, error)
+	if s.defaultCacheSalt == "" {
+		cacheSaltGenerator = openai.RandomPromptCacheSalt
+	} else {
+		cacheSaltGenerator = func() (string, error) {
+			return s.defaultCacheSalt, nil
+		}
+	}
+
+	return openai.CacheSaltInjector(cacheSaltGenerator, s.log)
 }
 
 func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +111,10 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 
 	s.forwarder.Forward(
 		w, r,
-		forwarder.WithFullJSONRequestMutation(rc.Encrypt, openai.PlainCompletionsRequestFields, s.log),
+		forwarder.RequestMutatorChain(
+			s.cacheSaltInjector(),
+			forwarder.WithFullJSONRequestMutation(rc.Encrypt, openai.PlainCompletionsRequestFields, s.log),
+		),
 		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, openai.PlainCompletionsResponseFields, false),
 		allowWails,
 	)
@@ -109,6 +133,23 @@ func (s *Server) embeddingsHandler(w http.ResponseWriter, r *http.Request) {
 		w, r,
 		forwarder.WithFullJSONRequestMutation(rc.Encrypt, openai.PlainEmbeddingsRequestFields, s.log),
 		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, openai.PlainEmbeddingsResponseFields, false),
+		allowWails,
+	)
+}
+
+func (s *Server) transcriptionsHandler(w http.ResponseWriter, r *http.Request) {
+	s.setRequestHeaders(r)
+
+	rc, err := s.getRequestCipher(r)
+	if err != nil {
+		forwarder.HTTPError(w, r, http.StatusInternalServerError, "creating request cipher: %s", err)
+		return
+	}
+
+	s.forwarder.Forward(
+		w, r,
+		forwarder.WithFormRequestMutation(rc.Encrypt, openai.PlainTranscriptionFields, s.log),
+		forwarder.WithFullResponseMutation(rc.DecryptResponse),
 		allowWails,
 	)
 }
@@ -155,11 +196,22 @@ func (s *Server) getRequestCipher(r *http.Request) (*crypto.RequestCipher, error
 	return rc, nil
 }
 
+func (s *Server) getClientHeader() string {
+	if s.isApp {
+		return constants.PrivatemodeClientApp
+	}
+
+	return constants.PrivatemodeClientProxy
+}
+
 func (s *Server) setRequestHeaders(r *http.Request) {
 	if s.apiKey != nil {
 		r.Header.Set("Authorization", fmt.Sprintf("%s %s", auth.Bearer, *s.apiKey))
 	}
 	r.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
+	r.Header.Set(constants.PrivatemodeOSHeader, runtime.GOOS)
+	r.Header.Set(constants.PrivatemodeArchitectureHeader, runtime.GOARCH)
+	r.Header.Set(constants.PrivatemodeClientHeader, s.getClientHeader())
 }
 
 // allowWails allows requests from wails (origin wails://wails.localhost)

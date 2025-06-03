@@ -2,6 +2,7 @@
 package cipher
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -24,8 +25,8 @@ func New(secrets *secrets.Secrets) *Cipher {
 // encryptResponse encrypts a message.
 // The message is encrypted using the secret associated with the given id.
 // The function returns the encrypted message in the format 'id:nonce:iv:cipher'.
-func (c *Cipher) encryptResponse(id, message string, requestNonce []byte, sequenceNumber uint32) (string, error) {
-	secret, ok := c.inferenceSecrets.Get(id)
+func (c *Cipher) encryptResponse(ctx context.Context, id, message string, requestNonce []byte, sequenceNumber uint32) (string, error) {
+	secret, ok := c.inferenceSecrets.Get(ctx, id)
 	if !ok {
 		return "", fmt.Errorf("no secret for ID %q", id)
 	}
@@ -35,12 +36,12 @@ func (c *Cipher) encryptResponse(id, message string, requestNonce []byte, sequen
 // decryptRequest decrypts a message.
 // The message is expected to be in the format '"id:nonce:iv:cipher"'.
 // On success, the function returns the plain text and the id.
-func (c *Cipher) decryptRequest(message string, nonce []byte, sequenceNumber uint32) (text, id string, err error) {
+func (c *Cipher) decryptRequest(ctx context.Context, message string, nonce []byte, sequenceNumber uint32) (text, id string, err error) {
 	id, err = crypto.GetIDFromCipher(message)
 	if err != nil {
 		return "", "", err
 	}
-	secret, ok := c.inferenceSecrets.Get(id)
+	secret, ok := c.inferenceSecrets.Get(ctx, id)
 	if !ok {
 		return "", "", fmt.Errorf("no secret for ID %q", id)
 	}
@@ -76,55 +77,59 @@ func (c *Cipher) NewResponseCipher() *ResponseCipher {
 }
 
 // DecryptRequest decrypts data sent by a client.
-func (c *ResponseCipher) DecryptRequest(encryptedData string) (res string, err error) {
-	if c.encSeqNum != 0 {
-		return "", errors.New("can't decrypt another request after encrypting a response")
-	}
-
-	// get request nonce from first message
-	if c.decSeqNum == 0 {
-		c.nonce, err = c.cipher.getNonce(encryptedData)
-		if err != nil {
-			return "", fmt.Errorf("getting nonce: %w", err)
+func (c *ResponseCipher) DecryptRequest(ctx context.Context) func(encryptedData string) (res string, err error) {
+	return func(encryptedData string) (res string, err error) {
+		if c.encSeqNum != 0 {
+			return "", errors.New("can't decrypt another request after encrypting a response")
 		}
-	}
 
-	plainData, fieldID, err := c.cipher.decryptRequest(encryptedData, c.nonce, c.decSeqNum)
-	if err != nil {
-		return "", fmt.Errorf("deciphering input: %w", err)
-	}
-	c.decSeqNum++
+		// get request nonce from first message
+		if c.decSeqNum == 0 {
+			c.nonce, err = c.cipher.getNonce(encryptedData)
+			if err != nil {
+				return "", fmt.Errorf("getting nonce: %w", err)
+			}
+		}
 
-	if c.id == "" {
-		c.id = fieldID
-	}
-	// All fields must be encrypted with the same ID
-	if c.id != fieldID {
-		return "", fmt.Errorf("deciphering input: multiple different IDs used for encrypting data: %q does not match %q", c.id, fieldID)
-	}
+		plainData, fieldID, err := c.cipher.decryptRequest(ctx, encryptedData, c.nonce, c.decSeqNum)
+		if err != nil {
+			return "", fmt.Errorf("deciphering input: %w", err)
+		}
+		c.decSeqNum++
 
-	return plainData, nil
+		if c.id == "" {
+			c.id = fieldID
+		}
+		// All fields must be encrypted with the same ID
+		if c.id != fieldID {
+			return "", fmt.Errorf("deciphering input: multiple different IDs used for encrypting data: %q does not match %q", c.id, fieldID)
+		}
+
+		return plainData, nil
+	}
 }
 
 // EncryptResponse encrypts data to send back to a client.
 // It may only be called after first decrypting data using [ResponseCipher.DecryptRequest].
-func (c *ResponseCipher) EncryptResponse(plainData string) (string, error) {
-	if len(c.nonce) == 0 || c.decSeqNum == 0 || c.id == "" {
-		return "", errors.New("can't encrypt response without first decrypting a request")
-	}
+func (c *ResponseCipher) EncryptResponse(ctx context.Context) func(plainData string) (string, error) {
+	return func(plainData string) (string, error) {
+		if len(c.nonce) == 0 || c.decSeqNum == 0 || c.id == "" {
+			return "", errors.New("can't encrypt response without first decrypting a request")
+		}
 
-	encryptedData, err := c.cipher.encryptResponse(c.id, plainData, c.nonce, c.encSeqNum)
-	if err != nil {
-		return "", fmt.Errorf("enciphering response: %w", err)
-	}
-	c.encSeqNum++
+		encryptedData, err := c.cipher.encryptResponse(ctx, c.id, plainData, c.nonce, c.encSeqNum)
+		if err != nil {
+			return "", fmt.Errorf("enciphering response: %w", err)
+		}
+		c.encSeqNum++
 
-	return encryptedData, nil
+		return encryptedData, nil
+	}
 }
 
 // cipher is the interface for encryption and decryption of messages read and send by the proxy.
 type cipher interface {
-	encryptResponse(id, message string, requestNonce []byte, sequenceNumber uint32) (string, error)
-	decryptRequest(message string, nonce []byte, sequenceNumber uint32) (text, id string, err error)
+	encryptResponse(ctx context.Context, id, message string, requestNonce []byte, sequenceNumber uint32) (string, error)
+	decryptRequest(ctx context.Context, message string, nonce []byte, sequenceNumber uint32) (text, id string, err error)
 	getNonce(ciphertext string) ([]byte, error)
 }

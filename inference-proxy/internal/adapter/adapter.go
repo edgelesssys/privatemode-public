@@ -37,10 +37,10 @@ func IsSupportedInferenceAPI(apiType string) bool {
 }
 
 // New creates a new InferenceAdapter for the given API type.
-func New(apiType, workloadTask string, cipher *cipher.Cipher, forwarder mutatingForwarder, log *slog.Logger) (InferenceAdapter, error) {
+func New(apiType string, workloadTasks []string, cipher *cipher.Cipher, forwarder mutatingForwarder, log *slog.Logger) (InferenceAdapter, error) {
 	switch strings.ToLower(apiType) {
 	case InferenceAPIOpenAI:
-		return openai.New(workloadTask, cipher, forwarder, log)
+		return openai.New(workloadTasks, cipher, forwarder, log)
 	case InferenceAPIUnstructured:
 		return unstructured.New(cipher, forwarder, log)
 	case InferenceAPIUnencrypted:

@@ -34,6 +34,7 @@ type Flags struct {
 	InsecureAPIConnection bool
 	APIEndpoint           string
 	APIKey                *string
+	PromptCacheSalt       string
 }
 
 // ContrastFlags holds the configuration for the Contrast deployment.
@@ -43,7 +44,7 @@ type ContrastFlags struct {
 }
 
 // NewServer creates a new server instance.
-func NewServer(flags Flags, manager *secretmanager.SecretManager, log *slog.Logger) *server.Server {
+func NewServer(flags Flags, manager *secretmanager.SecretManager, log *slog.Logger, isApp bool) *server.Server {
 	client := http.DefaultClient
 	if flags.InsecureAPIConnection {
 		client = &http.Client{
@@ -53,7 +54,8 @@ func NewServer(flags Flags, manager *secretmanager.SecretManager, log *slog.Logg
 			},
 		}
 	}
-	return server.New(client, flags.APIEndpoint, forwarder.SchemeHTTPS, manager, log, flags.APIKey)
+
+	return server.New(client, flags.APIEndpoint, forwarder.SchemeHTTPS, manager, log, flags.APIKey, flags.PromptCacheSalt, isApp)
 }
 
 func fetchBodyFromURL(ctx context.Context, sourceURL string) ([]byte, error) {

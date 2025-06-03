@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,8 +21,19 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// FieldSelector is a list of JSON field names to consider for mutation.
-// JSON paths are represented as a list of strings, where each string is a field name.
+const (
+	eventStreamSuffix    = "\n\n"
+	eventStreamSeparator = ": "
+)
+
+// FieldSelector is a list of field names to consider for mutation.
+//
+// For form requests, each entry is expected to be a slice of length 1,
+// where each entry is a name of a form field.
+// For example, the FieldSelector{["foo"], ["bar"]} matches the form fields "foo" and "bar".
+//
+// For JSON requests, each entry represents a JSON path as a slice of strings,
+// where each string in the slice is a field name of the path.
 //
 // For example, the FieldSelector{["foo", "bar"]} creates the JSON path "foo.bar",
 // and would match the field "bar" in the object "foo".
@@ -37,15 +50,32 @@ type FieldSelector [][]string
 // It is used by [WithJSONRequestMutation] to mutate data read from an [*http.Request],
 // and by [WithJSONResponseMutation] to mutate data read from an [io.Reader].
 // It may be called multiple times for a single request to mutate data.
-type MutationFunc func(request string) (mutatedRequest string, err error)
+type MutationFunc func(in string) (out string, err error)
 
-// WithSelectJSONRequestMutation returns a [RequestMutator] which mutates the request.
-func WithSelectJSONRequestMutation(mutate MutationFunc, fields FieldSelector, log *slog.Logger) RequestMutator {
-	return withJSONRequestMutation(mutate, fields, mutateSelectJSONFields, log)
+// RequestMutator mutates an [*http.Request].
+type RequestMutator func(request *http.Request) error
+
+// HeaderMutator mutates a [http.Header].
+// response is the header object of the response. Writes should usually go here.
+// request is the header object of the request.
+type HeaderMutator func(response http.Header, request http.Header) error
+
+// RequestMutatorChain is a chain of [RequestMutator]s.
+func RequestMutatorChain(
+	mutators ...RequestMutator,
+) RequestMutator {
+	return func(request *http.Request) error {
+		for _, mutator := range mutators {
+			if err := mutator(request); err != nil {
+				return fmt.Errorf("mutating request: %w", err)
+			}
+		}
+		return nil
+	}
 }
 
 // WithFullRequestMutation returns a [RequestMutator] which performs mutation on the entire request body,
-// regardless of content type. It uses the provided MutationFunc to mutate the raw request body.
+// regardless of its content-type. It uses the provided MutationFunc to mutate the raw request body.
 func WithFullRequestMutation(mutate MutationFunc, log *slog.Logger) RequestMutator {
 	return func(r *http.Request) error {
 		log.Info("Mutating full request body")
@@ -69,22 +99,78 @@ func WithFullRequestMutation(mutate MutationFunc, log *slog.Logger) RequestMutat
 	}
 }
 
-// WithFullJSONRequestMutation returns a [RequestMutator] which mutates the request.
+// WithSelectJSONRequestMutation returns a [RequestMutator] which mutates the request for
+// the selected JSON fields.
+func WithSelectJSONRequestMutation(mutate MutationFunc, fields FieldSelector, log *slog.Logger) RequestMutator {
+	return withJSONRequestMutation(mutate, fields, mutateSelectJSONFields, log)
+}
+
+// WithFullJSONRequestMutation returns a [RequestMutator] which mutates the full request.
 func WithFullJSONRequestMutation(mutate MutationFunc, skipFields FieldSelector, log *slog.Logger) RequestMutator {
 	return withJSONRequestMutation(mutate, skipFields, mutateAllJSONFields, log)
 }
 
-const (
-	eventStreamSuffix    = "\n\n"
-	eventStreamSeparator = ": "
-)
+// WithFormRequestMutation returns a [RequestMutator] which mutates requests with HTTP form data.
+func WithFormRequestMutation(mutate MutationFunc, skipFields FieldSelector, log *slog.Logger) RequestMutator {
+	return func(r *http.Request) error {
+		log.Info("Mutating HTTP form request")
+
+		if err := r.ParseMultipartForm(64 * 1024 * 1024); err != nil {
+			return fmt.Errorf("parsing form: %w", err)
+		}
+
+		formValueKeys := make([]string, 0, len(r.MultipartForm.Value))
+		for key := range r.MultipartForm.Value {
+			formValueKeys = append(formValueKeys, key)
+		}
+		sort.StringSlice(formValueKeys).Sort()
+
+		formFileKeys := make([]string, 0, len(r.MultipartForm.File))
+		for key := range r.MultipartForm.File {
+			formFileKeys = append(formFileKeys, key)
+		}
+
+		mutatedBody := &bytes.Buffer{}
+		writer := multipart.NewWriter(mutatedBody)
+
+		// Copy form values
+		for _, formKey := range formValueKeys {
+			log.Info("Mutating form field", "key", formKey)
+			if err := mutateFormField(writer, formKey, r.FormValue(formKey), mutate, skipFields); err != nil {
+				return fmt.Errorf("mutating form field %q: %w", formKey, err)
+			}
+		}
+
+		// Copy form files
+		for _, fileKey := range formFileKeys {
+			log.Info("Mutating form file", "key", fileKey)
+			formFile, _, err := r.FormFile(fileKey)
+			if err != nil {
+				return fmt.Errorf("getting form file %q: %w", fileKey, err)
+			}
+			if err := mutateFormFile(writer, fileKey, formFile, mutate, skipFields); err != nil {
+				return fmt.Errorf("mutating form file %q: %w", fileKey, err)
+			}
+		}
+
+		if err := writer.Close(); err != nil {
+			return fmt.Errorf("closing writer: %w", err)
+		}
+
+		r.Header.Set("Content-Type", writer.FormDataContentType())
+		r.ContentLength = int64(mutatedBody.Len())
+		r.Body = io.NopCloser(mutatedBody)
+
+		return nil
+	}
+}
 
 // WithSelectJSONResponseMutation returns a [ResponseMutator] which mutates the data read from the given [io.Reader].
 func WithSelectJSONResponseMutation(mutate MutationFunc, fields FieldSelector) ResponseMutator {
 	return &mutatingReader{
 		scanner:        nil,
 		mutate:         mutate,
-		jsonParseFunc:  mutateSelectJSONFields,
+		dataParseFunc:  mutateSelectJSONFields,
 		fields:         fields,
 		leftover:       nil,
 		skipFinalEvent: false,
@@ -96,10 +182,25 @@ func WithFullJSONResponseMutation(mutate MutationFunc, skipFields FieldSelector,
 	return &mutatingReader{
 		scanner:        nil,
 		mutate:         mutate,
-		jsonParseFunc:  mutateAllJSONFields,
+		dataParseFunc:  mutateAllJSONFields,
 		fields:         skipFields,
 		leftover:       nil,
 		skipFinalEvent: backwardsCompatibleMode,
+	}
+}
+
+// WithFullResponseMutation returns a [ResponseMutator] which mutates the whole body of the data from the given [io.Reader].
+func WithFullResponseMutation(mutate MutationFunc) ResponseMutator {
+	return &mutatingReader{
+		scanner: nil,
+		mutate:  mutate,
+		dataParseFunc: func(data []byte, mutate MutationFunc, _ FieldSelector) ([]byte, error) {
+			mutated, err := mutate(string(data))
+			return []byte(mutated), err
+		},
+		fields:         nil,
+		leftover:       nil,
+		skipFinalEvent: false,
 	}
 }
 
@@ -132,7 +233,7 @@ func withJSONRequestMutation(
 	}
 }
 
-// mutatingReader implements a wrapper for an io.ReadCloser,
+// mutatingReader implements a wrapper for an [io.ReadCloser],
 // which transparently mutates data chunks.
 type mutatingReader struct {
 	scanner  *bufio.Scanner
@@ -143,7 +244,7 @@ type mutatingReader struct {
 
 	fields        FieldSelector
 	mutate        MutationFunc
-	jsonParseFunc func(data []byte, mutate MutationFunc, fields FieldSelector) ([]byte, error)
+	dataParseFunc func(data []byte, mutate MutationFunc, fields FieldSelector) ([]byte, error)
 }
 
 // Reader returns a mutating [io.Reader].
@@ -154,7 +255,7 @@ func (r *mutatingReader) Reader(reader io.Reader) io.Reader {
 
 // Mutate performs mutation on the given data.
 func (r *mutatingReader) Mutate(body []byte) ([]byte, error) {
-	return r.jsonParseFunc(body, r.mutate, r.fields)
+	return r.dataParseFunc(body, r.mutate, r.fields)
 }
 
 // Read reads from the underlying reader, performs mutation on the data chunks, and returns the mutated data.
@@ -209,7 +310,7 @@ func (r *mutatingReader) Read(b []byte) (int, error) {
 		mutated = toMutate
 	} else {
 		// Mutate the data chunk
-		mutated, err = r.jsonParseFunc(toMutate, r.mutate, r.fields)
+		mutated, err = r.dataParseFunc(toMutate, r.mutate, r.fields)
 		if err != nil {
 			return 0, err
 		}
@@ -249,7 +350,7 @@ func mutateSelectJSONFields(data []byte, mutate MutationFunc, mutateFields Field
 		mutateFunc := mutate
 		// Otherwise recursively call [mutateSelectJSONFields]
 		if len(mutateField) > 1 {
-			subPaths := evaluateArrayPaths(gjson.GetBytes(result, field), mutateField[1:])
+			subPaths := EvaluateArrayPaths(gjson.GetBytes(result, field), mutateField[1:])
 			mutateFunc = func(data string) (string, error) {
 				mutatedField, err := mutateSelectJSONFields([]byte(data), mutate, subPaths)
 				if err != nil {
@@ -295,7 +396,7 @@ func mutateAllJSONFields(data []byte, mutate MutationFunc, skipFields FieldSelec
 
 			// Check if any subfields of the current field should be skipped
 			if len(skipField) > 1 && skipField[0] == field {
-				subPaths = append(subPaths, evaluateArrayPaths(gjson.GetBytes(result, field), skipField[1:])...)
+				subPaths = append(subPaths, EvaluateArrayPaths(gjson.GetBytes(result, field), skipField[1:])...)
 			}
 		}
 		if skip {
@@ -330,9 +431,9 @@ func mutateAllJSONFields(data []byte, mutate MutationFunc, skipFields FieldSelec
 	return result, nil
 }
 
-// evaluateArrayPaths expands a JSON path using the '#' array index placeholder
+// EvaluateArrayPaths expands a JSON path using the '#' array index placeholder
 // to multiple JSON paths with the actual array indices.
-func evaluateArrayPaths(gjsonData gjson.Result, path []string) FieldSelector {
+func EvaluateArrayPaths(gjsonData gjson.Result, path []string) FieldSelector {
 	var subPaths FieldSelector
 	switch {
 	case gjsonData.IsObject(), gjsonData.IsArray() && path[0] != "#":
@@ -367,4 +468,66 @@ func sortedIndices(jsonData []byte) []string {
 	})
 	sort.StringSlice(indices).Sort()
 	return indices
+}
+
+func mutateFormField(
+	writer *multipart.Writer, formKey, formValue string, mutate MutationFunc, skipFields FieldSelector,
+) error {
+	if slices.ContainsFunc(skipFields, func(skip []string) bool {
+		return len(skip) > 0 && skip[0] == formKey
+	}) {
+		if err := writer.WriteField(formKey, formValue); err != nil {
+			return fmt.Errorf("writing form field %q: %w", formKey, err)
+		}
+		return nil
+	}
+
+	mutatedValue, err := mutate(formValue)
+	if err != nil {
+		return fmt.Errorf("mutating form field %q: %w", formKey, err)
+	}
+
+	if err := writer.WriteField(formKey, mutatedValue); err != nil {
+		return fmt.Errorf("writing form field %q: %w", formKey, err)
+	}
+
+	return nil
+}
+
+func mutateFormFile(
+	writer *multipart.Writer, formKey string, formFile multipart.File, mutate MutationFunc, skipFields FieldSelector,
+) (err error) {
+	formWriter, err := writer.CreateFormFile(formKey, formKey)
+	if err != nil {
+		return fmt.Errorf("creating form file %q: %w", formKey, err)
+	}
+	defer func() {
+		if closeErr := formFile.Close(); err != nil {
+			err = errors.Join(err, fmt.Errorf("closing form file %q: %w", formKey, closeErr))
+		}
+	}()
+
+	if slices.ContainsFunc(skipFields, func(skip []string) bool {
+		return len(skip) > 0 && skip[0] == formKey
+	}) {
+		if _, err := io.Copy(formWriter, formFile); err != nil {
+			return fmt.Errorf("copying form file %q: %w", formKey, err)
+		}
+		return nil
+	}
+
+	formData, err := io.ReadAll(formFile)
+	if err != nil {
+		return fmt.Errorf("reading form file %q: %w", formKey, err)
+	}
+
+	mutatedData, err := mutate(string(formData))
+	if err != nil {
+		return fmt.Errorf("mutating form file %q: %w", formKey, err)
+	}
+	if _, err := formWriter.Write([]byte(mutatedData)); err != nil {
+		return fmt.Errorf("writing form file %q: %w", formKey, err)
+	}
+
+	return nil
 }

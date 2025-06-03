@@ -1,16 +1,31 @@
 # Privatemode UI
 This is the source code of the Privatemode UI. It's a modified version of ChatGPT-web. To build it, please see the instructions in the original Readme following below.
 
-## Building
+## Testing
 
-Before being able to build the app, you need to create dummy files for the Wails bindings:
+To test the fileupload feature against a local unstructured deployment and with an OpenAI chat model:
 
 ```bash
-mkdir -p wailsjs/go/main && echo 'export function GetConfiguredAPIKey () {
-  return '\'''\''
-}
-' > wailsjs/go/main/ConfigurationService.js
+mkdir -p wailsjs/go/main
+
+echo "export function GetConfiguredAPIKey () { return '' }
+" > wailsjs/go/main/ConfigurationService.js
+
+echo "
+export function OnSmokeTestCompleted(arg1, arg2) {}
+export function SmokeTestingActivated() { return false }
+" > wailsjs/go/main/SmokeTestService.js
 ```
+docker run -p 8000:8000 --rm -e ALLOWED_ORIGINS="*,http://localhost:5173" robwilkes/unstructured-api # the upstream image didn't work on mac
+
+VITE_TEST_UNSTRUCTURED_API_BASE=http://localhost:8000 VITE_VERSION="v1.10.0-pre" VITE_DEFAULT_MODEL="gpt-4o-mini" VITE_API_BASE="https://api.openai.com/v1" npm run dev
+```
+
+Then, set the OpenAI key in the UI settings.
+
+IMPORTANT: Only set `VITE_TEST_UNSTRUCTURED_API_BASE` for testing, because it disables setting an auth header to avoid CORS issues. Background is that the local unstructrued API service doesn't properly set the origin header in the preflight request.
+
+---
 
 # ChatGPT-web
 
@@ -107,13 +122,13 @@ For instances where immediate API responses are preferred, consider utilizing th
 To use ChatGPT-web as a desktop application:
 
 * **Installation**: First, ensure [Rust is installed](https://www.rust-lang.org/tools/install) on your computer.
-  
+
 * **Development Version**:
   * Run `npm run tauri dev` to start the desktop app in development mode.
-  
+
 * **Production Version**:
   * Use `npm run tauri build` to compile the production version of the app.
-  
+
 * **Location of the Built Application**:
   * The built application will be available in the `src-tauri/target` folder.
 

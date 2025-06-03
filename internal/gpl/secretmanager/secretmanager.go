@@ -93,8 +93,15 @@ func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
 }
 
 func (sm *SecretManager) updateSecret(ctx context.Context, now time.Time) error {
-	// create secrets with a buffer to refresh the secrets before they expire in the AS
-	secret, err := createRandom32ByteSecret(now.Add(sm.secretLifetime - sm.secretRefreshBuffer))
+	// Create secrets with a buffer to refresh the secrets before they expire in the AS.
+
+	// Clock.Now() returns the current time with monotonic time. Some operations on monotonic
+	// times do not work on MacOS as the OS stops the monotonic clock when the system goes
+	// to sleep. This leads to expiration time comparison failure after sleep.
+	// To prevent this, we must remove the monotonic part using Round(0).
+	// Cf. https://golang.google.cn/pkg/time/#hdr-Monotonic_Clocks
+	expirationDate := now.Round(0).Add(sm.secretLifetime - sm.secretRefreshBuffer)
+	secret, err := createRandom32ByteSecret(expirationDate)
 	if err != nil {
 		return err
 	}

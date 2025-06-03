@@ -9,6 +9,7 @@
   import { get } from 'svelte/store'
   import { isNativeApp } from './Util.svelte'
   import { GetConfiguredAPIKey } from '../../wailsjs/go/main/ConfigurationService'
+  import { SmokeTest } from './SmokeTest';
 
   $: apiKey = $apiKeyStorage
   const openAiEndpoint = $globalStorage.openAiEndpoint || ''
@@ -40,6 +41,9 @@
         $lastChatId = 0
         replace(`/chat/${chatId}`)
       }
+
+      // Note: this will not return but exit the app if running the smoke test
+      await SmokeTest.runIfActivated()
     }
     $lastChatId = 0
   })

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	crypto "github.com/edgelesssys/continuum/internal/gpl/crypto"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
 	"github.com/edgelesssys/continuum/internal/gpl/openai"
@@ -27,7 +28,7 @@ func OpenAIEchoHandler(secrets map[string][]byte, log *slog.Logger) http.Handler
 
 func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		requestMutator, responseMutator := getConnectionMutators(secrets, log)
+		requestMutator, responseMutator := getConnectionMutators(r, secrets, log)
 		if err := requestMutator(r); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -38,6 +39,8 @@ func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.Resp
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		w.Header().Set("Request-Cache-Salt", request.CacheSalt)
 
 		if len(request.Messages) == 0 {
 			http.Error(w, "no messages in request", http.StatusBadRequest)
@@ -90,9 +93,10 @@ func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.Resp
 			Model:   "gpt",
 			Choices: choices,
 			Usage: openai.Usage{
-				PromptTokens:     inputTokens,
-				CompletionTokens: len(responseMsg),
-				TotalTokens:      inputTokens + len(responseMsg),
+				PromptTokens:        inputTokens,
+				CompletionTokens:    len(responseMsg),
+				TotalTokens:         inputTokens + len(responseMsg),
+				PromptTokensDetails: nil,
 			},
 		}
 
@@ -159,11 +163,25 @@ func GetEncryptionFunctions(secrets map[string][]byte) (encryptFunc forwarder.Mu
 	return encrypt, decrypt
 }
 
-func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator) {
+func getConnectionMutators(r *http.Request, secrets map[string][]byte, log *slog.Logger) (requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator) {
 	encrypt, decrypt := GetEncryptionFunctions(secrets)
 
-	return forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainCompletionsRequestFields, log),
-		forwarder.WithFullJSONResponseMutation(encrypt, openai.PlainCompletionsResponseFields, false)
+	clientVersion := r.Header.Get(constants.PrivatemodeVersionHeader)
+	if clientVersion == "v1.15.0" {
+		// certain old version for testing CacheSaltInjector
+		requestMutator = forwarder.RequestMutatorChain(
+			forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainCompletionsRequestFields, log),
+			openai.CacheSaltInjector(openai.RandomPromptCacheSalt, log),
+		)
+	} else {
+		requestMutator = forwarder.RequestMutatorChain(
+			forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainCompletionsRequestFields, log),
+			openai.CacheSaltValidator(log),
+		)
+	}
+
+	responseMutator = forwarder.WithFullJSONResponseMutation(encrypt, openai.PlainCompletionsResponseFields, false)
+	return
 }
 
 func openAIModelsHandler() func(w http.ResponseWriter, r *http.Request) {

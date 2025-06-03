@@ -9,6 +9,7 @@
   import Home from './lib/Home.svelte'
   import Chat from './lib/Chat.svelte'
   import NewChat from './lib/NewChat.svelte'
+  import ToastContainer from './lib/ToastContainer.svelte'
   import { chatsStorage, setGlobalSettingValueByKey } from './lib/Storage.svelte'
   import { Modals, closeModal } from 'svelte-modals'
   import { dispatchModalEsc, checkModalEsc } from './lib/Util.svelte'
@@ -85,6 +86,7 @@
       <Router {routes} />
     {/key}
   </div>
+  <ToastContainer />
 </div>
 
 <Modals>

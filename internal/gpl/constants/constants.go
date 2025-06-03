@@ -19,8 +19,14 @@ const (
 	ServedModel = "ibnzterrell/Meta-Llama-3.3-70B-Instruct-AWQ-INT4"
 	// WorkloadTaskGenerate is the vLLM task for text generation.
 	WorkloadTaskGenerate = "generate"
+	// WorkloadTaskToolCalling indicates models that support tool calling for the /v1/chat/completions API.
+	WorkloadTaskToolCalling = "tool_calling"
+	// WorkloadTaskVision indicates models that support image recognition for the /v1/chat/completions API.
+	WorkloadTaskVision = "vision"
 	// WorkloadTaskEmbed is the vLLM task for creating embeddings.
 	WorkloadTaskEmbed = "embed"
+	// WorkloadTaskTranscribe indicates models that support the /v1/transcriptions API.
+	WorkloadTaskTranscribe = "transcribe"
 
 	// CacheDirEnv is the environment variable that specifies the cache directory of Continuum.
 	// If unset, [os.UserCacheDir()] is used.
@@ -53,6 +59,16 @@ const (
 	// PrivatemodeVersionHeader is an HTTP header sent by the Privatemode components on every request.
 	// It is used to check for version compatibility between client and server.
 	PrivatemodeVersionHeader = "Privatemode-Version"
+	// PrivatemodeOSHeader is the OS the Privatemode proxy is running on.
+	PrivatemodeOSHeader = "Privatemode-OS"
+	// PrivatemodeArchitectureHeader is the Platform the Privatemode proxy is running on.
+	PrivatemodeArchitectureHeader = "Privatemode-Architecture"
+	// PrivatemodeClientHeader is the App the Privatemode proxy is running, either "Proxy" or "App".
+	PrivatemodeClientHeader = "Privatemode-Client"
+	// PrivatemodeClientApp is the PrivatemodeClientHeader value for the Privatemode client app.
+	PrivatemodeClientApp = "App"
+	// PrivatemodeClientProxy is the PrivatemodeClientHeader value for the Privatemode client proxy.
+	PrivatemodeClientProxy = "Proxy"
 
 	// SecretServiceEndpoint is the endpoint of the secret service.
 	SecretServiceEndpoint = "secret.privatemode.ai:443"

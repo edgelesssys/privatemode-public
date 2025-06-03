@@ -19,6 +19,7 @@
   import rocket from '../assets/rocket.svg'
   import { replace } from 'svelte-spa-router'
   import settings from '../assets/settings.svg'
+  import { TestChatController } from './SmokeTest';
   $: sortedChats = $chatsStorage.sort(getChatSortOption().sortFn)
   $: activeChatId = $params && $params.chatId ? parseInt($params.chatId) : undefined
 
@@ -46,6 +47,31 @@
     })
   }
 
+  let newChatButton: HTMLButtonElement | null = null;
+
+  TestChatController.newChat = async () => {
+    if (newChatButton && !newChatButton.disabled) {
+      newChatButton.click();
+      // works also with 10ms, so 100 should be safe
+      await new Promise(resolve => setTimeout(resolve, 100))
+    } else {
+      throw new Error('New chat button is not available or disabled');
+    }
+  };
+
+  TestChatController.deleteActiveChat = async () => {
+    const index = $chatsStorage.findIndex(c => c.id === activeChatId);
+    if (index !== -1) {
+      chatsStorage.update(chats => {
+        chats.splice(index, 1);
+        return chats;
+      });
+    } else {
+      throw new Error(`Chat with id ${activeChatId} not found`);
+    }
+  };
+
+  
 </script>
 
 <aside class="menu main-menu" class:pinned={$pinMainMenu} use:clickOutside={() => { $pinMainMenu = false }}>
@@ -57,10 +83,12 @@
       </div>
       <div class="level-right">
         <div class="level-item">
-          <button on:click={async () => { $pinMainMenu = false; await startNewChatWithWarning(activeChatId) }} class="panel-block button" title="Start new chat with default profile" class:is-disabled={!hasModels}>
+          <button 
+            bind:this={newChatButton}
+            on:click={async () => { $pinMainMenu = false; await startNewChatWithWarning(activeChatId) }} class="panel-block button" title="Start new chat with default profile" class:is-disabled={!hasModels}>
 						<img src={plus} alt="add new chat" width="11" height="11" class="mr-2" />
 						New chat
-					</button>
+		  </button>
         </div>
       </div>
       {#if sortedChats.length > 1}

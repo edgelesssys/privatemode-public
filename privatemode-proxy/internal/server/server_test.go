@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"testing"
 
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
@@ -23,16 +24,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const testAPIKey string = "testkey"
+const (
+	testAPIKey           string = "testkey"
+	defaultClientVersion string = "v1.999.0" // greater than any test case
+)
 
 func TestPromptEncryption(t *testing.T) {
 	apiKey := testAPIKey
 	testCases := map[string]struct {
+		clientVersion    string
 		proxyAPIKey      *string
+		requestCacheSalt string
+		proxyCacheSalt   string
 		expectStatusCode int
 		expectedHeaders  map[string]string
 		expectedBody     string
 		requestMutator   func(*http.Request)
+		isApp            bool
 	}{
 		"with privatemode-proxy API key": {
 			proxyAPIKey:      &apiKey,
@@ -52,6 +60,42 @@ func TestPromptEncryption(t *testing.T) {
 			requestMutator: func(req *http.Request) {
 				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", testAPIKey))
 			},
+		},
+		"without cache salt key": {
+			proxyAPIKey:      &apiKey,
+			expectStatusCode: http.StatusOK,
+		},
+		"with valid request cache salt": {
+			proxyAPIKey:      &apiKey,
+			expectStatusCode: http.StatusOK,
+			requestCacheSalt: "r1234567890123456789012345678912",
+		},
+		"with invalid request cache salt": {
+			proxyAPIKey:      &apiKey,
+			expectStatusCode: http.StatusInternalServerError, // TODO(dr75): fix http status codes in forwarders
+			requestCacheSalt: "too short",
+		},
+		"with custom proxy cache salt": {
+			proxyAPIKey:      &apiKey,
+			expectStatusCode: http.StatusOK,
+			proxyCacheSalt:   "p1234567890123456789012345678912",
+		},
+		"with custom proxy and request cache salt": {
+			proxyAPIKey:      &apiKey,
+			expectStatusCode: http.StatusOK,
+			proxyCacheSalt:   "p1234567890123456789012345678912",
+			requestCacheSalt: "r1234567890123456789012345678912",
+		},
+		"compat: with cache salt key old client": {
+			proxyAPIKey:      &apiKey,
+			expectStatusCode: http.StatusOK,
+			clientVersion:    "v1.15.0",
+		},
+		"compat: too short cache salt key old client": {
+			proxyAPIKey:      &apiKey,
+			expectStatusCode: http.StatusInternalServerError, // TODO(dr75): fix http status codes in forwarders
+			clientVersion:    "v1.15.0",
+			requestCacheSalt: "too short",
 		},
 		"ACAO header is set for wails origin": {
 			proxyAPIKey:      &apiKey,
@@ -73,15 +117,24 @@ func TestPromptEncryption(t *testing.T) {
 				"Access-Control-Allow-Origin": "",
 			},
 		},
+		"with app client": {
+			proxyAPIKey:      &apiKey,
+			expectStatusCode: http.StatusOK,
+			isApp:            true,
+		},
 	}
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			require := require.New(t)
+			assert := assert.New(t)
 
 			// Arrange server
 			secret := secretmanager.Secret{
 				ID:   "123",
 				Data: bytes.Repeat([]byte{0x42}, 32),
+			}
+			if tc.clientVersion == "" {
+				tc.clientVersion = defaultClientVersion
 			}
 			stubAuthOpenAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				token := r.Header.Get("Authorization")
@@ -93,29 +146,54 @@ func TestPromptEncryption(t *testing.T) {
 					forwarder.HTTPError(w, r, http.StatusUnauthorized, "invalid API key: invalid API key")
 					return
 				}
+
+				// test set headers
+				appHeader := r.Header.Get(constants.PrivatemodeClientHeader)
+				if tc.isApp {
+					assert.Equal(constants.PrivatemodeClientApp, appHeader)
+				} else {
+					assert.Equal(constants.PrivatemodeClientProxy, appHeader)
+				}
+				assert.Equal(runtime.GOOS, r.Header.Get(constants.PrivatemodeOSHeader))
+				assert.Equal(runtime.GOARCH, r.Header.Get(constants.PrivatemodeArchitectureHeader))
+
+				// must override the version here as the proxy always sets 0.0.0
+				r.Header.Set(constants.PrivatemodeVersionHeader, tc.clientVersion)
+
 				stub.OpenAIEchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
 			}))
 			defer stubAuthOpenAIServer.Close()
 
-			sut := newTestServer(tc.proxyAPIKey, secret, stubAuthOpenAIServer.Listener.Addr().String())
+			sut := newTestServer(tc.proxyAPIKey, secret, stubAuthOpenAIServer.Listener.Addr().String(), tc.proxyCacheSalt, tc.isApp)
 
 			// Act
 			prompt := "Hello"
-			req := prepareRequest(t.Context(), require, &prompt, nil)
+			req := prepareRequest(t.Context(), require, &prompt, nil, tc.requestCacheSalt)
 			if tc.requestMutator != nil {
 				tc.requestMutator(req)
 			}
 			resp := httptest.NewRecorder()
 			sut.GetHandler().ServeHTTP(resp, req)
 
-			// Assert
-			assert := assert.New(t)
-			assert.Equal(tc.expectStatusCode, resp.Code)
+			if !assert.Equal(tc.expectStatusCode, resp.Code) {
+				t.Logf("Body: %s", resp.Body.String())
+			}
 			if resp.Code == http.StatusOK {
 				var res openai.ChatResponse
 				require.NoError(json.NewDecoder(resp.Body).Decode(&res))
 				require.Len(res.Choices, 1)
 				assert.Equal("Echo: Hello", *res.Choices[0].Message.Content)
+
+				// cache salt should never be empty
+				cacheSaltHeader := resp.Header().Get("Request-Cache-Salt")
+				assert.NotEmpty(cacheSaltHeader)
+
+				// cache salt is actually used; request cache salt takes precedence
+				if tc.requestCacheSalt != "" {
+					assert.Equal(tc.requestCacheSalt, cacheSaltHeader)
+				} else if tc.proxyCacheSalt != "" {
+					assert.Equal(tc.proxyCacheSalt, cacheSaltHeader)
+				}
 			}
 			if tc.expectedBody != "" {
 				body, err := io.ReadAll(resp.Body)
@@ -147,7 +225,7 @@ func TestTools(t *testing.T) {
 
 	// Create the SUT once (or inside the loop if you prefer)
 	apiKey := testAPIKey
-	sut := newTestServer(&apiKey, secret, stubAuthOpenAIServer.Listener.Addr().String())
+	sut := newTestServer(&apiKey, secret, stubAuthOpenAIServer.Listener.Addr().String(), "", false)
 
 	testFunc1 := `{"type":"function","function":"func1"}`
 	testFunc1Echo := `{"type":"function","function":"func1","test":"echo"}`
@@ -212,7 +290,7 @@ func TestTools(t *testing.T) {
 				tools = append(tools, json.RawMessage(tool))
 			}
 
-			req := prepareRequest(t.Context(), require, tc.prompt, tools)
+			req := prepareRequest(t.Context(), require, tc.prompt, tools, "")
 			resp := httptest.NewRecorder()
 			sut.GetHandler().ServeHTTP(resp, req)
 			require.Equal(http.StatusOK, resp.Code)
@@ -327,7 +405,7 @@ func TestUnstructuredEncrypted(t *testing.T) {
 			stub := fullEncryptionStubServer(secret, tc.handler)
 			t.Cleanup(func() { stub.Close() })
 
-			sut := newTestServer(nil, secret, stub.Listener.Addr().String())
+			sut := newTestServer(nil, secret, stub.Listener.Addr().String(), "", false)
 
 			body, contentType := tc.buildBody(t)
 
@@ -348,12 +426,14 @@ func TestUnstructuredEncrypted(t *testing.T) {
 }
 
 // newTestServer returns a stub server for testing.
-func newTestServer(apiKey *string, secret secretmanager.Secret, openAIServerAddr string) *Server {
+func newTestServer(apiKey *string, secret secretmanager.Secret, openAIServerAddr string, defaultCacheSalt string, isApp bool) *Server {
 	return &Server{
-		apiKey:    apiKey,
-		sm:        stubSecretManager{Secret: secret},
-		forwarder: forwarder.New("tcp", openAIServerAddr, slog.Default()),
-		log:       slog.Default(),
+		apiKey:           apiKey,
+		defaultCacheSalt: defaultCacheSalt,
+		sm:               stubSecretManager{Secret: secret},
+		forwarder:        forwarder.New("tcp", openAIServerAddr, slog.Default()),
+		log:              slog.Default(),
+		isApp:            isApp,
 	}
 }
 
@@ -392,7 +472,7 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 	}))
 }
 
-func prepareRequest(ctx context.Context, require *require.Assertions, prompt *string, tools []any) *http.Request {
+func prepareRequest(ctx context.Context, require *require.Assertions, prompt *string, tools []any, cacheSalt string) *http.Request {
 	baseURL := "http://192.0.2.1:8080" // doesn't matter
 	url := fmt.Sprintf("%s/v1/chat/completions", baseURL)
 
@@ -406,7 +486,8 @@ func prepareRequest(ctx context.Context, require *require.Assertions, prompt *st
 				Content: prompt,
 			},
 		},
-		Tools: tools,
+		Tools:     tools,
+		CacheSalt: cacheSalt,
 	}
 
 	payloadBytes, err := json.Marshal(payload)

@@ -26,5 +26,10 @@ func New(adapter adapter.InferenceAdapter, log *slog.Logger) *Server {
 
 // Serve starts the server.
 func (s *Server) Serve(listener net.Listener) error {
+	return http.ServeTLS(listener, s.adapter.ServeMux(), "/etc/tls/tls.crt", "/etc/tls/tls.key")
+}
+
+// serveInsecure starts the server without TLS. Only used in testing.
+func (s *Server) serveInsecure(listener net.Listener) error {
 	return http.Serve(listener, s.adapter.ServeMux())
 }

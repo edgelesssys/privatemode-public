@@ -17,33 +17,25 @@
     type Message,
     type Chat
   } from './Types.svelte'
-  import Prompts from './Prompts.svelte'
   import Messages from './Messages.svelte'
   import { restartProfile } from './Profiles.svelte'
   import { afterUpdate, onMount, onDestroy } from 'svelte'
   import Fa from 'svelte-fa/src/fa.svelte'
   import {
-    faArrowUpFromBracket,
-    faPaperPlane,
-    faGear,
-    faPenToSquare,
-    faMicrophone,
-    faLightbulb,
     faCommentSlash,
-    faCircleCheck
+    faCircleCheck,
+    faSpinner
   } from '@fortawesome/free-solid-svg-icons/index'
+  import FileUploadButton from './FileUploadButton.svelte'
   import { v4 as uuidv4 } from 'uuid'
-  import { getPrice } from './Stats.svelte'
   import { autoGrowInputOnEvent, scrollToBottom, sizeTextElements } from './Util.svelte'
   import ChatSettingsModal from './ChatSettingsModal.svelte'
   import Footer from './Footer.svelte'
-  import { openModal } from 'svelte-modals'
-  import PromptInput from './PromptInput.svelte'
   import { ChatRequest } from './ChatRequest.svelte'
-  import { getModelDetail } from './Models.svelte'
-  import microphone from '../assets/microphone.svg'
   import send from '../assets/send.svg'
+  import { FILE_MESSAGE_PREFIX } from './FileUploadService.svelte'
   import logoSmall from '../assets/logo-small.svg'
+  import { TestChatController } from './SmokeTest';
 
   export let params = { chatId: '' }
   const chatId: number = parseInt(params.chatId)
@@ -53,16 +45,58 @@
   let recognition: any = null
   let recording = false
   let lastSubmitRecorded = false
+  let isUploading = false
+  let uploadStatus = { progress: 0, filename: null }
+  let uploadErrorMessage = ''
+  let fileUploadButton: any // reference to the FileUploadButton component
+  let selectedFile: File | null = null
+  let fileUploaded = false // Track if a file has been successfully uploaded
 
   $: chat = $chatsStorage.find((chat) => chat.id === chatId) as Chat
   $: chatSettings = chat?.settings
-  let showSettingsModal
+  $: if (chat) {
+    fileUploaded = chat.hasUploadedFile === true
+  }
+  let showSettingsModal: () => void
   let promptInput = ''
 
-  $: isSendButtonDisabled = promptInput === ''
+  $: isSendButtonDisabled = (promptInput === '' && !fileUploaded) || isUploading
+
+  // Implement methods of chat controller for automation
+  let sendButton: HTMLButtonElement | null = null;
+  
+  TestChatController.sendMessage = async () => {
+    if (sendButton && !sendButton.disabled) {
+      sendButton.click();
+    } else {
+      const error = sendButton ? 'error: send button is disabled' : 'error: send button not found';
+      throw new Error(error);
+    }
+  };
+  TestChatController.setMessageInput = async (value: string) => {
+    promptInput = value;
+    // works also with 10ms, so 100 should be safe
+    await new Promise(resolve => setTimeout(resolve, 100));
+  };
+  TestChatController.activateMessageInput = async () => {
+    focusInput();
+  };
+  TestChatController.getLastMessageContent = async (role: string) => {
+    // Find the last message in $currentChatMessages matching the given role
+    const last = [...$currentChatMessages].reverse().find(m => m.role === role);
+    if (last && last.content) {
+      return last.content;
+    }
+
+    // If no message is found, throw an error and return the last message ignoring the role
+    // Do not try to get the content as it might be an error message with no content field
+    const lastMessage = $currentChatMessages[$currentChatMessages.length - 1];
+    const messageString = JSON.stringify(lastMessage);
+    throw new Error(`No message found for role: ${role}; last message: ${messageString}`);
+  };
 
   let scDelay
-  const onStateChange = async (...args:any) => {
+  const onStateChange = async (...args: any[]) => {
     if (!chat) return
     clearTimeout(scDelay)
     setTimeout(async () => {
@@ -95,7 +129,7 @@
 
   $: onStateChange($checkStateChange, $showSetChatSettings, $submitExitingPromptsNow, $continueMessage)
 
-  const afterChatLoad = (...args:any) => {
+  const afterChatLoad = (...args: any[]) => {
     scrollToBottom()
   }
 
@@ -120,6 +154,21 @@
     chatRequest = new ChatRequest()
     await chatRequest.setChat(chat)
 
+    // Check if this chat has any file messages and set hasUploadedFile flag accordingly
+    const hasFileMessage = chat.messages.some(m =>
+      m.role === 'user' && m.content.startsWith(FILE_MESSAGE_PREFIX)
+    )
+  
+    if (hasFileMessage) {
+      fileUploaded = true
+      chat.hasUploadedFile = true
+      saveChatStore()
+    } else {
+      fileUploaded = false
+      chat.hasUploadedFile = false
+      saveChatStore()
+    }
+
     chat.lastAccess = Date.now()
     saveChatStore()
     $checkStateChange++
@@ -141,7 +190,7 @@
       recognition.onstart = () => {
         recording = true
       }
-      recognition.onresult = (event) => {
+      recognition.onresult = (event: any) => {
         // Stop speech recognition, submit the form and remove the pulse
         const last = event.results.length - 1
         const text = event.results[last][0].transcript
@@ -177,25 +226,6 @@
     scrollToBottom()
   }
 
-  const addNewMessage = () => {
-    if (chatRequest.updating) return
-    let inputMessage: Message
-    const lastMessage = $currentChatMessages[$currentChatMessages.length - 1]
-    const uuid = uuidv4()
-    if ($currentChatMessages.length === 0) {
-      inputMessage = { role: 'system', content: input.value, uuid }
-    } else if (lastMessage && lastMessage.role === 'user') {
-      inputMessage = { role: 'assistant', content: input.value, uuid }
-    } else {
-      inputMessage = { role: 'user', content: input.value, uuid }
-    }
-    addMessage(chatId, inputMessage)
-
-    // Clear the input value
-    input.value = ''
-    // input.blur()
-    focusInput()
-  }
 
   const ttsStart = (text:string, recorded:boolean) => {
     // Use TTS to read the response, if query was recorded
@@ -209,6 +239,53 @@
     if ('SpeechSynthesisUtterance' in window) {
       window.speechSynthesis.cancel()
     }
+  }
+
+  // File upload handling functions
+  const handleFileSelected = (event: CustomEvent<{file: File}>) => {
+    selectedFile = event.detail.file
+    console.log('File selected:', selectedFile.name)
+  }
+  
+  const handleUploadStart = (event: CustomEvent<{filename: string}>) => {
+    isUploading = true
+    uploadErrorMessage = ''
+    uploadStatus = { progress: 0, filename: event.detail.filename }
+    // Reset the updating state to hide the cancel button
+    chatRequest.updating = false
+    chatRequest.updatingMessage = ''
+    console.log('Upload started:', event.detail.filename)
+  }
+  
+  const handleUploadComplete = (event: CustomEvent<{message: Message[]}>) => {
+    isUploading = false
+    uploadStatus = { ...uploadStatus, progress: 100 }
+    fileUploaded = true
+
+    // Store the fileUploaded state in the chat object
+    if (chat) {
+      chat.hasUploadedFile = true
+      saveChatStore()
+    }
+
+    selectedFile = null // Remove the file display since it's now in the chat
+    // Add both messages to the chat - user file message and empty assistant message
+    const messages = event.detail.message
+  
+    // Add the user message
+    addMessage(chatId, messages[0])
+  
+    // Add the empty assistant message
+    if (messages.length > 1) {
+      addMessage(chatId, messages[1])
+    }
+  
+    scrollToBottom()
+  }
+  
+  const handleUploadError = (event: CustomEvent<{error: string}>) => {
+    isUploading = false
+    console.error('Upload error:', event.detail.error)
   }
 
   let waitingForCancel:any = 0
@@ -258,7 +335,8 @@
 
     const checkUserScroll = (e: Event) => {
       const el = e.target as HTMLElement
-      if (el && e.isTrusted && didScroll) {
+      // Check if user has scrolled and adjust auto-scroll behavior accordingly
+      if (el && didScroll) {
         // from user
         doScroll = (window.innerHeight + window.scrollY + 10) >= document.body.offsetHeight
       }
@@ -294,75 +372,61 @@
     focusInput()
   }
 
-  const suggestName = async (): Promise<void> => {
-    const suggestMessage: Message = {
-      role: 'user',
-      content: "Using appropriate language, please tell me a short 6 word summary of this conversation's topic for use as a book title. Only respond with the summary.",
-      uuid: uuidv4()
-    }
-
-    const suggestMessages = $currentChatMessages.slice(0, 10) // limit to first 10 messages
-    suggestMessages.push(suggestMessage)
-
-    chatRequest.updating = true
-    chatRequest.updatingMessage = 'Getting suggestion for chat name...'
-    const response = await chatRequest.sendRequest(suggestMessages, {
-      chat,
-      autoAddMessages: false,
-      streaming: false,
-      summaryRequest: true
-    })
-
-    try {
-      await response.promiseToFinish()
-    } catch (e) {
-      console.error('Error generating name suggestion', e, e.stack)
-    }
-    chatRequest.updating = false
-    chatRequest.updatingMessage = ''
-    if (response.hasError()) {
-      addMessage(chatId, {
-        role: 'error',
-        content: `Unable to get suggested name: ${response.getError()}`,
-        uuid: uuidv4()
-      })
-    } else {
-      response.getMessages().forEach(m => {
-        const name = m.content.split(/\s+/).slice(0, 8).join(' ').replace(/^[^a-z0-9!?]+|[^a-z0-9!?]+$/gi, '').trim()
-        if (name) chat.name = name
-      })
-      saveChatStore()
-    }
-  }
-
-  function promptRename () {
-    openModal(PromptInput, {
-      title: 'Enter Name for Chat',
-      label: 'Name',
-      value: chat.name,
-      class: 'is-info',
-      onSubmit: (value) => {
-        chat.name = (value || '').trim() || chat.name
-        saveChatStore()
-        $checkStateChange++
-      }
-    })
-  }
-
-  const recordToggle = () => {
-    ttsStop()
-    if (chatRequest.updating) return
-    // Check if already recording - if so, stop - else start
-    if (recording) {
-      recognition?.stop()
-      recording = false
-    } else {
-      recognition?.start()
-    }
-  }
-
 </script>
 <style>
+  /* Spin animation for the loading icon */
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  
+  /* Upload banner styling */
+  .file-upload-banner {
+    width: 100%;
+    margin-bottom: 8px;
+    padding: 8px 12px;
+    background-color: white;
+    border-radius: 30px;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+  
+  .file-upload-icon {
+    margin-right: 10px;
+    color: rgb(122, 73, 246);
+    flex-shrink: 0;
+  }
+  
+  .file-upload-content {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+  
+  .file-upload-filename {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.9rem;
+  }
+  
+  .file-upload-progress-container {
+    margin-top: 4px;
+    height: 3px;
+    background-color: #e0e0e0;
+    border-radius: 1.5px;
+    overflow: hidden;
+  }
+  
+  .file-upload-progress-bar {
+    height: 100%;
+    background-color: rgb(122, 73, 246);
+    border-radius: 1.5px;
+    transition: width 0.3s ease;
+  }
+  
   .chat-page {
     padding-top: var(--banner-offset, 1.25rem);
     transition: padding-top 0.3s ease;
@@ -371,10 +435,14 @@
   :global(.update-banner:not(:empty) + .chat-page) {
     --banner-offset: 3rem;
   }
+  
+  .control.is-expanded {
+    position: relative;
+  }
 </style>
 
 {#if chat}
-<ChatSettingsModal chatId={chatId} bind:show={showSettingsModal} />
+<svelte:component this={ChatSettingsModal} chatId={chatId} bind:show={showSettingsModal} />
 <div class="chat-page pt-5 px-2" style="--running-totals: {Object.entries(chat.usage || {}).length}">
 <div class="chat-content">
 <nav class="level chat-header">
@@ -416,8 +484,23 @@
 </div>
 <Footer class="prompt-input-container" strongMask={true}>
   <div class="chat-content mx-auto pt-4 pb-2">
-  <form class="field has-addons has-addons-right is-align-items-flex-end" on:submit|preventDefault={() => submitForm()}>
-    <p class="control is-expanded">
+  <form class="field has-addons has-addons-right is-align-items-flex-end" style="margin-bottom: 0; overflow: hidden; max-width: 100%;" on:submit|preventDefault={() => submitForm()}>
+    <p class="control is-expanded" style="overflow: hidden; max-width: 100%;">
+      <!-- Enhanced loading banner shown during file upload -->
+      {#if isUploading}
+        <!-- Upload indicator with full width matching the chat input -->
+        <div class="file-upload-banner">
+          <span class="file-upload-icon">
+            <Fa icon={faSpinner} style="animation: spin 1s linear infinite;" />
+          </span>
+          <div class="file-upload-content">
+            <div class="file-upload-filename" title="{uploadStatus?.filename || 'Uploading document...'}">{uploadStatus?.filename || 'Uploading document...'}</div>
+            <div class="file-upload-progress-container">
+              <div class="file-upload-progress-bar" style="width: {uploadStatus?.progress || 0}%;"></div>
+            </div>
+          </div>
+        </div>
+      {/if}
       <textarea
         class="input is-info is-focused chat-input auto-size"
         placeholder="Type your message here..."
@@ -431,16 +514,17 @@
             e.preventDefault()
           }
         }}
-        on:input={e => autoGrowInputOnEvent(e)}
+        on:input={e => {
+          autoGrowInputOnEvent(e)
+          // Reset updating state when user types
+          chatRequest.updating = false
+          chatRequest.updatingMessage = ''
+        }}
         bind:this={input}
       />
     </p>
     <div class="chat-page-controls">
-    <!-- <p class="control mic" class:is-hidden={!recognition}>
-      <button class="button" class:is-disabled={chatRequest.updating} class:is-pulse={recording} on:click|preventDefault={recordToggle}
-      ><img width="12" height="18" src={microphone} alt="microphone icon"/></button
-      >
-    </p> -->
+    <!-- Microphone button removed as it's not used in current implementation -->
     <!-- <p class="control settings">
       <button title="Chat/Profile Settings" class="button" on:click|preventDefault={showSettingsModal}><span class="icon"><Fa icon={faGear} /></span></button>
     </p>
@@ -458,8 +542,17 @@
       </span></button>
     </p>
     {:else}
+    <FileUploadButton 
+      bind:this={fileUploadButton}
+      bind:selectedFile={selectedFile}
+      disabled={chatRequest.updating || fileUploaded || isUploading}
+      on:fileSelected={handleFileSelected}
+      on:uploadStart={handleUploadStart}
+      on:uploadComplete={handleUploadComplete}
+      on:uploadError={handleUploadError} 
+    />
     <p class="control send">
-      <button title="Send" class="button is-info" type="submit" disabled={isSendButtonDisabled}><img width="18" height="18" src={send} alt="send icon"/></button>
+      <button title="Send" class="button is-info" type="submit" disabled={isSendButtonDisabled} bind:this={sendButton}><img width="18" height="18" src={send} alt="send icon"/></button>
     </p>
     {/if}
     </div>

@@ -12,6 +12,7 @@ import (
 
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
+	"github.com/edgelesssys/continuum/internal/gpl/openai"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/setup"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -31,6 +32,12 @@ func main() {
 	workspace := filepath.Join(cfgDir, "EdgelessSystems", "privatemode")
 	log := logging.NewFileLogger("info", os.Stderr, filepath.Join(workspace, "log.txt"))
 
+	cacheSalt, err := openai.RandomPromptCacheSalt()
+	if err != nil {
+		log.Error("Failed to generate random salt for prompt caching", "error", err)
+		os.Exit(1)
+	}
+
 	app := NewApp(Config{
 		Flags: setup.Flags{
 			Workspace:      workspace,
@@ -43,6 +50,9 @@ func main() {
 				CDNBaseURL:          "https://cdn.confidential.cloud/privatemode/v2",
 			},
 			InsecureAPIConnection: false,
+			// In the app we always want prompt caching and use a random salt that lives as long as the app.
+			// This may be overridden in the config file to enable cache sharing between users.
+			PromptCacheSalt: cacheSalt,
 		},
 		runtimeConfig: jsonConfig{}, //nolint:exhaustruct
 	}, log)
@@ -60,6 +70,7 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		Bind: []interface{}{
 			&ConfigurationService{config: &app.config},
+			&SmokeTestService{app: app},
 		},
 	})
 	if err != nil {

@@ -2,6 +2,8 @@ package cipher
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
@@ -18,22 +20,22 @@ func TestEncryptResponse(t *testing.T) {
 	id := "id"
 	nonce := []byte("nonce")
 	secret := bytes.Repeat([]byte{0x42}, 32)
-	secrets := secrets.New(nil)
+	secrets := secrets.New(stubSecretGetter{}, nil)
 	cipher := New(secrets)
 
 	// No secrets set
-	_, err := cipher.encryptResponse(id, message, nonce, 2)
+	_, err := cipher.encryptResponse(t.Context(), id, message, nonce, 2)
 	assert.Error(err)
 
 	// Add a secret
 	secrets.Set(id, secret)
 
 	// Encrypt
-	cipherText, err := cipher.encryptResponse(id, message, nonce, 2)
+	cipherText, err := cipher.encryptResponse(t.Context(), id, message, nonce, 2)
 	require.NoError(err)
 
 	// Encrypt with wrong id
-	_, err = cipher.encryptResponse("wrong", message, nonce, 2)
+	_, err = cipher.encryptResponse(t.Context(), "wrong", message, nonce, 2)
 	assert.Error(err)
 
 	// Decrypt
@@ -49,7 +51,7 @@ func TestDecryptRequest(t *testing.T) {
 	message := "message"
 	id := "id"
 	secret := bytes.Repeat([]byte{0x42}, 32)
-	secrets := secrets.New(nil)
+	secrets := secrets.New(stubSecretGetter{}, nil)
 	cipher := New(secrets)
 
 	// Prepare ciphertext
@@ -62,20 +64,20 @@ func TestDecryptRequest(t *testing.T) {
 	require.NoError(err)
 
 	// No secrets set
-	_, _, err = cipher.decryptRequest(cipherText, nonce, 0)
+	_, _, err = cipher.decryptRequest(t.Context(), cipherText, nonce, 0)
 	assert.Error(err)
 
 	// Add a secret
 	secrets.Set(id, secret)
 
 	// Decrypt
-	plainText, gotID, err := cipher.decryptRequest(cipherText, nonce, 0)
+	plainText, gotID, err := cipher.decryptRequest(t.Context(), cipherText, nonce, 0)
 	require.NoError(err)
 	assert.Equal(message, plainText)
 	assert.Equal(id, gotID)
 
 	// Try to decrypt message with wrong format
-	_, _, err = cipher.decryptRequest("wrong", nonce, 0)
+	_, _, err = cipher.decryptRequest(t.Context(), "wrong", nonce, 0)
 	assert.Error(err)
 }
 
@@ -141,7 +143,7 @@ func TestResponseCipherDecryptRequest(t *testing.T) {
 			assert := assert.New(t)
 			require := require.New(t)
 
-			result, err := tc.responseCipher.DecryptRequest(tc.requestBody)
+			result, err := tc.responseCipher.DecryptRequest(t.Context())(tc.requestBody)
 
 			if tc.wantErr {
 				assert.Error(err)
@@ -226,7 +228,7 @@ func TestResponseCipherEncryptResponse(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			result, err := tc.responseCipher.EncryptResponse(tc.responseBody)
+			result, err := tc.responseCipher.EncryptResponse(t.Context())(tc.responseBody)
 			if tc.wantErr {
 				assert.Error(err)
 				return
@@ -245,7 +247,7 @@ func TestResponseCipherEncryptDecrypt(t *testing.T) {
 	message := "message"
 	id := "id"
 	secret := bytes.Repeat([]byte{0x42}, 32)
-	secrets := secrets.New(nil)
+	secrets := secrets.New(stubSecretGetter{}, nil)
 	cipher := New(secrets)
 
 	// Add a secret
@@ -265,20 +267,20 @@ func TestResponseCipherEncryptDecrypt(t *testing.T) {
 	require.NoError(err)
 
 	// Decrypt the messages
-	plainText1, err := responseCipher.DecryptRequest(cipherText1)
+	plainText1, err := responseCipher.DecryptRequest(t.Context())(cipherText1)
 	assert.NoError(err)
 	assert.Equal(message, plainText1)
 
-	plainText2, err := responseCipher.DecryptRequest(cipherText2)
+	plainText2, err := responseCipher.DecryptRequest(t.Context())(cipherText2)
 	assert.NoError(err)
 	assert.Equal(message, plainText2)
 
 	// Encrypt a response
 	responseBody := "response"
-	encryptedResponse1, err := responseCipher.EncryptResponse(responseBody)
+	encryptedResponse1, err := responseCipher.EncryptResponse(t.Context())(responseBody)
 	assert.NoError(err)
 
-	encryptedResponse2, err := responseCipher.EncryptResponse(responseBody)
+	encryptedResponse2, err := responseCipher.EncryptResponse(t.Context())(responseBody)
 	assert.NoError(err)
 
 	// Decrypt the response
@@ -299,14 +301,20 @@ type stubCipher struct {
 	getNonceErr error
 }
 
-func (s *stubCipher) encryptResponse(_, _ string, _ []byte, _ uint32) (string, error) {
+func (s *stubCipher) encryptResponse(_ context.Context, _, _ string, _ []byte, _ uint32) (string, error) {
 	return s.cipherMsg, s.cipherErr
 }
 
-func (s *stubCipher) decryptRequest(string, []byte, uint32) (text, id string, err error) {
+func (s *stubCipher) decryptRequest(_ context.Context, _ string, _ []byte, _ uint32) (text, id string, err error) {
 	return s.decipherMsg, "unit-test", s.decipherErr
 }
 
 func (s *stubCipher) getNonce(string) ([]byte, error) {
 	return []byte("nonce"), s.getNonceErr
+}
+
+type stubSecretGetter struct{}
+
+func (s stubSecretGetter) GetSecret(_ context.Context, _ string) ([]byte, error) {
+	return nil, errors.New("not found")
 }

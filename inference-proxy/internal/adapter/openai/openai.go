@@ -6,6 +6,7 @@ package openai implements an inference API adapter for the [OpenAI API spec].
 package openai
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,20 +21,24 @@ import (
 
 // Adapter implements an InferenceAdapter for OpenAI API.
 type Adapter struct {
-	cipher       *cipher.Cipher
-	forwarder    mutatingForwarder
-	workloadTask string
+	cipher        *cipher.Cipher
+	forwarder     mutatingForwarder
+	workloadTasks []string
 
 	log *slog.Logger
 }
 
 // New creates a new InferenceAdapter for the OpenAI API.
-func New(workloadTask string, cipher *cipher.Cipher, forwarder mutatingForwarder, log *slog.Logger) (*Adapter, error) {
+func New(workloadTasks []string, cipher *cipher.Cipher, forwarder mutatingForwarder, log *slog.Logger) (*Adapter, error) {
+	if len(workloadTasks) == 0 {
+		return nil, errors.New("no workload tasks provided")
+	}
+
 	return &Adapter{
-		cipher:       cipher,
-		forwarder:    forwarder,
-		workloadTask: workloadTask,
-		log:          log,
+		cipher:        cipher,
+		forwarder:     forwarder,
+		workloadTasks: workloadTasks,
+		log:           log,
 	}, nil
 }
 
@@ -45,18 +50,15 @@ func (t *Adapter) ServeMux() *http.ServeMux {
 	srv.HandleFunc("/", t.unsupportedEndpoint)
 
 	// Create chat completion: https://platform.openai.com/docs/api-reference/chat/create
-	srv.HandleFunc("/v1/chat/completions", t.forwardWithFieldMutation(
-		forwarder.FieldSelector{{openai.ChatRequestMessagesField}, {openai.ChatRequestToolsField}}, // Decrypting should yield an OpenAI response struct
-		openai.PlainCompletionsRequestFields,
-		forwarder.FieldSelector{{openai.ChatResponseEncryptionField}}, // Encrypting the response field results in a simple string
-		openai.PlainCompletionsResponseFields,
-	)) // cannot restrict to POST method because OPTIONS is needed for CORS by the browser
+	srv.HandleFunc("/v1/chat/completions", t.forwardChatCompletionsRequest()) // cannot restrict to POST method because OPTIONS is needed for CORS by the browser
 
 	// Create embeddings: https://platform.openai.com/docs/api-reference/embeddings/create
 	srv.HandleFunc("POST /v1/embeddings", t.forwardEmbeddingsRequest)
 
 	// List models: https://platform.openai.com/docs/api-reference/models/list
 	srv.HandleFunc("GET /v1/models", t.forwardModelsRequest)
+
+	srv.HandleFunc(openai.TranscriptionsEndpoint, t.forwardTranscriptionsRequest)
 
 	// TODO: vllm only supports /v1/chat/completions and /v1/models
 	// Until vllm implements more endpoints we won't put effort into implementing these endpoints
@@ -135,7 +137,7 @@ func (t *Adapter) unsupportedEndpoint(w http.ResponseWriter, _ *http.Request) {
 // and augments the response with the task vllm is running with.
 func (t *Adapter) forwardModelsRequest(w http.ResponseWriter, r *http.Request) {
 	mutate := func(request string) (mutatedRequest string, err error) {
-		return request + `, "tasks": ["` + t.workloadTask + `"]`, nil
+		return request + `,"tasks":["` + strings.Join(t.workloadTasks, `","`) + `"]`, nil
 	}
 
 	t.forwarder.Forward(
@@ -151,72 +153,115 @@ func (t *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Reques
 
 	t.forwarder.Forward(
 		w, r,
-		forwarder.WithFullJSONRequestMutation(session.DecryptRequest, openai.PlainEmbeddingsRequestFields, t.log),
-		forwarder.WithFullJSONResponseMutation(session.EncryptResponse, openai.PlainEmbeddingsResponseFields, false),
+		forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainEmbeddingsRequestFields, t.log),
+		forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainEmbeddingsResponseFields, false),
 		forwarder.NoHeaderMutation,
 	)
 }
 
-// forwardWithFieldMutation returns a handler to forward requests with field mutation using the given selectors.
-func (t *Adapter) forwardWithFieldMutation(inputEncryptSelector, inputSkipSelector, outputEncryptSelector, outputSkipSelector forwarder.FieldSelector) func(http.ResponseWriter, *http.Request) {
+func (t *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Request) {
+	session := t.cipher.NewResponseCipher()
+
+	t.forwarder.Forward(
+		w, r,
+		forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), openai.PlainTranscriptionFields, t.log),
+		forwarder.WithFullResponseMutation(session.EncryptResponse(r.Context())),
+		forwarder.NoHeaderMutation,
+	)
+}
+
+// forwardChatCompletionsRequest returns a handler to forward chat completions with field mutation using the given selectors.
+func (t *Adapter) forwardChatCompletionsRequest() func(http.ResponseWriter, *http.Request) {
+	saltInjector := openai.CacheSaltInjector(openai.RandomPromptCacheSalt, t.log)
+	saltValidator := openai.CacheSaltValidator(t.log)
+	currentVersion, err := t.getSemanticVersion(constants.Version())
+	if err != nil {
+		t.log.Error("retrieving client version", "error", err)
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := t.cipher.NewResponseCipher()
 
-		clientVersion, err := t.getClientSemanticVersion(r)
+		clientVersion, err := t.getSemanticVersion(r.Header.Get(constants.PrivatemodeVersionHeader))
 		if err != nil {
 			t.log.Error("retrieving client version", "error", err)
 			forwarder.HTTPError(w, r, http.StatusBadRequest, "checking client version: %s", err.Error())
 			return
 		}
 
+		// log old versions for debugging and to remove them if they are not used anymore
+		if clientVersion == "" || semver.Compare(clientVersion, currentVersion) != 0 {
+			t.log.Info("forwarding request", "clientVersion", clientVersion)
+		}
+
 		switch {
 		case clientVersion == "": // backwards compatibility for clients < 1.12.0 that didn't set the header
 			t.forwarder.Forward(
 				w, r,
-				forwarder.WithSelectJSONRequestMutation(session.DecryptRequest, inputEncryptSelector, t.log),
-				forwarder.WithSelectJSONResponseMutation(session.EncryptResponse, outputEncryptSelector),
+				forwarder.RequestMutatorChain(
+					forwarder.WithSelectJSONRequestMutation(
+						session.DecryptRequest(r.Context()),
+						forwarder.FieldSelector{{openai.ChatRequestMessagesField}, {openai.ChatRequestToolsField}},
+						t.log),
+					saltInjector,
+				),
+				forwarder.WithSelectJSONResponseMutation(session.EncryptResponse(r.Context()), forwarder.FieldSelector{{openai.ChatResponseEncryptionField}}),
 				forwarder.NoHeaderMutation,
 			)
 		case semver.Compare(clientVersion, "v1.16.0") < 0: // backwards compatibility for clients < 1.16.0
 			t.forwarder.Forward(
 				w, r,
-				forwarder.WithFullJSONRequestMutation(session.DecryptRequest, inputSkipSelector, t.log),
-				forwarder.WithFullJSONResponseMutation(session.EncryptResponse, outputSkipSelector, true),
+				forwarder.RequestMutatorChain(
+					forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, t.log),
+					saltInjector,
+				),
+				forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainCompletionsResponseFields, true),
+				forwarder.NoHeaderMutation,
+			)
+		case semver.Compare(clientVersion, "v1.17.0") < 0: // clients without cache_salt
+			t.forwarder.Forward(
+				w, r,
+				forwarder.RequestMutatorChain(
+					forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, t.log),
+					saltInjector,
+				),
+				forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainCompletionsResponseFields, false),
 				forwarder.NoHeaderMutation,
 			)
 		default:
 			t.forwarder.Forward(
 				w, r,
-				forwarder.WithFullJSONRequestMutation(session.DecryptRequest, inputSkipSelector, t.log),
-				forwarder.WithFullJSONResponseMutation(session.EncryptResponse, outputSkipSelector, false),
+				forwarder.RequestMutatorChain(
+					forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, t.log),
+					saltValidator, // Introduced cache_salt validation.
+				),
+				forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainCompletionsResponseFields, false),
 				forwarder.NoHeaderMutation,
 			)
 		}
 	}
 }
 
-// getClientSemanticVersion returns the client semantic version from the request header.
+// getSemanticVersion returns the client semantic version from the request header.
 // NOTE: the app did not set the correct version prior v1.16.0 such that version
 // is always 0.0.0 in that case!
-func (t *Adapter) getClientSemanticVersion(r *http.Request) (string, error) {
-	clientVersion := r.Header.Get(constants.PrivatemodeVersionHeader)
-
+func (t *Adapter) getSemanticVersion(version string) (string, error) {
 	// Clients without version (< 1.12.0) will not set the header
-	if clientVersion != "" {
+	if version != "" {
 		// Drop pseudo-version suffix (anything after "-")
-		clientVersion, _, _ = strings.Cut(clientVersion, "-")
+		version, _, _ = strings.Cut(version, "-")
 
 		// old clients app set the version to "0.0.0", instead of "v0.0.0"
-		if clientVersion == "0.0.0" {
-			clientVersion = "v0.0.0"
+		if version == "0.0.0" {
+			version = "v0.0.0"
 		}
 
-		if !semver.IsValid(clientVersion) {
-			return "", fmt.Errorf("invalid client version: %s", clientVersion)
+		if !semver.IsValid(version) {
+			return "", fmt.Errorf("invalid client version: %s", version)
 		}
 	}
 
-	return clientVersion, nil
+	return version, nil
 }
 
 type mutatingForwarder interface {

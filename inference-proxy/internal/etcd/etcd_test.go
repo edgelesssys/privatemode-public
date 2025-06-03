@@ -56,7 +56,7 @@ func TestFetchSecrets(t *testing.T) {
 			}
 			assert.NoError(err)
 			for _, kvs := range tc.etcdClient.getResponse.Kvs {
-				_, ok := secrets.Get(strings.TrimPrefix(string(kvs.Key), constants.EtcdInferenceSecretPrefix))
+				_, ok := secrets.Get(t.Context(), strings.TrimPrefix(string(kvs.Key), constants.EtcdInferenceSecretPrefix))
 				assert.True(ok)
 			}
 		})
@@ -78,12 +78,12 @@ func TestGetEndpointFromInstances(t *testing.T) {
 
 func TestWatchSecrets(t *testing.T) {
 	testCases := map[string]struct {
-		secrets    *secrets.Secrets
-		events     []clientv3.WatchResponse
-		assertions func(*assert.Assertions, *secrets.Secrets)
+		initialSecrets map[string][]byte
+		events         []clientv3.WatchResponse
+		assertions     func(*testing.T, *secrets.Secrets)
 	}{
 		"add secret": {
-			secrets: secrets.New(nil),
+			initialSecrets: nil,
 			events: []clientv3.WatchResponse{
 				{
 					Events: []*clientv3.Event{
@@ -108,17 +108,17 @@ func TestWatchSecrets(t *testing.T) {
 					},
 				},
 			},
-			assertions: func(assert *assert.Assertions, sec *secrets.Secrets) {
-				secret, ok := sec.Get("key1")
-				assert.True(ok)
-				assert.Equal("value1", string(secret))
-				secret, ok = sec.Get("key2")
-				assert.True(ok)
-				assert.Equal("value2", string(secret))
+			assertions: func(t *testing.T, sec *secrets.Secrets) {
+				secret, ok := sec.Get(t.Context(), "key1")
+				assert.True(t, ok)
+				assert.Equal(t, "value1", string(secret))
+				secret, ok = sec.Get(t.Context(), "key2")
+				assert.True(t, ok)
+				assert.Equal(t, "value2", string(secret))
 			},
 		},
 		"remove secret": {
-			secrets: secrets.New(map[string][]byte{"key1": []byte("value1")}),
+			initialSecrets: map[string][]byte{"key1": []byte("value1")},
 			events: []clientv3.WatchResponse{
 				{
 					Events: []*clientv3.Event{
@@ -131,13 +131,13 @@ func TestWatchSecrets(t *testing.T) {
 					},
 				},
 			},
-			assertions: func(assert *assert.Assertions, sec *secrets.Secrets) {
-				_, ok := sec.Get("key1")
-				assert.False(ok)
+			assertions: func(t *testing.T, sec *secrets.Secrets) {
+				_, ok := sec.Get(t.Context(), "key1")
+				assert.False(t, ok)
 			},
 		},
 		"update secret": {
-			secrets: secrets.New(map[string][]byte{"key1": []byte("value1")}),
+			initialSecrets: map[string][]byte{"key1": []byte("value1")},
 			events: []clientv3.WatchResponse{
 				{
 					Events: []*clientv3.Event{
@@ -153,14 +153,14 @@ func TestWatchSecrets(t *testing.T) {
 					},
 				},
 			},
-			assertions: func(assert *assert.Assertions, sec *secrets.Secrets) {
-				secret, ok := sec.Get("key1")
-				assert.True(ok)
-				assert.Equal("value2", string(secret))
+			assertions: func(t *testing.T, sec *secrets.Secrets) {
+				secret, ok := sec.Get(t.Context(), "key1")
+				assert.True(t, ok)
+				assert.Equal(t, "value2", string(secret))
 			},
 		},
 		"canceled then add secret": {
-			secrets: secrets.New(nil),
+			initialSecrets: nil,
 			events: []clientv3.WatchResponse{
 				{
 					Events:   []*clientv3.Event{},
@@ -178,10 +178,10 @@ func TestWatchSecrets(t *testing.T) {
 					},
 				},
 			},
-			assertions: func(assert *assert.Assertions, sec *secrets.Secrets) {
-				secret, ok := sec.Get("key1")
-				assert.True(ok)
-				assert.Equal("value1", string(secret))
+			assertions: func(t *testing.T, sec *secrets.Secrets) {
+				secret, ok := sec.Get(t.Context(), "key1")
+				assert.True(t, ok)
+				assert.Equal(t, "value1", string(secret))
 			},
 		},
 	}
@@ -189,19 +189,22 @@ func TestWatchSecrets(t *testing.T) {
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			stubClient := &stubEtcdClient{
+				getResponse:   nil,
+				getErr:        assert.AnError,
 				watchResponse: make(chan clientv3.WatchResponse),
 			}
 			etcd := &Etcd{
 				client: stubClient,
 				log:    slog.Default(),
 			}
+			secrets := secrets.New(etcd, tc.initialSecrets)
 
 			ctx, cancel := context.WithCancel(t.Context())
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				etcd.watchSecrets(ctx, tc.secrets, 0)
+				etcd.watchSecrets(ctx, secrets, 0)
 			}()
 
 			for _, event := range tc.events {
@@ -210,7 +213,7 @@ func TestWatchSecrets(t *testing.T) {
 			cancel()
 			wg.Wait()
 
-			tc.assertions(assert.New(t), tc.secrets)
+			tc.assertions(t, secrets)
 		})
 	}
 }

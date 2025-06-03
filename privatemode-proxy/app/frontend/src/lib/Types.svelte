@@ -111,6 +111,7 @@ export type Chat = {
     created: number;
     lastUse: number;
     lastAccess: number;
+    hasUploadedFile: boolean;
   };
 
   type ResponseOK = {

@@ -7,6 +7,8 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+testfiles
+
 node_modules
 /wailsjs/
 *.local

@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -44,7 +45,7 @@ func benchmarkServe(b *testing.B, apiType string) {
 	proxyLis, err := net.Listen("tcp", "")
 	require.NoError(err)
 	go func() {
-		if err := server.Serve(proxyLis); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := server.serveInsecure(proxyLis); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			panic(err)
 		}
 	}()
@@ -69,7 +70,7 @@ func benchmarkServe(b *testing.B, apiType string) {
 				if resp.StatusCode != http.StatusOK {
 					respBody, err := io.ReadAll(resp.Body)
 					require.NoError(err)
-					b.Log("response:", string(respBody))
+					b.Log("response:", string(respBody), "status:", resp.StatusCode)
 					b.FailNow()
 				}
 
@@ -88,18 +89,24 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 	fw := forwarder.New("tcp", workloadEndpoint, log)
 
 	secret := []byte("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-	c := cipher.New(secrets.New(map[string][]byte{"test": secret}))
-	plain := `[{"role": "system","content": "You are a helpful assistant."},{"role": "user","content": "Hello!"}`
+	c := cipher.New(secrets.New(stubSecretGetter{}, map[string][]byte{"test": secret}))
+	plain := `[{"role": "system","content": "You are a helpful assistant."},{"role": "user","content": "Hello!"}]`
 	requestCipher, err := crypto.NewRequestCipher(secret, "test")
 	require.NoError(err)
 	m, err := requestCipher.Encrypt(plain)
 	require.NoError(err)
 	payload := fmt.Sprintf(`{"model": "model","messages": %s}`, m)
 
-	adapter, err := adapter.New(apiType, "generate", c, fw, log)
+	adapter, err := adapter.New(apiType, []string{"generate"}, c, fw, log)
 	require.NoError(err)
 
 	server := New(adapter, log)
 
 	return []byte(payload), server
+}
+
+type stubSecretGetter struct{}
+
+func (s stubSecretGetter) GetSecret(_ context.Context, _ string) ([]byte, error) {
+	return nil, errors.New("not found")
 }

@@ -9,11 +9,15 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWithSelectJSONRequestMutation(t *testing.T) {
@@ -639,6 +643,299 @@ func TestWithFullJSONResponseMutation(t *testing.T) {
 				assert.Equal(fmt.Sprintf(`%d: {"field1": %s}`, i, tc.mutator.mutateResponse), responseParts[i])
 			}
 			assert.Equal("data: [DONE]", responseParts[messageParts]) // assert the event stream message is not mutated
+		})
+	}
+}
+
+func TestWithFormRequestMutation(t *testing.T) {
+	testCases := map[string]struct {
+		mutator      stubMutator
+		request      func(*testing.T, *require.Assertions) *http.Request
+		expectedForm map[string]string
+		skipFields   FieldSelector
+		wantErr      bool
+	}{
+		"all forms mutation": {
+			mutator: stubMutator{
+				mutateResponse: "mutated",
+			},
+			expectedForm: map[string]string{
+				"field1": "mutated",
+				"field2": "mutated",
+			},
+			request: func(t *testing.T, require *require.Assertions) *http.Request {
+				body := &bytes.Buffer{}
+				writer := multipart.NewWriter(body)
+				require.NoError(writer.WriteField("field1", "plain text"))
+				require.NoError(writer.WriteField("field2", "plain text"))
+				require.NoError(writer.Close())
+
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://192.0.2.1", body)
+				require.NoError(err)
+				req.Header.Set("Content-Type", writer.FormDataContentType())
+				return req
+			},
+		},
+		"skip select fields": {
+			mutator: stubMutator{
+				mutateResponse: "mutated",
+			},
+			skipFields: FieldSelector{{"field1"}},
+			expectedForm: map[string]string{
+				"field1": "plain text",
+				"field2": "mutated",
+				"field3": "mutated",
+			},
+			request: func(t *testing.T, require *require.Assertions) *http.Request {
+				body := &bytes.Buffer{}
+				writer := multipart.NewWriter(body)
+				require.NoError(writer.WriteField("field1", "plain text"))
+				require.NoError(writer.WriteField("field2", "plain text"))
+				require.NoError(writer.WriteField("field3", "plain text"))
+				require.NoError(writer.Close())
+
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://192.0.2.1", body)
+				require.NoError(err)
+				req.Header.Set("Content-Type", writer.FormDataContentType())
+				return req
+			},
+		},
+		"form file mutation": {
+			mutator: stubMutator{
+				mutateResponse: "mutated",
+			},
+			expectedForm: map[string]string{
+				"file1": "mutated",
+				"file2": "plain text",
+			},
+
+			skipFields: FieldSelector{{"file2"}},
+			request: func(t *testing.T, require *require.Assertions) *http.Request {
+				body := &bytes.Buffer{}
+				writer := multipart.NewWriter(body)
+
+				fileWriter, err := writer.CreateFormFile("file1", "file.txt")
+				require.NoError(err)
+				_, err = fileWriter.Write([]byte("plain text"))
+				require.NoError(err)
+
+				fileWriter, err = writer.CreateFormFile("file2", "file.txt")
+				require.NoError(err)
+				_, err = fileWriter.Write([]byte("plain text"))
+				require.NoError(err)
+
+				require.NoError(writer.Close())
+
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://192.0.2.1", body)
+				require.NoError(err)
+				req.Header.Set("Content-Type", writer.FormDataContentType())
+				return req
+			},
+		},
+		"mutation error": {
+			mutator: stubMutator{
+				mutateErr: assert.AnError,
+			},
+			request: func(t *testing.T, require *require.Assertions) *http.Request {
+				body := &bytes.Buffer{}
+				writer := multipart.NewWriter(body)
+				require.NoError(writer.WriteField("field1", "plain text"))
+				require.NoError(writer.WriteField("field2", "plain text"))
+				require.NoError(writer.Close())
+
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://192.0.2.1", body)
+				require.NoError(err)
+				req.Header.Set("Content-Type", writer.FormDataContentType())
+				return req
+			},
+			wantErr: true,
+		},
+		"incorrect content type": {
+			mutator: stubMutator{
+				mutateResponse: "mutated",
+			},
+			request: func(t *testing.T, require *require.Assertions) *http.Request {
+				body := &bytes.Buffer{}
+				writer := multipart.NewWriter(body)
+				require.NoError(writer.WriteField("field1", "plain text"))
+				require.NoError(writer.WriteField("field2", "plain text"))
+				require.NoError(writer.Close())
+
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://192.0.2.1", body)
+				require.NoError(err)
+				req.Header.Set("Content-Type", "garbage")
+				return req
+			},
+			wantErr: true,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+			require := require.New(t)
+
+			mutate := WithFormRequestMutation(tc.mutator.mutate, tc.skipFields, slog.Default())
+
+			req := tc.request(t, require)
+			err := mutate(req)
+			if tc.wantErr {
+				assert.Error(err)
+				return
+			}
+			assert.NoError(err)
+
+			handler := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				err := r.ParseMultipartForm(64 * 1024 * 1024)
+				assert.NoError(err)
+
+				var formFields []string
+				for key := range r.MultipartForm.Value {
+					formFields = append(formFields, key)
+					assert.Equal(tc.expectedForm[key], r.FormValue(key))
+				}
+
+				for key := range r.MultipartForm.File {
+					formFields = append(formFields, key)
+					file, _, err := r.FormFile(key)
+					assert.NoError(err)
+					defer file.Close()
+					fileData, err := io.ReadAll(file)
+					assert.NoError(err)
+					assert.Equal(tc.expectedForm[key], string(fileData))
+				}
+
+				var expectedFields []string
+				for key := range tc.expectedForm {
+					expectedFields = append(expectedFields, key)
+				}
+				assert.ElementsMatch(expectedFields, formFields)
+			})
+
+			client := &http.Client{}
+			server := httptest.NewServer(handler)
+			defer server.Close()
+			req.URL, err = url.Parse(server.URL)
+			require.NoError(err)
+
+			res, err := client.Do(req)
+			require.NoError(err)
+			defer res.Body.Close()
+			assert.Equal(http.StatusOK, res.StatusCode)
+		})
+	}
+}
+
+func TestWithFullResponseMutation(t *testing.T) {
+	testCases := map[string]struct {
+		mutator          stubMutator
+		responseBody     string
+		expectedResponse string
+		wantErr          bool
+	}{
+		"plain text mutation": {
+			mutator: stubMutator{
+				mutateResponse: "encryptedText",
+			},
+			responseBody:     "original text",
+			expectedResponse: "encryptedText",
+		},
+		"JSON body mutation": {
+			mutator: stubMutator{
+				mutateResponse: "encryptedText",
+			},
+			responseBody:     `{"field": "original"}`,
+			expectedResponse: "encryptedText",
+		},
+		"empty body": {
+			mutator: stubMutator{
+				mutateResponse: "",
+			},
+			responseBody:     "",
+			expectedResponse: "",
+		},
+		"mutation error": {
+			mutator: stubMutator{
+				mutateErr: assert.AnError,
+			},
+			responseBody: "original text",
+			wantErr:      true,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+
+			mutator := WithFullResponseMutation(tc.mutator.mutate)
+
+			body, err := mutator.Mutate([]byte(tc.responseBody))
+			if tc.wantErr {
+				assert.Error(err)
+				return
+			}
+
+			assert.NoError(err)
+			assert.Equal(tc.expectedResponse, string(body))
+		})
+	}
+
+	streamingCases := map[string]struct {
+		mutator      stubMutator
+		responseBody string
+	}{
+		"streaming JSON mutation": {
+			mutator: stubMutator{
+				mutateResponse: "encryptedText",
+			},
+			responseBody: `{"field1": "plainText"}`,
+		},
+		"streaming JSON large field mutation": {
+			mutator: stubMutator{
+				mutateResponse: string(bytes.Repeat([]byte("encryptedText"), 10000)),
+			},
+			responseBody: `{"field1": "plainText"}`,
+		},
+		"streaming text data mutation": {
+			mutator: stubMutator{
+				mutateResponse: "encryptedText",
+			},
+			responseBody: "plainText",
+		},
+		"streaming text data large field mutation": {
+			mutator: stubMutator{
+				mutateResponse: string(bytes.Repeat([]byte("encryptedText"), 10000)),
+			},
+			responseBody: "plainText",
+		},
+	}
+	for name, tc := range streamingCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+
+			mutator := WithFullResponseMutation(tc.mutator.mutate)
+
+			msgChan := make(chan string)
+			reader := &fakeReader{
+				msgChan: msgChan,
+			}
+
+			messageParts := 10
+			go func() {
+				for i := range messageParts {
+					msgChan <- fmt.Sprintf("%d: %s", i, tc.responseBody) + "\n\n"
+				}
+				close(msgChan)
+			}()
+
+			response := &bytes.Buffer{}
+			_, err := io.Copy(response, mutator.Reader(reader))
+			assert.NoError(err)
+			responseParts := strings.Split(strings.TrimRight(response.String(), "\n"), "\n\n") // trim the last newline, so that we don't get an empty final part
+			assert.Len(responseParts, messageParts)
+			for i, part := range responseParts {
+				assert.Equal(fmt.Sprintf("%d: %s", i, tc.mutator.mutateResponse), part)
+			}
 		})
 	}
 }

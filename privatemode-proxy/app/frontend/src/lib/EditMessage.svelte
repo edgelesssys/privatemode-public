@@ -2,16 +2,15 @@
   import Code from './Code.svelte'
   import { afterUpdate, createEventDispatcher, onMount } from 'svelte'
   import { deleteMessage, deleteSummaryMessage, truncateFromMessage, submitExitingPromptsNow, continueMessage, updateMessages } from './Storage.svelte'
-  import { getPrice } from './Stats.svelte'
   import SvelteMarkdown from 'svelte-markdown'
   import type { Message, Model, Chat } from './Types.svelte'
   import Fa from 'svelte-fa/src/fa.svelte'
-  import { faTrash, faDiagramPredecessor, faDiagramNext, faCircleCheck, faPaperPlane, faEye, faEyeSlash, faEllipsis, faDownload, faClipboard } from '@fortawesome/free-solid-svg-icons/index'
+  import { faTrash, faDiagramPredecessor, faDiagramNext, faCircleCheck, faPaperPlane, faEye, faEyeSlash, faDownload, faClipboard, faFile } from '@fortawesome/free-solid-svg-icons/index'
   import { errorNotice, scrollToMessage } from './Util.svelte'
   import { openModal } from 'svelte-modals'
   import PromptConfirm from './PromptConfirm.svelte'
   import { getImage } from './ImageStore.svelte'
-  import { getModelDetail } from './Models.svelte'
+  import { parseFileMessage } from './FileUploadService.svelte'
   import logoSmall from '../assets/logo-small.svg'
 
   export let message:Message
@@ -25,6 +24,10 @@
   const isUser = message.role === 'user'
   const isAssistant = message.role === 'assistant'
   const isImage = message.role === 'image'
+  
+  // Check if this is a file message using the parseFileMessage function
+  const fileMessageInfo = parseFileMessage(message)
+  const isFileMessage = fileMessageInfo.isFileMessage
 
   // Marked options
   const markdownOptions = {
@@ -75,7 +78,7 @@
     }, 0)
   }
 
-  let dbnc
+  let dbnc: ReturnType<typeof setTimeout>
   const update = () => {
     clearTimeout(dbnc)
     dbnc = setTimeout(() => { doChange() }, 250)
@@ -156,16 +159,16 @@
         onConfirm: () => {
           try {
             deleteSummaryMessage(chatId, message.uuid)
-          } catch (e) {
-            errorNotice('Unable to delete summary:', e)
+          } catch (e: unknown) {
+            errorNotice('Unable to delete summary:', e instanceof Error ? e : undefined)
           }
         }
       })
     } else {
       try {
         deleteMessage(chatId, message.uuid)
-      } catch (e) {
-        errorNotice('Unable to delete:', e)
+      } catch (e: unknown) {
+        errorNotice('Unable to delete:', e instanceof Error ? e : undefined)
       }
     }
   }
@@ -189,8 +192,8 @@
     try {
       truncateFromMessage(chatId, message.uuid)
       $submitExitingPromptsNow = true
-    } catch (e) {
-      errorNotice('Unable to delete:', e)
+    } catch (e: unknown) {
+      errorNotice('Unable to delete:', e instanceof Error ? e : undefined)
     }
   }
 
@@ -251,13 +254,29 @@
         {#if message.summary && !message.summary.length}
           <p><b>Summarizing...</b></p>
         {/if}
-        {#key refreshCounter}
-          <SvelteMarkdown
-            source={displayMessage}
-            options={markdownOptions}
-            renderers={{ code: Code, html: Code }}
-          />
-        {/key}
+        
+        {#if isFileMessage}
+          <div class="file-message">
+            <span class="file-icon"><Fa icon={faFile} /></span>
+            <span class="file-name-wrapper">
+              <span class="file-name" title="{fileMessageInfo.filename}">{fileMessageInfo.filename}</span>
+            </span>
+          </div>
+          {#if fileMessageInfo.wordCount !== undefined}
+            <div class="file-word-count" style="margin-left:2.2em; margin-top:0.1em; color: #888; font-size: 0.85em;">
+              {fileMessageInfo.wordCount} words
+            </div>
+          {/if}
+        {:else}
+          {#key refreshCounter}
+            <SvelteMarkdown
+              source={displayMessage}
+              options={markdownOptions}
+              renderers={{ code: Code, html: Code }}
+            />
+          {/key}
+        {/if}
+        
         {#if imageUrl}
           <img src={imageUrl} alt="">
         {/if}
@@ -296,7 +315,8 @@
         title="Jump to summary"
         class="msg-summary button is-small"
         on:click|preventDefault={() => {
-          scrollToMessage(message.summarized)
+          // Using type assertion in a separate function to handle string conversion
+          if (message.summarized) scrollToMessage(message.summarized)
         }}
       >
       <span class="icon"><Fa icon={faDiagramNext} /></span>
@@ -308,7 +328,8 @@
         title="Jump to summarized"
         class="msg-summarized button is-small"
         on:click|preventDefault={() => {
-          scrollToMessage(message.summary)
+          // Using type assertion in a separate function to handle string conversion
+          if (message.summary) scrollToMessage(message.summary)
         }}
       >
       <span class="icon"><Fa icon={faDiagramPredecessor} /></span>
@@ -404,6 +425,46 @@
     color: inherit;
     cursor: pointer;
     animation: cursor-blink 1.5s steps(2) infinite;
+  }
+  
+  .file-message {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 12px;
+    height: 36px;
+    background-color: white;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 30px;
+    max-width: 100%;
+  }
+  
+  .file-icon {
+    margin-right: 8px;
+    color: rgb(122, 73, 246);
+    font-size: 1.2em;
+    display: flex;
+    align-items: center;
+  }
+  
+  .file-name-wrapper {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+  }
+
+  .file-name {
+    font-weight: normal;
+    font-size: 0.9em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    line-height: 36px;
   }
 
   .continue-button:hover {

@@ -9,6 +9,7 @@
     import { v4 as uuidv4 } from 'uuid'
     import { get } from 'svelte/store'
     import { getLeadPrompt, getModelDetail } from './Models.svelte'
+    import { FILE_MESSAGE_PREFIX } from './FileUploadService.svelte'
 
 export class ChatRequest {
       constructor () {
@@ -129,9 +130,21 @@ export class ChatRequest {
         const includedRoles = ['user', 'assistant'].concat(chatSettings.useSystemPrompt ? ['system'] : [])
     
         // Submit only the role and content of the messages, provide the previous messages as well for context
-        const messageFilter = (m:Message) => !m.suppress &&
-          includedRoles.includes(m.role) &&
-          m.content && !m.summarized
+        const messageFilter = (m:Message, index: number, array: Message[]) => {
+          // Don't filter out empty assistant messages that follow file messages
+          if (m.role === 'assistant' && m.content === '' && index > 0) {
+            const prevMessage = array[index - 1]
+            if (prevMessage.role === 'user' &&
+                typeof prevMessage.content === 'string' &&
+                prevMessage.content.startsWith(FILE_MESSAGE_PREFIX)) {
+              return true
+            }
+          }
+    
+          return !m.suppress &&
+            includedRoles.includes(m.role) &&
+            m.content && !m.summarized
+        }
         const filtered = messages.filter(messageFilter)
     
         // If we're doing continuous chat, do it
@@ -143,7 +156,14 @@ export class ChatRequest {
         const messagePayload = filtered
           .filter(m => { if (m.skipOnce) { delete m.skipOnce; return false } return true })
           .map(m => {
-            const content = m.content + (m.appendOnce || []).join('\n'); delete m.appendOnce; return { role: m.role, content: cleanContent(chatSettings, content) }
+            // For empty assistant messages after a file upload, include them with empty content
+            if (m.role === 'assistant' && m.content === '') {
+              return { role: m.role, content: '' }
+            }
+    
+            const content = m.content + (m.appendOnce || []).join('\n')
+            delete m.appendOnce
+            return { role: m.role, content: cleanContent(chatSettings, content) }
           }) as Message[]
 
         // Parse system and expand prompt if needed
@@ -227,6 +247,19 @@ export class ChatRequest {
                 Summary should only have one completion
                 */
                 value = 1
+              } else {
+                // Check if any of the messages is a file message
+                const hasFileMessage = messagePayload.some(m =>
+                  m.role === 'user' &&
+                  typeof m.content === 'string' &&
+                  m.content.startsWith('[FILE]')
+                )
+    
+                // If there's a file message, ensure we preserve the n value
+                if (hasFileMessage && value !== null) {
+                  // Keep the original n value from settings
+                  console.log('File message detected, preserving n value:', value)
+                }
               }
             }
             if (value !== null) acc[key] = value

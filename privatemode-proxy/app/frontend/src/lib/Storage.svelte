@@ -28,7 +28,7 @@
   export let currentChatId = writable(0)
   export let lastChatId = persisted('lastChatId', 0)
 
-  const chatDefaults = getChatDefaults();
+  const chatDefaults = getChatDefaults()
   
   export const getApiKey = (): string => {
     return get(apiKeyStorage)
@@ -77,7 +77,8 @@
       sessionStarted: false,
       created: Date.now(),
       lastUse: Date.now(),
-      lastAccess: Date.now()
+      lastAccess: Date.now(),
+      hasUploadedFile: false
     })
     chatsStorage.set(chats)
     // Apply defaults and prepare it to start
@@ -142,6 +143,8 @@
     }
     if (chat.startSession === undefined) chat.startSession = false
     if (chat.sessionStarted === undefined) chat.sessionStarted = !!chat.messages.find(m => m.role === 'user')
+    // Ensure hasUploadedFile is set
+    if (chat.hasUploadedFile === undefined) chat.hasUploadedFile = false
     chatsStorage.set(chats)
   }
 

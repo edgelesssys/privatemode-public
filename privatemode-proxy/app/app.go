@@ -49,10 +49,15 @@ func (c *Config) update(runtimeConfig jsonConfig) {
 	c.Flags.CoordinatorEndpoint = addPrefix(constants.CoordinatorEndpoint, runtimeConfig.DeploymentUID)
 	c.Flags.InsecureAPIConnection = runtimeConfig.DeploymentUID != ""
 	c.Flags.ManifestPath = runtimeConfig.ManifestPath
+
+	if runtimeConfig.PromptCacheSalt != "" {
+		c.Flags.PromptCacheSalt = runtimeConfig.PromptCacheSalt
+	}
 }
 
 // App wraps the server and handles deferred initialization.
 type App struct {
+	ctx         context.Context
 	config      Config
 	log         *slog.Logger
 	server      *server.Server
@@ -62,6 +67,7 @@ type App struct {
 // NewApp creates a new App instance.
 func NewApp(cfg Config, log *slog.Logger) *App {
 	return &App{
+		ctx:         nil,
 		config:      cfg,
 		log:         log,
 		server:      nil,
@@ -71,6 +77,7 @@ func NewApp(cfg Config, log *slog.Logger) *App {
 
 // OnStartup initializes the app when Wails starts.
 func (a *App) OnStartup(ctx context.Context) {
+	a.ctx = ctx
 	if err := a.config.Update(a.log); err != nil {
 		a.log.Error("Loading JSON configuration", "error", err)
 		_, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
@@ -136,13 +143,15 @@ func (a *App) initialize(ctx context.Context) error {
 		return fmt.Errorf("setting up secret manager: %w", err)
 	}
 
-	a.server = setup.NewServer(a.config.Flags, manager, a.log)
+	const isApp = true
+	a.server = setup.NewServer(a.config.Flags, manager, a.log, isApp)
 	close(a.initialized) // Signal that initialization is complete
 	return nil
 }
 
 type jsonConfig struct {
-	APIKey string `json:"app_key"`
+	APIKey          string `json:"app_key"`
+	PromptCacheSalt string `json:"prompt_cache_salt"`
 	// Dev-only
 	DeploymentUID string `json:"deployment_uid"`
 	ManifestPath  string `json:"manifest_path"`
@@ -176,6 +185,9 @@ func loadRuntimeConfig(workspace string, log *slog.Logger) (jsonConfig, error) {
 
 	if configFile.APIKey == "" {
 		log.Info("API key not set in configuration file")
+	}
+	if configFile.PromptCacheSalt != "" {
+		log.Info("PromptCacheSalt set in configuration file")
 	}
 
 	return configFile, nil

@@ -11,7 +11,17 @@
 // [sjson.SetBytes]: https://pkg.go.dev/github.com/tidwall/sjson#SetBytes
 package openai
 
-import "github.com/edgelesssys/continuum/internal/gpl/forwarder"
+import (
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"log/slog"
+
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
+
+	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
+)
 
 const (
 	// ChatRequestMessagesField is the messages field in the request that is encrypted / decrypted.
@@ -26,6 +36,8 @@ const (
 	ModelsEndpoint = "/v1/models"
 	// EmbeddingsEndpoint is the endpoint for embeddings.
 	EmbeddingsEndpoint = "/v1/embeddings"
+	// TranscriptionsEndpoint is the endpoint for audio transcriptions.
+	TranscriptionsEndpoint = "/v1/audio/transcriptions"
 )
 
 // PlainCompletionsRequestFields is a field selector for all fields in an OpenAI chat completions request that are not encrypted.
@@ -55,6 +67,20 @@ var PlainEmbeddingsResponseFields = forwarder.FieldSelector{
 	{"usage"},
 }
 
+// PlainTranscriptionFields are the plain form fields for OpenAI audio transcriptions.
+var PlainTranscriptionFields = forwarder.FieldSelector{
+	{"model"},
+}
+
+// RandomPromptCacheSalt generates a random salt for prompt caching.
+func RandomPromptCacheSalt() (string, error) {
+	salt := make([]byte, 32) // 256-bit salt
+	if _, err := rand.Read(salt); err != nil {
+		return "", fmt.Errorf("generating random salt: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(salt), nil
+}
+
 // EncryptedChatRequest is the request structure for an OpenAI chat completion call,
 // with encrypted fields.
 // Fields that should not be encrypted need to be added to [PlainCompletionsRequestFields].
@@ -66,6 +92,7 @@ type EncryptedChatRequest struct {
 	Messages    string  `json:"messages"` // The whole messages array from Request as an encrypted blob.
 	Temperature string  `json:"temperature,omitzero"`
 	Tools       *string `json:"tools,omitempty"` // The whole tools array from Request as an encrypted blob.
+	CacheSalt   string  `json:"cache_salt,omitempty"`
 }
 
 // ChatRequest is the request structure for an OpenAI chat completion call.
@@ -76,6 +103,7 @@ type ChatRequest struct {
 	Messages    []Message `json:"messages"`
 	Temperature float32   `json:"temperature,omitzero"`
 	Tools       []any     `json:"tools,omitempty"`
+	CacheSalt   string    `json:"cache_salt,omitempty"`
 }
 
 // ChatRequestPlainData contains fields that are not encrypted for [ChatRequest] and [EncryptedChatRequest].
@@ -187,7 +215,62 @@ type Message struct {
 
 // Usage contains the token usage of an OpenAI chat completion call.
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
+	PromptTokens        int                  `json:"prompt_tokens"`
+	TotalTokens         int                  `json:"total_tokens"`
+	CompletionTokens    int                  `json:"completion_tokens"`
+	PromptTokensDetails *PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+// PromptTokensDetails contains detailed information about prompt tokens.
+type PromptTokensDetails struct {
+	AudioTokens  int `json:"audio_tokens,omitempty"`
+	CachedTokens int `json:"cached_tokens,omitempty"`
+}
+
+// CacheSaltInjector creates a forwarder.RequestMutator that injects a CacheSalt if it is not set.
+func CacheSaltInjector(cacheSaltGenerator func() (string, error), log *slog.Logger) forwarder.RequestMutator {
+	injectSalt := func(httpBody string) (mutatedRequest string, err error) {
+		// Skip empty body, e.g., for OPTIONS requests
+		if len(httpBody) == 0 {
+			return httpBody, nil
+		}
+		currentSalt := gjson.Get(httpBody, "cache_salt").String()
+		if currentSalt != "" {
+			if len(currentSalt) < 32 {
+				return "", fmt.Errorf("cache_salt must be at least 32 characters long")
+			}
+			return httpBody, nil
+		}
+
+		salt, err := cacheSaltGenerator()
+		if err != nil {
+			return "", fmt.Errorf("generating cache salt: %w", err)
+		}
+		mutatedBody, err := sjson.Set(httpBody, "cache_salt", salt)
+		if err != nil {
+			return "", fmt.Errorf("injecting cache salt: %w", err)
+		}
+		return mutatedBody, nil
+	}
+	return forwarder.WithFullRequestMutation(injectSalt, log)
+}
+
+// CacheSaltValidator creates a forwarder.RequestMutator that ensures a non-empty CacheSalt.
+func CacheSaltValidator(log *slog.Logger) forwarder.RequestMutator {
+	validateSalt := func(httpBody string) (mutatedRequest string, err error) {
+		// Skip empty body, e.g., for OPTIONS requests
+		if len(httpBody) == 0 {
+			return httpBody, nil
+		}
+		cacheSalt := gjson.Get(httpBody, "cache_salt").String()
+		if cacheSalt == "" {
+			return "", fmt.Errorf("missing field 'cache_salt'")
+		}
+		if len(cacheSalt) < 32 {
+			return "", fmt.Errorf("cache_salt must be at least 32 characters long")
+		}
+		return httpBody, nil
+	}
+
+	return forwarder.WithFullRequestMutation(validateSalt, log)
 }

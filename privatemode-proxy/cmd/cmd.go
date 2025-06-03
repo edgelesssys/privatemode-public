@@ -13,6 +13,7 @@ import (
 
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
+	"github.com/edgelesssys/continuum/internal/gpl/openai"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/setup"
 	"github.com/spf13/cobra"
 )
@@ -28,8 +29,16 @@ var (
 	tlsCertPath           string
 	tlsKeyPath            string
 	insecureAPIConnection bool
-	coordinatorEndpoint   string
-	cdnBaseURL            string
+
+	// sharedPromptCache is used to share the cache between users.
+	// When true, all users of the proxy will share the same cache.
+	// When false (default), the proxy will disable caching by
+	// using a random salt for each request. Clients can then
+	// use request param cache_salt to enable caching.
+	sharedPromptCache   bool
+	promptCacheSalt     string
+	coordinatorEndpoint string
+	cdnBaseURL          string
 )
 
 // New returns the root command of the privatemode-proxy.
@@ -51,6 +60,11 @@ func New() *cobra.Command {
 	cmd.Flags().StringVar(&port, "port", "8080", "The port on which the proxy listens for incoming API requests.")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", fmt.Sprintf("The path into which the binary writes files. This includes the manifest log data in the '%s' subdirectory.", constants.ManifestDir))
 	cmd.Flags().StringVar(&manifestPath, "manifestPath", "", "The path for the manifest file. If not provided, the manifest will be read from the remote source.")
+
+	// prompt caching
+	cmd.Flags().BoolVar(&sharedPromptCache, "sharedPromptCache", false, "If set, caching of prompts between all users of the proxy is enabled. This reduces response times for long conversations or common documents.")
+	cmd.Flags().StringVar(&promptCacheSalt, "promptCacheSalt", "", "The salt used to isolate prompt caches. If empty (default), the same random salt is used for all requests, enabling sharing the cache between all users of the same proxy. Requires 'sharedPromptCache' to be enabled!")
+
 	cmd.Flags().BoolVar(&insecureAPIConnection, "insecureAPIConnection", false, "If set, the server will accept self-signed certificates from the API endpoint. Only intended for testing.")
 	must(cmd.Flags().MarkHidden("insecureAPIConnection"))
 
@@ -66,12 +80,36 @@ func New() *cobra.Command {
 	return cmd
 }
 
+func getPromptCacheSalt() (string, error) {
+	if promptCacheSalt != "" && !sharedPromptCache {
+		return "", fmt.Errorf("promptCacheSalt is set but sharedPromptCache is not enabled")
+	}
+
+	// if cache sharing is disabled, we must not use a salt but generate a random salt per-request
+	if !sharedPromptCache {
+		return "", nil
+	}
+
+	// if cache sharing is enabled, but no salt is set, we now generate a random salt
+	// to keep for the lifetime of the proxy
+	if promptCacheSalt == "" {
+		return openai.RandomPromptCacheSalt()
+	}
+
+	return promptCacheSalt, nil
+}
+
 func runProxy(cmd *cobra.Command, _ []string) error {
 	log := logging.NewLogger(logLevel)
 	log.Info("Privatemode encryption proxy", "version", constants.Version())
 
 	if (tlsCertPath == "") != (tlsKeyPath == "") {
 		return errors.New("TLS certificate and key must be provided together")
+	}
+
+	cacheSalt, err := getPromptCacheSalt()
+	if err != nil {
+		return fmt.Errorf("getting prompt cache salt: %w", err)
 	}
 
 	var apiKey *string
@@ -93,12 +131,14 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 		InsecureAPIConnection: insecureAPIConnection,
 		APIEndpoint:           apiEndpoint,
 		APIKey:                apiKey,
+		PromptCacheSalt:       cacheSalt,
 	}
 	manager, err := setup.SecretManager(cmd.Context(), flags, log)
 	if err != nil {
 		return fmt.Errorf("setting up secret manager configuration: %w", err)
 	}
-	server := setup.NewServer(flags, manager, log)
+	const isApp = false
+	server := setup.NewServer(flags, manager, log, isApp)
 	lis, err := net.Listen("tcp", net.JoinHostPort("", port))
 	if err != nil {
 		return fmt.Errorf("listening on port %q: %w", port, err)

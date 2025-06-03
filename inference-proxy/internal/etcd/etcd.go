@@ -77,6 +77,18 @@ func (e *Etcd) WatchSecrets(ctx context.Context) (*secrets.Secrets, error) {
 	return secrets, nil
 }
 
+// GetSecret retrieves a secret from etcd by its key.
+func (e *Etcd) GetSecret(ctx context.Context, key string) ([]byte, error) {
+	response, err := e.client.Get(ctx, constants.EtcdInferenceSecretPrefix+key)
+	if err != nil {
+		return nil, err
+	}
+	if len(response.Kvs) != 1 {
+		return nil, errors.New("secret not found")
+	}
+	return response.Kvs[0].Value, nil
+}
+
 func (e *Etcd) watchSecrets(ctx context.Context, secrets *secrets.Secrets, watchRevision int64) {
 	startWatch := func(ctx context.Context, revision int64) (clientv3.WatchChan, func()) {
 		e.log.Info("Starting watch", "revision", revision)
@@ -158,7 +170,7 @@ func (e *Etcd) fetchSecrets(ctx context.Context) (*secrets.Secrets, int64, error
 		secretMap[strings.TrimPrefix(string(kv.Key), constants.EtcdInferenceSecretPrefix)] = kv.Value
 	}
 
-	return secrets.New(secretMap), resp.Header.Revision + 1, nil
+	return secrets.New(e, secretMap), resp.Header.Revision + 1, nil
 }
 
 func (e *Etcd) close() {

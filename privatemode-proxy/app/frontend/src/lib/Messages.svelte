@@ -13,7 +13,9 @@
 </script>
 
 {#each messages as message, i}
-  {#if !((message.summarized) && $globalStorage.hideSummarized) && !(i === 0 && message.role === 'system' && !chatSettings.useSystemPrompt)}
+  {#if !((message.summarized) && $globalStorage.hideSummarized) &&
+        !(i === 0 && message.role === 'system' && !chatSettings.useSystemPrompt) &&
+        !(message.role === 'assistant' && message.content === '')}
   {#key message.uuid}<EditMessage bind:message={message} chatId={chatId} chat={chat} />{/key}
   {/if}
 {/each}

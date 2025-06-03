@@ -27,41 +27,18 @@ const (
 	// to ensure streaming responses are comparatively smooth to directly interacting with the server.
 	// Size was chosen through experimentation with vllm benchmarks.
 	copyBufferSize = 1024 * 8
-	// privateModeEncryptedHeader is the header used to indicate that the response is not encrypted.
+	// privateModeEncryptedHeader is the header used to indicate whether a response is encrypted.
 	privateModeEncryptedHeader = "Privatemode-Encrypted"
 )
 
 // ProtocolScheme is the protocol scheme used for the forwarding.
 type ProtocolScheme string
 
-// NoRequestMutation skips any mutation on the [*http.Request].
-func NoRequestMutation(*http.Request) error { return nil }
-
-// NoHeaderMutation skips any mutation on the [*http.Header].
-func NoHeaderMutation(http.Header, http.Header) error { return nil }
-
 // ResponseMutator performs mutations on the given [io.Reader].
 type ResponseMutator interface {
 	Reader(reader io.Reader) io.Reader
 	Mutate(body []byte) ([]byte, error)
 }
-
-// RequestMutator mutates an [*http.Request].
-type RequestMutator func(request *http.Request) error
-
-// HeaderMutator mutates a [http.Header].
-// response is the header object of the response. Writes should usually go here.
-// request is the header object of the request.
-type HeaderMutator func(response http.Header, request http.Header) error
-
-// NoResponseMutation skips any mutation of the given [io.ReadCloser].
-type NoResponseMutation struct{}
-
-// Reader returns the given [io.Reader] without any mutation.
-func (NoResponseMutation) Reader(rc io.Reader) io.Reader { return rc }
-
-// Mutate returns the given byte slice without any mutation.
-func (NoResponseMutation) Mutate(body []byte) ([]byte, error) { return body, nil }
 
 // ErrorMessage represents an error response in the OpenAI API format for v1/chat/completions.
 type ErrorMessage struct {
@@ -75,6 +52,21 @@ type APIError struct {
 	Param   string `json:"param"`
 	Code    string `json:"code"`
 }
+
+// NoRequestMutation skips any mutation on the [*http.Request].
+func NoRequestMutation(*http.Request) error { return nil }
+
+// NoHeaderMutation skips any mutation on the [*http.Header].
+func NoHeaderMutation(http.Header, http.Header) error { return nil }
+
+// NoResponseMutation skips any mutation of the given [io.ReadCloser].
+type NoResponseMutation struct{}
+
+// Reader returns the given [io.Reader] without any mutation.
+func (NoResponseMutation) Reader(rc io.Reader) io.Reader { return rc }
+
+// Mutate returns the given byte slice without any mutation.
+func (NoResponseMutation) Mutate(body []byte) ([]byte, error) { return body, nil }
 
 // Forwarder implements a simple http proxy to forward http requests over a unix socket.
 type Forwarder struct {
@@ -111,10 +103,12 @@ func NewWithClient(client *http.Client, address string, scheme ProtocolScheme, l
 	}
 }
 
-// Forward a requests to a different endpoint.
+// Forward mutates a request with the given mutator and forwards it to a different endpoint.
+// It also mutates the response with the given responseMutator and responseHeaderMutator before
+// writing it back to the client.
 func (f *Forwarder) Forward(
 	w http.ResponseWriter, req *http.Request,
-	requestMutator RequestMutator, responseMutator ResponseMutator, headerMutator HeaderMutator,
+	requestMutator RequestMutator, responseMutator ResponseMutator, responseHeaderMutator HeaderMutator,
 ) {
 	f.log.Info("Forwarding request", "remoteAddress", req.RemoteAddr, "method", req.Method, "url", req.URL.String())
 
@@ -149,7 +143,7 @@ func (f *Forwarder) Forward(
 
 	// Allow caller to mutate headers.
 	// This is necessary in cases where the caller wants to modify a header already present in the response.
-	if err := headerMutator(resp.Header, req.Header); err != nil {
+	if err := responseHeaderMutator(resp.Header, req.Header); err != nil {
 		f.log.Error("Failed to mutate header", "error", err)
 		HTTPError(w, req, http.StatusInternalServerError, "mutating header: %s", err)
 		return
@@ -215,34 +209,6 @@ func (f *Forwarder) Forward(
 	f.log.Info("Forwarding finished successfully")
 }
 
-// delHopHeaders deletes hop-by-hop headers which should not be forwarded.
-// See the HTTP RFC for more details: https://datatracker.ietf.org/doc/html/rfc9110#name-message-forwarding
-func delHopHeaders(header http.Header) {
-	hopHeaders := []string{
-		"Connection",
-		"Keep-Alive",
-		"Proxy-Authenticate",
-		"Proxy-Authorization",
-		"Te",
-		"Trailers",
-		"Transfer-Encoding",
-		"Upgrade",
-	}
-	for _, h := range hopHeaders {
-		header.Del(h)
-	}
-}
-
-// updateForwardedHeader updates the X-Forwarded-For header with the client's IP address.
-func updateForwardedHeader(header http.Header, remoteAddr string) {
-	if clientIP, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		if prior, ok := header["X-Forwarded-For"]; ok {
-			clientIP = strings.Join(prior, ", ") + ", " + clientIP
-		}
-		header.Set("X-Forwarded-For", clientIP)
-	}
-}
-
 // HTTPError writes an error response to the client.
 // Functions similarly to [http.Error], but also handles error reporting for SSE requests.
 func HTTPError(w http.ResponseWriter, r *http.Request, code int, msg string, args ...any) {
@@ -269,4 +235,32 @@ func HTTPError(w http.ResponseWriter, r *http.Request, code int, msg string, arg
 	w.Header().Set(privateModeEncryptedHeader, "false")
 	w.WriteHeader(code)
 	fmt.Fprint(w, formattedMsg)
+}
+
+// delHopHeaders deletes hop-by-hop headers which should not be forwarded.
+// See the HTTP RFC for more details: https://datatracker.ietf.org/doc/html/rfc9110#name-message-forwarding
+func delHopHeaders(header http.Header) {
+	hopHeaders := []string{
+		"Connection",
+		"Keep-Alive",
+		"Proxy-Authenticate",
+		"Proxy-Authorization",
+		"Te",
+		"Trailers",
+		"Transfer-Encoding",
+		"Upgrade",
+	}
+	for _, h := range hopHeaders {
+		header.Del(h)
+	}
+}
+
+// updateForwardedHeader updates the X-Forwarded-For header with the client's IP address.
+func updateForwardedHeader(header http.Header, remoteAddr string) {
+	if clientIP, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		if prior, ok := header["X-Forwarded-For"]; ok {
+			clientIP = strings.Join(prior, ", ") + ", " + clientIP
+		}
+		header.Set("X-Forwarded-For", clientIP)
+	}
 }

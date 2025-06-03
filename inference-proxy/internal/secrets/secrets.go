@@ -2,6 +2,7 @@
 package secrets
 
 import (
+	"context"
 	"maps"
 	"sync"
 )
@@ -9,26 +10,39 @@ import (
 // Secrets is a thread-safe map of secrets.
 type Secrets struct {
 	inferenceSecrets map[string][]byte
+	secretGetter     secretGetter
 	rwLock           sync.RWMutex
 }
 
 // New creates a new Secrets object.
-func New(initialSecrets map[string][]byte) *Secrets {
+func New(secretGetter secretGetter, initialSecrets map[string][]byte) *Secrets {
 	if initialSecrets == nil {
 		initialSecrets = make(map[string][]byte)
 	}
 	return &Secrets{
 		inferenceSecrets: maps.Clone(initialSecrets),
+		secretGetter:     secretGetter,
 		rwLock:           sync.RWMutex{},
 	}
 }
 
 // Get returns the secret for the given key.
-func (s *Secrets) Get(key string) ([]byte, bool) {
+func (s *Secrets) Get(ctx context.Context, key string) ([]byte, bool) {
 	s.rwLock.RLock()
 	defer s.rwLock.RUnlock()
 	secret, ok := s.inferenceSecrets[key]
-	return secret, ok
+	if ok {
+		return secret, true
+	}
+
+	// The etcd watch mechanism we use to populate the secret cache
+	// may not have been triggered yet
+	// In that case, try to retrieve the secret directly from etcd
+	secret, err := s.secretGetter.GetSecret(ctx, key)
+	if err != nil {
+		return nil, false
+	}
+	return secret, true
 }
 
 // Set sets the secret for the given key.
@@ -54,4 +68,8 @@ func (s *Secrets) Keys() []string {
 		keys = append(keys, key)
 	}
 	return keys
+}
+
+type secretGetter interface {
+	GetSecret(ctx context.Context, key string) ([]byte, error)
 }
