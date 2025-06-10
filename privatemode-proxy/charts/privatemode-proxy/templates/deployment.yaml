@@ -28,10 +28,13 @@ spec:
             - "--apiKey=$(privatemode_API_KEY)"
             {{- end}}
             {{- if .Values.config.ssEndpoint.enabled }}
-            - "--ssEndpoint={{ .Values.config.ssEndpoint }}"
+            - "--ssEndpoint={{ .Values.config.ssEndpoint.ssEndpoint }}"
             {{- end}}
             {{- if .Values.config.apiEndpoint.enabled }}
-            - "--apiEndpoint={{ .Values.config.apiEndpoint }}"
+            - "--apiEndpoint={{ .Values.config.apiEndpoint.apiEndpoint }}"
+            {{- end}}
+            {{- if .Values.config.coordinatorEndpoint.enabled }}
+            - "--coordinatorEndpoint={{ .Values.config.coordinatorEndpoint.coordinatorEndpoint }}"
             {{- end}}
             - "--port={{ .Values.config.port }}"
             {{- if .Values.config.workspace.enabled }}

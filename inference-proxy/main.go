@@ -24,6 +24,7 @@ import (
 )
 
 var (
+	listenPort      = flag.String("listen-port", constants.ProxyServerPort, "port the proxy server is listening on")
 	workloadPort    = flag.String("workload-port", constants.WorkloadDefaultExposedPort, "port the workload is listening on")
 	adapterType     = flag.String("adapter-type", "openai", "type of adapter to use")
 	workloadAddress = flag.String("workload-address", "", "host name or IP the workload can be reached at over TCP")
@@ -87,7 +88,7 @@ func main() {
 	server := server.New(adapter, log)
 
 	log.Info("Starting server")
-	listener, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", constants.ProxyServerPort))
+	listener, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", *listenPort))
 	if err != nil {
 		log.Error("Failed to listen", "error", err)
 		os.Exit(1)

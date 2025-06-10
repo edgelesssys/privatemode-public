@@ -2,7 +2,7 @@ module github.com/edgelesssys/continuum
 
 go 1.24.0
 
-toolchain go1.24.3
+toolchain go1.24.4
 
 replace (
 	github.com/NVIDIA/go-nvml => github.com/edgelesssys/go-nvml v0.0.0-20240513083754-6f82958b50dd
@@ -11,12 +11,12 @@ replace (
 
 require (
 	cloud.google.com/go/cloudsqlconn v1.17.1
-	github.com/MicahParks/keyfunc/v3 v3.3.11
+	github.com/MicahParks/keyfunc/v3 v3.4.0
 	github.com/NVIDIA/go-nvml v0.12.0-2
 	github.com/avast/retry-go/v4 v4.6.1
-	github.com/docker/docker v28.1.1+incompatible
+	github.com/docker/docker v28.2.2+incompatible
 	github.com/docker/go-connections v0.5.0
-	github.com/edgelesssys/contrast v1.8.1
+	github.com/edgelesssys/contrast v1.9.0
 	github.com/go-git/go-git/v5 v5.16.0
 	github.com/go-sql-driver/mysql v1.9.2
 	github.com/golang-jwt/jwt/v5 v5.2.2
@@ -26,7 +26,7 @@ require (
 	github.com/spf13/afero v1.14.0
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
-	github.com/stripe/stripe-go/v82 v82.1.0
+	github.com/stripe/stripe-go/v82 v82.2.0
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/vishvananda/netlink v1.3.1
@@ -66,6 +66,8 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudflare/circl v1.6.1 // indirect
+	github.com/containerd/errdefs v1.0.0 // indirect
+	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
@@ -95,7 +97,7 @@ require (
 	github.com/google/gnostic-models v0.6.9 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-sev-guest v0.13.0 // indirect
-	github.com/google/go-tdx-guest v0.3.2-0.20250429142953-26039ed5ccc8 // indirect
+	github.com/google/go-tdx-guest v0.3.2-0.20250505161510-9efd53b4a100 // indirect
 	github.com/google/logger v1.1.1 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
@@ -135,8 +137,8 @@ require (
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/prometheus/client_model v0.6.1 // indirect
-	github.com/prometheus/common v0.63.0 // indirect
+	github.com/prometheus/client_model v0.6.2 // indirect
+	github.com/prometheus/common v0.64.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
@@ -175,7 +177,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
+	golang.org/x/exp v0.0.0-20250506013437-ce4c2cf36ca6 // indirect
 	golang.org/x/net v0.40.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/term v0.32.0 // indirect

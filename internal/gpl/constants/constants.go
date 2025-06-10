@@ -15,8 +15,8 @@ var version = "0.0.0-dev"
 func Version() string { return version }
 
 const (
-	// ServedModel is the deployed model for the SaaS.
-	ServedModel = "ibnzterrell/Meta-Llama-3.3-70B-Instruct-AWQ-INT4"
+	// DefaultTextgenModel is the deployed model for the SaaS.
+	DefaultTextgenModel = "ibnzterrell/Meta-Llama-3.3-70B-Instruct-AWQ-INT4"
 	// WorkloadTaskGenerate is the vLLM task for text generation.
 	WorkloadTaskGenerate = "generate"
 	// WorkloadTaskToolCalling indicates models that support tool calling for the /v1/chat/completions API.

@@ -5,9 +5,7 @@
 package dialer
 
 import (
-	"context"
 	"crypto/tls"
-	"net"
 	"time"
 
 	"google.golang.org/grpc"
@@ -17,14 +15,12 @@ import (
 
 // Dialer can open grpc client connections with TLS.
 type Dialer struct {
-	netDialer NetDialer
 	tlsConfig *tls.Config
 }
 
 // New creates a new Dialer without aTLS.
-func New(netDialer NetDialer, tlsConfig *tls.Config) *Dialer {
+func New(tlsConfig *tls.Config) *Dialer {
 	return &Dialer{
-		netDialer: netDialer,
 		tlsConfig: tlsConfig,
 	}
 }
@@ -41,9 +37,4 @@ func (d *Dialer) NewConn(target string) (*grpc.ClientConn, error) {
 			Backoff:           backoff.DefaultConfig,
 		}),
 	)
-}
-
-// NetDialer implements the net Dialer interface.
-type NetDialer interface {
-	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }

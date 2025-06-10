@@ -1,6 +1,6 @@
 replicaCount: 1
 image:
-  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy@sha256:c6aa0ca1f5dc7ddefd6de9c7b5f8c0a0fa2e7e64962dd4aaef22e6d69842fc4d
+  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy@sha256:4abfb8a61731fee43151f497df4bfa78cc30e701ff14cde7e945a5816ee8c13a
   pullPolicy: IfNotPresent
   restartPolicy: Always
 service:
@@ -15,9 +15,9 @@ affinity: {}
 config:
   # API key configuration
   apiKey:
-    enabled: false
+    enabled: true
     apiKeySecretName: 'privatemode-api-key' # Name of the Kubernetes Secret containing the API
-  # Attestation Service configuration
+  # Secret Service configuration
   ssEndpoint:
     enabled: false
     ssEndpoint: 'secret.privatemode.ai:443'
@@ -25,6 +25,10 @@ config:
   apiEndpoint:
     enabled: false
     apiEndpoint: 'api.privatemode.ai:443'
+  # Coordinator configuration
+  coordinatorEndpoint:
+    enabled: false
+    coordinatorEndpoint: 'coordinator.privatemode.ai:443'
   # Container port configuration
   port: '8080'
   workspace:

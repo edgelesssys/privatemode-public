@@ -478,7 +478,7 @@ func prepareRequest(ctx context.Context, require *require.Assertions, prompt *st
 
 	payload := openai.ChatRequest{
 		ChatRequestPlainData: openai.ChatRequestPlainData{
-			Model: constants.ServedModel,
+			Model: constants.DefaultTextgenModel,
 		},
 		Messages: []openai.Message{
 			{

@@ -38,7 +38,7 @@
   /**
    * Add an error toast notification
    */
-  export const addErrorToast = (message: string, duration: number = 5000): string => {
+  export const addErrorToast = (message: string, duration: number = 10000): string => {
     return addToast(message, 'error', duration)
   }
 
@@ -52,7 +52,7 @@
   /**
    * Add a warning toast notification
    */
-  export const addWarningToast = (message: string, duration: number = 5000): string => {
+  export const addWarningToast = (message: string, duration: number = 10000): string => {
     return addToast(message, 'warning', duration)
   }
 

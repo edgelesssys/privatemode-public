@@ -10,14 +10,14 @@ manifest=$1
 yq eval -i 'del(.ReferenceValues.snp[] | select(.ProductName == "Milan"))' "$manifest"
 
 # set TCB versions
-yq eval -i '.ReferenceValues.snp[].MinimumTCB.BootloaderVersion=9' "$manifest"
+yq eval -i '.ReferenceValues.snp[].MinimumTCB.BootloaderVersion=10' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.TEEVersion=0' "$manifest"
-yq eval -i '.ReferenceValues.snp[].MinimumTCB.SNPVersion=21' "$manifest"
-yq eval -i '.ReferenceValues.snp[].MinimumTCB.MicrocodeVersion=72' "$manifest"
+yq eval -i '.ReferenceValues.snp[].MinimumTCB.SNPVersion=23' "$manifest"
+yq eval -i '.ReferenceValues.snp[].MinimumTCB.MicrocodeVersion=84' "$manifest"
 
 # configure GuestPolicy and PlatformInfo
 yq eval -i '.ReferenceValues.snp[].GuestPolicy={ "SMT":true, "MigrateMA":false, "Debug":false, "CXLAllowed":false }' "$manifest"
-yq eval -i '.ReferenceValues.snp[].PlatformInfo={ "SMTEnabled":true, "AliasCheckComplete":false }' "$manifest"
+yq eval -i '.ReferenceValues.snp[].PlatformInfo={ "SMTEnabled":true, "AliasCheckComplete":true }' "$manifest"
 
 # add required SAN for secret-service mesh cert.
 yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) += [env(SECRET_SERVICE_K8S_DOMAIN)]' "$manifest"

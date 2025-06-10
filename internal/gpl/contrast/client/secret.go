@@ -6,7 +6,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/gpl/grpc/dialer"
@@ -16,7 +15,7 @@ import (
 // SetSecrets uploads secrets to Continuum's Secret Service.
 // A zero or negative TTL will create secrets without expiration.
 func (c *Client) SetSecrets(ctx context.Context, secrets map[string][]byte, ttl time.Duration) error {
-	conn, err := dialer.New(&net.Dialer{}, c.tlsConfig).NewConn(c.endpoint)
+	conn, err := dialer.New(c.tlsConfig).NewConn(c.endpoint)
 	if err != nil {
 		return fmt.Errorf("failed to dial Secret Service endpoint %q: %w", c.endpoint, err)
 	}
