@@ -14,6 +14,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/edgelesssys/continuum/internal/gpl/constants"
 )
 
 const (
@@ -110,7 +112,19 @@ func (f *Forwarder) Forward(
 	w http.ResponseWriter, req *http.Request,
 	requestMutator RequestMutator, responseMutator ResponseMutator, responseHeaderMutator HeaderMutator,
 ) {
-	f.log.Info("Forwarding request", "remoteAddress", req.RemoteAddr, "method", req.Method, "url", req.URL.String())
+	f.log.Info("Forwarding request",
+		"remoteAddress", req.RemoteAddr,
+		"method", req.Method,
+		"url", req.URL.String(),
+		"userAgent", req.UserAgent(),
+		"clientVersion", req.Header.Get(constants.PrivatemodeVersionHeader),
+		"clientOS", req.Header.Get(constants.PrivatemodeOSHeader),
+		"clientArch", req.Header.Get(constants.PrivatemodeArchitectureHeader),
+		"clientType", req.Header.Get(constants.PrivatemodeClientHeader),
+		"shardKey", req.Header.Get(constants.PrivatemodeShardKeyHeader),
+		"contentLength", req.ContentLength,
+		"contentType", req.Header.Get("Content-Type"),
+	)
 
 	// Prepare request for forwarding to server
 	req.RequestURI = ""

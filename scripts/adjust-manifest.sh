@@ -6,9 +6,6 @@ set -euo pipefail
 
 manifest=$1
 
-# The machines on Scaleway are Genoa machines. Coordinator validation fails if we have Milan reference values in the manifest.
-yq eval -i 'del(.ReferenceValues.snp[] | select(.ProductName == "Milan"))' "$manifest"
-
 # set TCB versions
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.BootloaderVersion=10' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.TEEVersion=0' "$manifest"
@@ -17,7 +14,7 @@ yq eval -i '.ReferenceValues.snp[].MinimumTCB.MicrocodeVersion=84' "$manifest"
 
 # configure GuestPolicy and PlatformInfo
 yq eval -i '.ReferenceValues.snp[].GuestPolicy={ "SMT":true, "MigrateMA":false, "Debug":false, "CXLAllowed":false }' "$manifest"
-yq eval -i '.ReferenceValues.snp[].PlatformInfo={ "SMTEnabled":true, "AliasCheckComplete":true }' "$manifest"
+yq eval -i '.ReferenceValues.snp[].PlatformInfo={ "SMTEnabled":false, "AliasCheckComplete":true }' "$manifest"
 
 # add required SAN for secret-service mesh cert.
 yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) += [env(SECRET_SERVICE_K8S_DOMAIN)]' "$manifest"

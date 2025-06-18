@@ -5,6 +5,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -194,6 +196,12 @@ func TestPromptEncryption(t *testing.T) {
 				} else if tc.proxyCacheSalt != "" {
 					assert.Equal(tc.proxyCacheSalt, cacheSaltHeader)
 				}
+
+				// correct shard key header was set if there is a cache salt
+				hash := sha256.Sum256([]byte(cacheSaltHeader))
+				expectedShardKey := hex.EncodeToString(hash[16:])
+				actualShardKey := resp.Header().Get("Request-Shard-Key")
+				assert.Equal(expectedShardKey, actualShardKey)
 			}
 			if tc.expectedBody != "" {
 				body, err := io.ReadAll(resp.Body)

@@ -174,10 +174,6 @@ func (t *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Re
 func (t *Adapter) forwardChatCompletionsRequest() func(http.ResponseWriter, *http.Request) {
 	saltInjector := openai.CacheSaltInjector(openai.RandomPromptCacheSalt, t.log)
 	saltValidator := openai.CacheSaltValidator(t.log)
-	currentVersion, err := t.getSemanticVersion(constants.Version())
-	if err != nil {
-		t.log.Error("retrieving client version", "error", err)
-	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := t.cipher.NewResponseCipher()
@@ -187,11 +183,6 @@ func (t *Adapter) forwardChatCompletionsRequest() func(http.ResponseWriter, *htt
 			t.log.Error("retrieving client version", "error", err)
 			forwarder.HTTPError(w, r, http.StatusBadRequest, "checking client version: %s", err.Error())
 			return
-		}
-
-		// log old versions for debugging and to remove them if they are not used anymore
-		if clientVersion == "" || semver.Compare(clientVersion, currentVersion) != 0 {
-			t.log.Info("forwarding request", "clientVersion", clientVersion)
 		}
 
 		switch {

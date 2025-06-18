@@ -223,8 +223,8 @@ type Usage struct {
 
 // PromptTokensDetails contains detailed information about prompt tokens.
 type PromptTokensDetails struct {
-	AudioTokens  int `json:"audio_tokens,omitempty"`
-	CachedTokens int `json:"cached_tokens,omitempty"`
+	AudioTokens  int `json:"audio_tokens,omitzero"`
+	CachedTokens int `json:"cached_tokens,omitzero"`
 }
 
 // CacheSaltInjector creates a forwarder.RequestMutator that injects a CacheSalt if it is not set.

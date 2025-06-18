@@ -5,9 +5,13 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -22,6 +26,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/gpl/openai"
 	"github.com/edgelesssys/continuum/internal/gpl/process"
 	"github.com/edgelesssys/continuum/internal/gpl/secretmanager"
+	"github.com/tidwall/gjson"
 )
 
 // Server implements the HTTP server for the API gateway.
@@ -100,6 +105,34 @@ func (s *Server) cacheSaltInjector() forwarder.RequestMutator {
 	return openai.CacheSaltInjector(cacheSaltGenerator, s.log)
 }
 
+func (s *Server) shardKeyInjector() forwarder.RequestMutator {
+	// Reads the cache salt and generates a shard key using sha256.
+	// Returns an error if there is no cache salt in the request body.
+	return func(r *http.Request) error {
+		bodyBytes, err := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		if err != nil {
+			return fmt.Errorf("reading request body: %w", err)
+		}
+
+		httpBody := string(bodyBytes)
+		if len(httpBody) == 0 {
+			return nil
+		}
+		cacheSalt := gjson.Get(httpBody, "cache_salt").String()
+		if cacheSalt == "" {
+			return fmt.Errorf("missing field 'cache_salt'")
+		}
+
+		hash := sha256.Sum256([]byte(cacheSalt))
+		shardKey := hex.EncodeToString(hash[16:])
+		r.Header.Set(constants.PrivatemodeShardKeyHeader, shardKey)
+		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+
+		return nil
+	}
+}
+
 func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
 	s.setRequestHeaders(r)
 
@@ -113,6 +146,7 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 		w, r,
 		forwarder.RequestMutatorChain(
 			s.cacheSaltInjector(),
+			s.shardKeyInjector(),
 			forwarder.WithFullJSONRequestMutation(rc.Encrypt, openai.PlainCompletionsRequestFields, s.log),
 		),
 		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, openai.PlainCompletionsResponseFields, false),

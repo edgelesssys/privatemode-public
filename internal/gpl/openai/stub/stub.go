@@ -42,6 +42,10 @@ func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.Resp
 
 		w.Header().Set("Request-Cache-Salt", request.CacheSalt)
 
+		if r.Header.Get(constants.PrivatemodeShardKeyHeader) != "" {
+			w.Header().Set("Request-Shard-Key", r.Header.Get(constants.PrivatemodeShardKeyHeader))
+		}
+
 		if len(request.Messages) == 0 {
 			http.Error(w, "no messages in request", http.StatusBadRequest)
 			return

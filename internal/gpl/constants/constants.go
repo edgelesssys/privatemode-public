@@ -56,6 +56,9 @@ const (
 	// ManifestDir is the directory where the manifest log is stored.
 	ManifestDir = "manifests"
 
+	// PrivatemodeShardKeyHeader is the key used to decide how to route requests, e.g., to reuse a cache.
+	// Currently used for routing chat completions to reuse the prefix cache.
+	PrivatemodeShardKeyHeader = "Privatemode-Shard-Key"
 	// PrivatemodeVersionHeader is an HTTP header sent by the Privatemode components on every request.
 	// It is used to check for version compatibility between client and server.
 	PrivatemodeVersionHeader = "Privatemode-Version"
@@ -69,6 +72,8 @@ const (
 	PrivatemodeClientApp = "App"
 	// PrivatemodeClientProxy is the PrivatemodeClientHeader value for the Privatemode client proxy.
 	PrivatemodeClientProxy = "Proxy"
+	// PrivatemodeClientAPIGateway is the PrivatemodeClientHeader value for the Api Gateway.
+	PrivatemodeClientAPIGateway = "ApiGateway"
 
 	// SecretServiceEndpoint is the endpoint of the secret service.
 	SecretServiceEndpoint = "secret.privatemode.ai:443"
