@@ -84,7 +84,7 @@
   <article class="message">
     <div class="message-body">
       <p>
-      In order to chat with Privatemode, you need to set your App key below. Don't have a key yet?
+      In order to chat with Privatemode, you need to set your access key below. Don't have a key yet?
       <a href="https://privatemode.ai/sign-up-app"
          rel="noopener noreferrer">
         Request one here
@@ -95,7 +95,7 @@
   <article class="message" class:is-danger={!hasModels} class:is-warning={!apiKey} class:is-info={apiKey}>
     <div class="message-body">
       <p class="is-size-8 mb-4">
-        Enter your App key below{#if isNativeApp}&nbsp;or set it in the configuration file{/if}.
+        Enter your access key below{#if isNativeApp}&nbsp;or set it in the configuration file{/if}.
       </p>
       <form
         class="field has-addons has-addons-right"
@@ -110,8 +110,8 @@
       >
         <p class="control is-expanded">
           <input
-            aria-label="OpenAI API key"
-            placeholder="Your App key"
+            aria-label="Privatemode access key"
+            placeholder="Your access key"
             autocomplete="off"
             class="input"
             class:is-danger={!hasModels}

@@ -1,0 +1,22 @@
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: STORAGE_CLASS_NAME
+  annotations:
+    privatemode.edgeless.systems/model_source: "MODEL_SOURCE"
+    privatemode.edgeless.systems/root_hash: "VERITY_HASH"
+    privatemode.edgeless.systems/disk_size_gb: "DISK_SIZE_GB"
+    privatemode.edgeless.systems/commit_hash: "COMMIT_HASH"
+provisioner: driver.longhorn.io
+allowVolumeExpansion: false
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  # Number of replicas to keep for volumes created with this StorageClass
+  # Setting this to the number of nodes in the cluster ensures Pods can be rescheduled
+  # without having to wait for a replica to be rebuilt
+  numberOfReplicas: "NUM_NODES"
+  staleReplicaTimeout: "2880"
+  backingImage: verity-disk-NAME_SUFFIX
+  backingImageChecksum: "BACKING_IMAGE_CHECKSUM"
+  dataEngine: "v1"

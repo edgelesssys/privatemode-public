@@ -19,6 +19,7 @@
   import rocket from '../assets/rocket.svg'
   import { replace } from 'svelte-spa-router'
   import settings from '../assets/settings.svg'
+  import security from '../assets/security.svg'
   import { TestChatController } from './SmokeTest';
   $: sortedChats = $chatsStorage.sort(getChatSortOption().sortFn)
   $: activeChatId = $params && $params.chatId ? parseInt($params.chatId) : undefined
@@ -131,8 +132,11 @@
       {/if}
     </div> -->
 
-  <div class="side-info-block">
-    <!-- <AttestationBanner /> -->
+    <div class="side-info-block">
+    <a href="#/" class="flex attestation-link">
+      <img src={security} alt="security shield" width="15" height="15" />
+      <p>Your session is secure</p>
+    </a>
     {#if sortedChats.length > 1}
       <a
         href="#/"
@@ -150,19 +154,8 @@
       <img src={settings} alt="key icon" width="15" height="15" />
       <p>Settings</p>
     </a>
-
     <a
-      href="https://privatemode.ai"
-      class="flex"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      <img src={info} alt="info icon" width="11.5" height="14" />
-      <p>About Privatemode</p>
-    </a>
-
-    <a
-      href="https://docs.privatemode.ai"
+      href="https://docs.privatemode.ai/guides/desktop-app"
       class="flex"
       target="_blank"
       rel="noopener noreferrer"
@@ -170,11 +163,6 @@
       <img src={docs} alt="docs icon" width="11.5" height="14" />
       <p>Documentation</p>
     </a>
-
-    <!-- <a on:click={openWaitlist} style="display: flex; align-items: center; gap: 10px;">
-      <img width="12" height="12" src={rocket} alt="signup icon" />
-      <p>Request API key</p>
-   </a> -->
     </div>
   </div>
 </aside>
@@ -182,4 +170,9 @@
   class="modal-backdrop fade show {$pinMainMenu ? 'd-block' : 'd-none'}"
   style="z-index: 31;"
 ></div>
-<!-- <Waitlist showModal={showWaitlist} /> -->
+
+<style>
+  .attestation-link p {
+    color: #75FB7A !important;
+  }
+</style>

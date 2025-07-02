@@ -46,6 +46,8 @@ const (
 	SecretServiceBackendPort = "9000"
 	// WorkloadDefaultExposedPort is the default port on which a workload container, and therefore the inference-proxy, listens for connections.
 	WorkloadDefaultExposedPort = "8008"
+	// LoadBalancerDefaultPort is the default port on which the local API Gateway load balancer listens for connections.
+	LoadBalancerDefaultPort = "8000"
 
 	// EtcdInferenceSecretPrefix is the prefix for inference secrets stored in etcd.
 	EtcdInferenceSecretPrefix = "inference-secrets/"

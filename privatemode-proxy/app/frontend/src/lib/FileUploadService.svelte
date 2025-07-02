@@ -33,7 +33,7 @@
   
     // Handle specific error cases with more user-friendly messages
     if (errorMessage.includes('Unauthorized')) {
-      return 'Unauthorized: Check your API key for file processing'
+      return 'Unauthorized: Check your access key for file processing'
     } else if (errorMessage.includes('Network Error') || errorMessage.includes('Failed to fetch')) {
       return 'Network error: Upload failed, please try again'
     } else if (errorMessage.includes('429')) {

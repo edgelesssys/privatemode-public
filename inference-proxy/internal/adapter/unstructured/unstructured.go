@@ -35,6 +35,7 @@ func New(cipher *cipher.Cipher, forwarder mutatingForwarder, log *slog.Logger) (
 func (t *Adapter) ServeMux() *http.ServeMux {
 	srv := http.NewServeMux()
 	srv.HandleFunc("/", t.forwardRequest)
+	srv.HandleFunc("/healthcheck", t.forwardHealthcheckRequest)
 	return srv
 }
 
@@ -45,6 +46,15 @@ func (t *Adapter) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		forwarder.WithFullRequestMutation(session.DecryptRequest(r.Context()), t.log),
 		// currently only JSON responses are supported
 		forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), nil, false),
+		forwarder.NoHeaderMutation,
+	)
+}
+
+func (t *Adapter) forwardHealthcheckRequest(w http.ResponseWriter, r *http.Request) {
+	t.forwarder.Forward(
+		w, r,
+		forwarder.NoRequestMutation,
+		forwarder.NoResponseMutation{},
 		forwarder.NoHeaderMutation,
 	)
 }

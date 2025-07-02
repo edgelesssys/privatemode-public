@@ -1,0 +1,10 @@
+[Partition]
+Type=linux-generic
+Weight=1000
+UUID=null
+Format=erofs
+Verity=data
+VerityMatchKey=verity
+CopyFiles=@@SOURCE_REPO@@:/
+ExcludeFiles=@@SOURCE_REPO@@/.git
+@@EXTRA_EXCLUDED_FILES@@

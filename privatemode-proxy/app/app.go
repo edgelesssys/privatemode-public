@@ -40,7 +40,7 @@ func (c *Config) Update(log *slog.Logger) error {
 
 // GetConfiguredAPIKey returns the configured API key.
 func (c *Config) GetConfiguredAPIKey() string {
-	return c.runtimeConfig.APIKey
+	return c.runtimeConfig.AccessKey
 }
 
 func (c *Config) update(runtimeConfig jsonConfig) {
@@ -150,7 +150,7 @@ func (a *App) initialize(ctx context.Context) error {
 }
 
 type jsonConfig struct {
-	APIKey          string `json:"app_key"`
+	AccessKey       string `json:"access_key"`
 	PromptCacheSalt string `json:"prompt_cache_salt"`
 	// Dev-only
 	DeploymentUID string `json:"deployment_uid"`
@@ -183,8 +183,8 @@ func loadRuntimeConfig(workspace string, log *slog.Logger) (jsonConfig, error) {
 		return jsonConfig{}, fmt.Errorf("parsing configuration file: %w", err) //nolint:exhaustruct
 	}
 
-	if configFile.APIKey == "" {
-		log.Info("API key not set in configuration file")
+	if configFile.AccessKey == "" {
+		log.Info("Access key not set in configuration file")
 	}
 	if configFile.PromptCacheSalt != "" {
 		log.Info("PromptCacheSalt set in configuration file")

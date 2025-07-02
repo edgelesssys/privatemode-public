@@ -36,42 +36,6 @@ func TestSetRawBytes(t *testing.T) {
 	assert.Equal(t, replace, gjson.GetBytes(res, "messages").String())
 }
 
-func TestGetClientSemanticVersion(t *testing.T) {
-	a := &Adapter{}
-	makeReq := func(version string) *http.Request {
-		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
-		if version != "" {
-			req.Header.Set(constants.PrivatemodeVersionHeader, version)
-		}
-		return req
-	}
-
-	testCases := map[string]struct {
-		headerValue    string
-		expectedOutput string
-		expectError    bool
-	}{
-		"no header":          {"", "", false},
-		"valid version":      {"v1.12.3", "v1.12.3", false},
-		"with pseudo suffix": {"v1.12.3-beta", "v1.12.3", false},
-		"0.0.0 old app":      {"0.0.0", "v0.0.0", false},
-		"invalid version":    {"banana", "", true},
-	}
-
-	for name, tt := range testCases {
-		t.Run(name, func(t *testing.T) {
-			req := makeReq(tt.headerValue)
-			version, err := a.getSemanticVersion(req.Header.Get(constants.PrivatemodeVersionHeader))
-			if tt.expectError {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Equal(t, tt.expectedOutput, version)
-			}
-		})
-	}
-}
-
 func TestForwardModelsRequest(t *testing.T) {
 	testCases := map[string]struct {
 		workloadTasks  []string

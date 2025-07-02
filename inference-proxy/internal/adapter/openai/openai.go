@@ -7,7 +7,6 @@ package openai
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -178,81 +177,21 @@ func (t *Adapter) forwardChatCompletionsRequest() func(http.ResponseWriter, *htt
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := t.cipher.NewResponseCipher()
 
-		clientVersion, err := t.getSemanticVersion(r.Header.Get(constants.PrivatemodeVersionHeader))
-		if err != nil {
-			t.log.Error("retrieving client version", "error", err)
-			forwarder.HTTPError(w, r, http.StatusBadRequest, "checking client version: %s", err.Error())
-			return
+		saltMutator := saltValidator
+		clientVersion := r.Header.Get(constants.PrivatemodeVersionHeader)
+		if semver.Compare(clientVersion, "v1.17.0") < 0 { // clients without cache_salt
+			saltMutator = saltInjector
 		}
-
-		switch {
-		case clientVersion == "": // backwards compatibility for clients < 1.12.0 that didn't set the header
-			t.forwarder.Forward(
-				w, r,
-				forwarder.RequestMutatorChain(
-					forwarder.WithSelectJSONRequestMutation(
-						session.DecryptRequest(r.Context()),
-						forwarder.FieldSelector{{openai.ChatRequestMessagesField}, {openai.ChatRequestToolsField}},
-						t.log),
-					saltInjector,
-				),
-				forwarder.WithSelectJSONResponseMutation(session.EncryptResponse(r.Context()), forwarder.FieldSelector{{openai.ChatResponseEncryptionField}}),
-				forwarder.NoHeaderMutation,
-			)
-		case semver.Compare(clientVersion, "v1.16.0") < 0: // backwards compatibility for clients < 1.16.0
-			t.forwarder.Forward(
-				w, r,
-				forwarder.RequestMutatorChain(
-					forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, t.log),
-					saltInjector,
-				),
-				forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainCompletionsResponseFields, true),
-				forwarder.NoHeaderMutation,
-			)
-		case semver.Compare(clientVersion, "v1.17.0") < 0: // clients without cache_salt
-			t.forwarder.Forward(
-				w, r,
-				forwarder.RequestMutatorChain(
-					forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, t.log),
-					saltInjector,
-				),
-				forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainCompletionsResponseFields, false),
-				forwarder.NoHeaderMutation,
-			)
-		default:
-			t.forwarder.Forward(
-				w, r,
-				forwarder.RequestMutatorChain(
-					forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, t.log),
-					saltValidator, // Introduced cache_salt validation.
-				),
-				forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainCompletionsResponseFields, false),
-				forwarder.NoHeaderMutation,
-			)
-		}
+		t.forwarder.Forward(
+			w, r,
+			forwarder.RequestMutatorChain(
+				forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, t.log),
+				saltMutator,
+			),
+			forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainCompletionsResponseFields, false),
+			forwarder.NoHeaderMutation,
+		)
 	}
-}
-
-// getSemanticVersion returns the client semantic version from the request header.
-// NOTE: the app did not set the correct version prior v1.16.0 such that version
-// is always 0.0.0 in that case!
-func (t *Adapter) getSemanticVersion(version string) (string, error) {
-	// Clients without version (< 1.12.0) will not set the header
-	if version != "" {
-		// Drop pseudo-version suffix (anything after "-")
-		version, _, _ = strings.Cut(version, "-")
-
-		// old clients app set the version to "0.0.0", instead of "v0.0.0"
-		if version == "0.0.0" {
-			version = "v0.0.0"
-		}
-
-		if !semver.IsValid(version) {
-			return "", fmt.Errorf("invalid client version: %s", version)
-		}
-	}
-
-	return version, nil
 }
 
 type mutatingForwarder interface {

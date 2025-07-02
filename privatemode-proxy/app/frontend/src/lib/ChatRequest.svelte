@@ -54,7 +54,7 @@ export class ChatRequest {
         switch (response.status) {
           case 401:
           case 403:
-            userMessage = 'Authentication failed. Please check your App key.'
+            userMessage = 'Authentication failed. Please check your access key.'
             break
           case 429:
             userMessage = 'Rate limit exceeded. Please try again in a few moments.'

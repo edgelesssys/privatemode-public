@@ -1,0 +1,64 @@
+kind: Job
+apiVersion: batch/v1
+metadata:
+  name: verity-disk-generator
+spec:
+  completions: 1
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: verity-disk-generator
+        image: ghcr.io/edgelesssys/privatemode/verity-disk-generator:latest
+        imagePullPolicy: Always
+        env:
+        - name: GIT_PAT
+          valueFrom:
+            secretKeyRef:
+              name: verity-disk-generator-git-creds
+              key: GIT_PAT
+        - name: EXCLUDE_GIT_FILES
+          value: EXCLUDED_MODEL_REPO_FILES # adjust as needed
+        - name: TMPDIR
+          value: "/mnt/temp"
+        args:
+        - "/verity-disk"
+        - "MODEL_SOURCE" # adjust as needed
+        - "COMMIT_HASH" # adjust as needed
+        securityContext:
+          privileged: true
+        volumeMounts:
+          - name: temp-storage
+            mountPath: /mnt/temp
+          - name: sys-devices-dir
+            mountPath: /sys/bus/scsi/devices
+            mountPropagation: Bidirectional
+          - name: sys-class
+            mountPath: /sys/class/
+            mountPropagation: Bidirectional
+        volumeDevices:
+        - name: verity-disk
+          devicePath: /verity-disk
+      volumes:
+      - name: verity-disk
+        persistentVolumeClaim:
+          claimName: verity-disk-NAME_SUFFIX
+      - name: temp-storage
+        emptyDir: {}
+      - name: sys-devices-dir
+        hostPath:
+          path: /sys/bus/scsi/devices
+          type: Directory
+      - name: sys-class
+        hostPath:
+          path: /sys/class/
+          type: Directory
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: verity-disk-generator-git-creds
+type: Opaque
+data:
+  GIT_PAT: GIT_PAT_BASE64 # adjust as needed

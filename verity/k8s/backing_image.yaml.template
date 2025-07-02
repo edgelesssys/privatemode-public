@@ -1,0 +1,12 @@
+apiVersion: longhorn.io/v1beta2
+kind: BackingImage
+metadata:
+  # backing images may only have names of up to 40 characters
+  name: verity-disk-NAME_SUFFIX
+  namespace: longhorn-system
+spec:
+  minNumberOfCopies: 2 # minimum number of copies required for Longhorn to consider the BackingImage healthy
+  sourceType: export-from-volume
+  sourceParameters:
+    volume-name: PVC_NAME
+    export-type: raw

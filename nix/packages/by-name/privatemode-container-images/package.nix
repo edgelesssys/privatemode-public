@@ -19,6 +19,7 @@
   # Optional inputs - these are not available in the OSS build.
   apigateway ? null,
   gpu-injector ? null,
+  fake-workload ? null,
 }:
 let
   privatemode-proxy-amd64 = privatemode-proxy.image.overrideAttrs (_: {
@@ -55,6 +56,7 @@ let
   images = oss-images ++ [
     apigateway.image
     gpu-injector.image
+    fake-workload.image
   ];
 
   toOciImage =

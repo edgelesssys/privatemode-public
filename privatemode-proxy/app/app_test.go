@@ -31,19 +31,19 @@ func TestLoadConfig(t *testing.T) {
 			configData: `{}`,
 			expectCfg:  jsonConfig{},
 		},
-		"config file with valid APP key": {
-			configData: `{"app_key": "test-key"}`,
-			expectCfg:  jsonConfig{APIKey: "test-key"},
+		"config file with valid access key": {
+			configData: `{"access_key": "test-key"}`,
+			expectCfg:  jsonConfig{AccessKey: "test-key"},
 		},
 		"complete config file": {
 			configData: `{
-				"app_key": "test-key",
+				"access_key": "test-key",
 				"deployment_uid": "test-uid",
 				"manifest_path": "test-manifest",
 				"prompt_cache_salt": "test-salt"
 			}`,
 			expectCfg: jsonConfig{
-				APIKey:          "test-key",
+				AccessKey:       "test-key",
 				DeploymentUID:   "test-uid",
 				ManifestPath:    "test-manifest",
 				PromptCacheSalt: "test-salt",

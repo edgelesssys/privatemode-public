@@ -99,12 +99,6 @@ func WithFullRequestMutation(mutate MutationFunc, log *slog.Logger) RequestMutat
 	}
 }
 
-// WithSelectJSONRequestMutation returns a [RequestMutator] which mutates the request for
-// the selected JSON fields.
-func WithSelectJSONRequestMutation(mutate MutationFunc, fields FieldSelector, log *slog.Logger) RequestMutator {
-	return withJSONRequestMutation(mutate, fields, mutateSelectJSONFields, log)
-}
-
 // WithFullJSONRequestMutation returns a [RequestMutator] which mutates the full request.
 func WithFullJSONRequestMutation(mutate MutationFunc, skipFields FieldSelector, log *slog.Logger) RequestMutator {
 	return withJSONRequestMutation(mutate, skipFields, mutateAllJSONFields, log)
