@@ -54,7 +54,7 @@ func (l *LicenseDB) GetLicenseEntriesByOrgID(ctx context.Context, orgID uint) ([
 
 // DeleteLicenseKey deletes a license entry with the given license key from the database.
 func (l *LicenseDB) DeleteLicenseKey(ctx context.Context, licenseKey string, orgID uint) error {
-	result := l.db.WithContext(ctx).Where("license_key = ?", licenseKey).Where("organization_id = ?", orgID).Delete(&LicenseEntry{}) // nolint:exhaustruct
+	result := l.db.WithContext(ctx).Where("license_key = ?", licenseKey).Where("organization_id = ?", orgID).Delete(&LicenseEntry{}) //nolint:exhaustruct
 	if result.Error != nil {
 		return fmt.Errorf("deleting license entry: %w", result.Error)
 	}
@@ -66,7 +66,7 @@ func (l *LicenseDB) DeleteLicenseKey(ctx context.Context, licenseKey string, org
 
 // DeleteLicenseKeys deletes all license entries for the given organization ID from the database.
 func (l *LicenseDB) DeleteLicenseKeys(ctx context.Context, orgID uint) error {
-	result := l.db.WithContext(ctx).Where("organization_id = ?", orgID).Delete(&LicenseEntry{}) // nolint:exhaustruct
+	result := l.db.WithContext(ctx).Where("organization_id = ?", orgID).Delete(&LicenseEntry{}) //nolint:exhaustruct
 	if result.Error != nil {
 		return fmt.Errorf("deleting license entries: %w", result.Error)
 	}
@@ -131,7 +131,7 @@ func (l *LicenseDB) UpdateLicenseEntry(ctx context.Context, entry UpdateLicenseE
 		return nil
 	}
 
-	result := l.db.WithContext(ctx).Model(&LicenseEntry{}).Where("license_key = ?", entry.LicenseKey).Updates(updates) // nolint:exhaustruct
+	result := l.db.WithContext(ctx).Model(&LicenseEntry{}).Where("license_key = ?", entry.LicenseKey).Updates(updates) //nolint:exhaustruct
 	if result.Error != nil {
 		return fmt.Errorf("updating license entry: %w", result.Error)
 	}
@@ -142,15 +142,15 @@ func (l *LicenseDB) UpdateLicenseEntry(ctx context.Context, entry UpdateLicenseE
 type LicenseEntry struct {
 	Name                      string       `json:"name" gorm:"column:name;type:varchar(256)"` // used to separate multiple keys in the user portal.
 	LicenseKey                string       `json:"license_key" gorm:"column:license_key;primaryKey;type:varchar(36)"`
-	OrganizationName          string       `json:"organization" gorm:"column:organization;type:varchar(256);not null"` // TODO(elchead): maybe remove once we moved to v2
+	OrganizationName          string       `json:"organization" gorm:"column:organization;type:varchar(256);not null"` // TODO(daniel-weisse): maybe remove once we moved to v2
 	IssueDate                 time.Time    `json:"issue_date" gorm:"column:issue_date;type:DATE;not null"`
-	ExpirationDate            time.Time    `json:"expiration_date" gorm:"column:expiration_date;type:DATE;not null"`                                           // TODO(elchead): remove once we moved to v2
-	UsageLimit                int64        `json:"usage_limit" gorm:"column:usage_limit;type:BIGINT;not null"`                                                 // TODO(elchead): remove once we moved to v2
-	PromptTokensPerMinute     int64        `json:"prompt_tokens_per_minute" gorm:"column:prompt_tokens_per_minute;type:BIGINT;not null;default:20000"`         // TODO(elchead): remove once we moved to v2
-	CompletionTokensPerMinute int64        `json:"completion_tokens_per_minute" gorm:"column:completion_tokens_per_minute;type:BIGINT;not null;default:10000"` // TODO(elchead): remove once we moved to v2
-	RequestsPerMinute         int64        `json:"requests_per_minute" gorm:"column:requests_per_minute;type:BIGINT;not null;default:20"`                      // TODO(elchead): remove once we moved to v2
-	StripeCustomerID          *string      `json:"stripe_customer_id" gorm:"column:stripe_customer_id;type:varchar(255)"`                                      // TODO(elchead): remove once we moved to v2
-	Type                      string       `json:"type" gorm:"column:type;type:varchar(256);not null;default:'api'"`                                           // TODO(elchead): remove once we moved to v2
+	ExpirationDate            time.Time    `json:"expiration_date" gorm:"column:expiration_date;type:DATE;not null"`                                           // TODO(daniel-weisse): remove once we moved to v2
+	UsageLimit                int64        `json:"usage_limit" gorm:"column:usage_limit;type:BIGINT;not null"`                                                 // TODO(daniel-weisse): remove once we moved to v2
+	PromptTokensPerMinute     int64        `json:"prompt_tokens_per_minute" gorm:"column:prompt_tokens_per_minute;type:BIGINT;not null;default:20000"`         // TODO(daniel-weisse): remove once we moved to v2
+	CompletionTokensPerMinute int64        `json:"completion_tokens_per_minute" gorm:"column:completion_tokens_per_minute;type:BIGINT;not null;default:10000"` // TODO(daniel-weisse): remove once we moved to v2
+	RequestsPerMinute         int64        `json:"requests_per_minute" gorm:"column:requests_per_minute;type:BIGINT;not null;default:20"`                      // TODO(daniel-weisse): remove once we moved to v2
+	StripeCustomerID          *string      `json:"stripe_customer_id" gorm:"column:stripe_customer_id;type:varchar(255)"`                                      // TODO(daniel-weisse): remove once we moved to v2
+	Type                      string       `json:"type" gorm:"column:type;type:varchar(256);not null;default:'api'"`                                           // TODO(daniel-weisse): remove once we moved to v2
 	OrganizationID            uint         `json:"organization_id" gorm:"column:organization_id;index"`
 	Organization              Organization `json:"organization_v2" gorm:"foreignKey:OrganizationID"` // JSON field is suffixed with v2, since organization shouldn't be taken to remain compatible with v1
 	Comment                   string       `json:"comment" gorm:"column:comment;type:TEXT"`

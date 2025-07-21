@@ -1,7 +1,7 @@
 //go:build gpu
 
 /*
-The GPU package implements functionality to talk to local NVIDIA GPUs.
+Package gpu implements functionality to talk to local NVIDIA GPUs.
 */
 package gpu
 
@@ -72,14 +72,14 @@ func (c *Client) Close() error {
 }
 
 // ListGPUs returns a list of all NVIDIA GPUs in the system.
-func (c *Client) ListGPUs() ([]Device, error) {
+func (c *Client) ListGPUs() ([]*Device, error) {
 	gpuCount, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {
 		return nil, fmt.Errorf("getting GPU count: %s", nvml.ErrorString(ret))
 	}
 
-	gpus := make([]Device, gpuCount)
-	for i := 0; i < gpuCount; i++ {
+	gpus := make([]*Device, gpuCount)
+	for i := range gpuCount {
 		device, ret := nvml.DeviceGetHandleByIndex(i)
 		if ret != nvml.SUCCESS {
 			return nil, fmt.Errorf("getting GPU handle: %s", nvml.ErrorString(ret))
@@ -90,7 +90,10 @@ func (c *Client) ListGPUs() ([]Device, error) {
 			return nil, fmt.Errorf("getting GPU UUID: %s", nvml.ErrorString(ret))
 		}
 
-		gpus[i] = Device{id: id}
+		gpus[i] = &Device{
+			id:           id,
+			cachedHandle: nil,
+		}
 	}
 
 	return gpus, nil

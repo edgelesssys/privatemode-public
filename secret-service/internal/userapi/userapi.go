@@ -1,4 +1,4 @@
-// the userapi package is responsible for handling requests
+// Package userapi package is responsible for handling requests
 // from users to the attestation service.
 package userapi
 

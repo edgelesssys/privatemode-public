@@ -1,4 +1,4 @@
-// The NRAS package implements a client to talk to the NVIDIA Remote Attestation Service (NRAS).
+// Package nras implements a client to talk to the NVIDIA Remote Attestation Service (NRAS).
 // See https://docs.attestation.nvidia.com/api-docs/nras.html.
 package nras
 

@@ -14,10 +14,10 @@ treatment when being linked, we need to put it behind build tags.
 */
 
 // AttestationReport returns the attestation report for the given GPU.
-func (d Device) AttestationReport(nonce [32]byte) (nvml.ConfComputeGpuAttestationReport, error) {
-	device, ret := nvml.DeviceGetHandleByUUID(d.ID())
-	if ret != nvml.SUCCESS {
-		return nvml.ConfComputeGpuAttestationReport{}, fmt.Errorf("getting GPU handle: %s", nvml.ErrorString(ret))
+func (d *Device) AttestationReport(nonce [32]byte) (nvml.ConfComputeGpuAttestationReport, error) {
+	device, err := d.handle()
+	if err != nil {
+		return nvml.ConfComputeGpuAttestationReport{}, fmt.Errorf("getting GPU handle: %w", err)
 	}
 
 	report, ret := device.GetConfComputeGpuAttestationReport(nonce)
@@ -29,10 +29,10 @@ func (d Device) AttestationReport(nonce [32]byte) (nvml.ConfComputeGpuAttestatio
 }
 
 // Certificate returns the attestation certificate for the given GPU.
-func (d Device) Certificate() (nvml.ConfComputeGpuCertificate, error) {
-	device, ret := nvml.DeviceGetHandleByUUID(d.ID())
-	if ret != nvml.SUCCESS {
-		return nvml.ConfComputeGpuCertificate{}, fmt.Errorf("getting GPU handle: %s", nvml.ErrorString(ret))
+func (d *Device) Certificate() (nvml.ConfComputeGpuCertificate, error) {
+	device, err := d.handle()
+	if err != nil {
+		return nvml.ConfComputeGpuCertificate{}, fmt.Errorf("getting GPU handle: %w", err)
 	}
 
 	cert, ret := device.GetConfComputeGpuCertificate()

@@ -1,4 +1,4 @@
-// package etcd manages Continuum's etcd key-value store.
+// Package etcd manages Continuum's etcd key-value store.
 // The etcd server is started as a subroutine of the Attestation Service.
 // Each AS instance runs its own etcd server.
 // For distributed deployments, this means that each node runs its own etcd server,
@@ -27,6 +27,29 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
+// JoinMethod defines how the etcd server should behave when starting up.
+type JoinMethod int
+
+const (
+	// Invalid is an invalid JoinMethod.
+	Invalid JoinMethod = iota
+	// Bootstrap means that the etcd server will only attempt to bootstrap a new cluster.
+	Bootstrap
+	// Join means that the etcd server will only attempt to join an existing cluster.
+	Join
+)
+
+// JoinError is the error returned when the etcd server fails to join an existing cluster.
+type JoinError struct{ wrapped error }
+
+// Error implements the error interface for JoinError.
+func (e *JoinError) Error() string {
+	return fmt.Sprintf("joining existing etcd cluster: %v", e.wrapped)
+}
+
+// newJoinError creates a new JoinError with the given error.
+func newJoinError(err error) *JoinError { return &JoinError{err} }
+
 // Etcd is a handle for Continuum's etcd key-value store backend.
 // The etcd server is directly started as a routine of the binary importing this package.
 type Etcd struct {
@@ -38,7 +61,9 @@ type Etcd struct {
 
 // New sets up etcd on the node and returns a client to securely interact with it.
 // The returned close function gracefully shuts down the etcd server.
-func New(ctx context.Context, host, serverCrt, serverKey, caCrt string, fs afero.Afero, log *slog.Logger) (*Etcd, func(), error) {
+func New(ctx context.Context, joinMethod JoinMethod,
+	k8sNamespace, serverCrt, serverKey, caCrt string, fs afero.Afero, log *slog.Logger,
+) (*Etcd, func(), error) {
 	if err := fs.MkdirAll(constants.EtcdBasePath(), 0o700); err != nil {
 		return nil, nil, fmt.Errorf("creating etcd base directory: %w", err)
 	}
@@ -52,10 +77,23 @@ func New(ctx context.Context, host, serverCrt, serverKey, caCrt string, fs afero
 		return nil, nil, fmt.Errorf("parsing etcd server certificate: %w", err)
 	}
 
-	server, err := builder.StartNewCluster(authCtx(ctx, memberCert), host, serverCrt, serverKey, caCrt)
-	if err != nil {
-		return nil, nil, fmt.Errorf("setting up etcd: %w", err)
+	var server *embed.Etcd
+	switch joinMethod {
+	case Bootstrap:
+		server, err = builder.BootstrapCluster(authCtx(ctx, memberCert), k8sNamespace, serverCrt, serverKey, caCrt)
+		if err != nil {
+			return nil, nil, fmt.Errorf("bootstrapping etcd: %w", err)
+		}
+	case Join:
+		server, err = builder.JoinExistingCluster(authCtx(ctx, memberCert),
+			k8sNamespace, serverCrt, serverKey, caCrt, log)
+		if err != nil {
+			return nil, nil, newJoinError(err)
+		}
+	default:
+		return nil, nil, fmt.Errorf("unknown join method: %d", joinMethod)
 	}
+
 	// Wait for etcd server to start (and join an existing etcd cluster if necessary)
 	select {
 	case <-server.Server.ReadyNotify():

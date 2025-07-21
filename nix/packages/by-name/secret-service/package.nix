@@ -1,6 +1,8 @@
 {
   lib,
+  bash,
   buildContinuumGoModule,
+  buildEnv,
   dockerTools,
   grpc-health-probe,
 }:
@@ -32,11 +34,18 @@ rec {
     name = "secret-service";
     tag = lib.continuumVersion;
 
-    contents = [
-      bin
-      grpc-health-probe
-      dockerTools.caCertificates
-    ];
+    contents = buildEnv {
+      name = "image-root";
+      paths = [
+        bin
+        bash
+        grpc-health-probe
+        dockerTools.caCertificates
+      ];
+      pathsToLink = [
+        "/bin"
+      ];
+    };
 
     config = {
       Entrypoint = [ "${bin}/bin/secret-service" ];

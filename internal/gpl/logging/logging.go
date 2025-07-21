@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package logging contains utility functions to set up logging for Continuum components.
+// Package logging contains utility functions to set up logging for Continuum components.
 package logging
 
 import (

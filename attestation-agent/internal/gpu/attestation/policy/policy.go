@@ -1,4 +1,4 @@
-// package policy contains policy definitions for GPU attestation
+// Package policy contains policy definitions for GPU attestation
 package policy
 
 // NvidiaHopper defines the allowed configuration for an NVIDIA Hopper GPU used by worker nodes.

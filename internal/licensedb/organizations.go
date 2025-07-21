@@ -58,7 +58,7 @@ func (l *LicenseDB) DeleteOrganization(ctx context.Context, orgID uint) error {
 		return fmt.Errorf("no organization found with ID %d", orgID)
 	}
 
-	keysResult := tx.WithContext(ctx).Where("organization_id = ?", orgID).Delete(&LicenseEntry{}) // nolint:exhaustruct
+	keysResult := tx.WithContext(ctx).Where("organization_id = ?", orgID).Delete(&LicenseEntry{}) //nolint:exhaustruct
 	if keysResult.Error != nil {
 		return fmt.Errorf("deleting license keys: %w", keysResult.Error)
 	}

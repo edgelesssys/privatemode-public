@@ -35,6 +35,9 @@ The following is needed to set up a verity protected disk:
 - An access token to authenticate with the model repository
   For HuggingFace, you can follow the official [documentation](https://huggingface.co/docs/hub/en/security-tokens) to generate a token.
 
+- (Optional) A list of files, or wildcards, to exclude from copying from the model repository.
+  Used to keep the disk size small in case the model repository contains model files in multiple formats.
+
 Since some OS settings, such as SELinux, can interfere with the setup, e.g. by setting SELinux specific information on the disk, we recommend running the setup on a fresh Ubuntu 24.04 installation.
 From a fresh installation, only [Docker engine](https://docs.docker.com/engine/install/ubuntu/) is additionally required.
 
@@ -42,8 +45,9 @@ Once your environment is ready, you can create your verity protected disk.
 Assuming you want to reproduce a model disk for the `facebook/opt-125m` model at commit `27dcfa74d334bc871f3234de431e71c6eeba5dd6`, run the following command:
 
 ```bash
-REGISTRY=<your_registry>
+registry=<your_registry>
 GIT_PAT=<your_git_pat>
+EXCLUDE_GIT_FILES="example-file-*.txt"
 MODEL_SOURCE=https://huggingface.co/facebook/opt-125m
 COMMIT_HASH=27dcfa74d334bc871f3234de431e71c6eeba5dd6
 DISK_SIZE_GB=1
@@ -56,6 +60,7 @@ docker run --rm -it \
     -v ${PWD}/repart.json:/repart.json \
     -v ${PWD}/data.disk:/data.disk \
     -e GIT_PAT=${GIT_PAT} \
+    -e EXCLUDE_GIT_FILES="${EXCLUDE_GIT_FILES}" \
     ${registry}/verity-disk-generator:latest \
     "/data.disk" $MODEL_SOURCE $COMMIT_HASH
 ```

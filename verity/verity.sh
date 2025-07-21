@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -ex
+set -exo pipefail
 
 device="${1}"
 model_src="${2}"
@@ -46,7 +46,12 @@ if [[ -n ${EXCLUDE_GIT_FILES} ]]; then
 fi
 extra_exclude_directives=()
 for file in "${excluded_files[@]}"; do
-  extra_exclude_directives+=("ExcludeFiles=${file}\n")
+  file_glob="${tmp_repo}/${file}"
+  shopt -s nullglob
+  # shellcheck disable=SC2206 # We want globbing and splitting
+  absolute_paths=(${file_glob})
+  shopt -u nullglob
+  extra_exclude_directives+=("ExcludeFiles=${absolute_paths[*]}\n")
 done
 
 sed -e "s|@@SOURCE_REPO@@|${tmp_repo}|g" \

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 )
@@ -48,10 +47,10 @@ func TestSetSecrets(t *testing.T) {
 			server: &stubEtcdServer{
 				txnResponse: &pb.TxnResponse{
 					Succeeded: false,
-					Responses: []*etcdserverpb.ResponseOp{
+					Responses: []*pb.ResponseOp{
 						{
-							Response: &etcdserverpb.ResponseOp_ResponseRange{
-								ResponseRange: &etcdserverpb.RangeResponse{
+							Response: &pb.ResponseOp_ResponseRange{
+								ResponseRange: &pb.RangeResponse{
 									Kvs: []*mvccpb.KeyValue{
 										{Key: []byte("key1")},
 									},
@@ -59,8 +58,8 @@ func TestSetSecrets(t *testing.T) {
 							},
 						},
 						{
-							Response: &etcdserverpb.ResponseOp_ResponseRange{
-								ResponseRange: &etcdserverpb.RangeResponse{},
+							Response: &pb.ResponseOp_ResponseRange{
+								ResponseRange: &pb.RangeResponse{},
 							},
 						},
 					},

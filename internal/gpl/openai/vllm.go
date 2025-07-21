@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package openai provides type definitions for the OpenAI inference API.
+// Package openai provides type definitions for the OpenAI inference API.
 // The marshaled value of the types defined here should never be returned to
 // a client, or passed to the model backend.
 // This is important to avoid dropping unknown fields sent by the client/model,
@@ -32,12 +32,16 @@ const (
 	ChatResponseEncryptionField = "choices"
 	// ChatCompletionsEndpoint is the endpoint for chat completions.
 	ChatCompletionsEndpoint = "/v1/chat/completions"
+	// LegacyCompletionsEndpoint is the legacy endpoint for chat completions.
+	LegacyCompletionsEndpoint = "/v1/completions"
 	// ModelsEndpoint is the endpoint to list the currently available models.
 	ModelsEndpoint = "/v1/models"
 	// EmbeddingsEndpoint is the endpoint for embeddings.
 	EmbeddingsEndpoint = "/v1/embeddings"
 	// TranscriptionsEndpoint is the endpoint for audio transcriptions.
 	TranscriptionsEndpoint = "/v1/audio/transcriptions"
+	// TranslationsEndpoint is the endpoint for audio translations.
+	TranslationsEndpoint = "/v1/audio/translations"
 )
 
 // PlainCompletionsRequestFields is a field selector for all fields in an OpenAI chat completions request that are not encrypted.
@@ -69,6 +73,11 @@ var PlainEmbeddingsResponseFields = forwarder.FieldSelector{
 
 // PlainTranscriptionFields are the plain form fields for OpenAI audio transcriptions.
 var PlainTranscriptionFields = forwarder.FieldSelector{
+	{"model"},
+}
+
+// PlainTranslationFields are the plain form fields for OpenAI audio translations.
+var PlainTranslationFields = forwarder.FieldSelector{
 	{"model"},
 }
 
@@ -181,6 +190,15 @@ type ChatResponse struct {
 	Created int      `json:"created"`
 	Model   string   `json:"model"`
 	Usage   Usage    `json:"usage"`
+}
+
+// CompletionsResponse is the response structure for the legacy /v1/completions endpoint.
+type CompletionsResponse struct {
+	Choices []struct {
+		Text  string `json:"text"`
+		Index int    `json:"index"`
+	} `json:"choices"`
+	Usage Usage `json:"usage"`
 }
 
 // ModelsResponse is the response structure for an OpenAI v1/models call.

@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package cmd defines the privatemode-proxy's root command.
+// Package cmd defines the privatemode-proxy's root command.
 package cmd
 
 import (

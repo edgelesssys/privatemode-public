@@ -173,7 +173,7 @@ type UsageEntry struct {
 	CompletionTokens   int64         `gorm:"column:completion_tokens;type:BIGINT;not null"`
 	FileSizeMB         int64         `gorm:"column:file_size_mb;type:BIGINT;not null;default:0"`
 	Timestamp          time.Time     `gorm:"column:timestamp;type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
-	OrganizationID     *uint         `gorm:"column:organization_id"` // TODO(elchead): make not nullable, after migration
+	OrganizationID     *uint         `gorm:"column:organization_id"` // TODO(daniel-weisse): make not nullable, after migration
 	Organization       *Organization `gorm:"foreignKey:OrganizationID"`
 }
 
@@ -212,7 +212,7 @@ func (l *LicenseDB) GetUsageByMonth(ctx context.Context, orgID uint, yearMonth s
 	}
 
 	endDate := startDate.AddDate(0, 1, 0).Add(-time.Second)
-	dayFunc := getDayFunction(l.db.Dialector.Name())
+	dayFunc := getDayFunction(l.db.Name())
 
 	query := fmt.Sprintf(`
 		SELECT

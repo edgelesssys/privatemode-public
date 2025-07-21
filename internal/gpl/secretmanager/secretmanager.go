@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package secretmanager manages the lifetime of a secret and always returns an up-to-date secret.
+// Package secretmanager manages the lifetime of a secret and always returns an up-to-date secret.
 package secretmanager
 
 import (
@@ -65,6 +65,14 @@ func (sm *SecretManager) LatestSecret(ctx context.Context) (Secret, error) {
 		}
 	}
 	return *sm.secret, nil
+}
+
+// ForceUpdate forces an immediate secret update, regardless of expiration status.
+func (sm *SecretManager) ForceUpdate(ctx context.Context) error {
+	sm.mut.Lock()
+	defer sm.mut.Unlock()
+
+	return sm.updateSecret(ctx, sm.clock.Now())
 }
 
 // Loop keeps the secret up-to-date by periodically updating it.

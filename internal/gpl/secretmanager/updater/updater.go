@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package updater contains the functionality to update prompt secrets when the underlying Continuum deployment is updated.
+// Package updater contains the functionality to update prompt secrets when the underlying Continuum deployment is updated.
 package updater
 
 import (

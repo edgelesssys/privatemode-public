@@ -216,6 +216,71 @@ func TestPromptEncryption(t *testing.T) {
 	}
 }
 
+func TestInvalidSecret(t *testing.T) {
+	require := require.New(t)
+	assert := assert.New(t)
+
+	apiKey := testAPIKey
+	secretInvalid := secretmanager.Secret{
+		ID:   "123",
+		Data: bytes.Repeat([]byte{0x42}, 32),
+	}
+	secretValid := secretmanager.Secret{
+		ID:   "456",
+		Data: bytes.Repeat([]byte{0x42}, 32),
+	}
+
+	// setup a server with secretValid and check that there are two requests
+	// - the first fails due to the invalid secret
+	// - the second succeeds with the valid secret
+	numRequests := 0
+	stubAuthOpenAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		numRequests++
+		token := r.Header.Get("Authorization")
+		if token == "" {
+			forwarder.HTTPError(w, r, http.StatusUnauthorized, "no auth found: expected Authorization header with 'Bearer <auth>'")
+			return
+		}
+		if token != fmt.Sprintf("Bearer %s", testAPIKey) {
+			forwarder.HTTPError(w, r, http.StatusUnauthorized, "invalid API key: invalid API key")
+			return
+		}
+
+		stub.OpenAIEchoHandler(secretValid.Map(), slog.Default()).ServeHTTP(w, r)
+	}))
+	defer stubAuthOpenAIServer.Close()
+
+	sut := Server{
+		apiKey:           &apiKey,
+		defaultCacheSalt: "",
+		sm:               &stubSecretManager{secrets: []secretmanager.Secret{secretInvalid, secretValid}},
+		forwarder:        forwarder.New("tcp", stubAuthOpenAIServer.Listener.Addr().String(), slog.Default()),
+		log:              slog.Default(),
+		isApp:            false,
+	}
+
+	prompt := "Hello"
+	req := prepareRequest(t.Context(), require, &prompt, nil, "")
+	resp := httptest.NewRecorder()
+	sut.GetHandler().ServeHTTP(resp, req)
+
+	require.Equal(http.StatusOK, resp.Code)
+	assert.Equal(2, numRequests)
+
+	var res openai.ChatResponse
+	require.NoError(json.NewDecoder(resp.Body).Decode(&res))
+	require.Len(res.Choices, 1)
+	assert.Equal("Echo: Hello", *res.Choices[0].Message.Content)
+
+	cacheSaltHeader := resp.Header().Get("Request-Cache-Salt")
+	assert.NotEmpty(cacheSaltHeader)
+
+	hash := sha256.Sum256([]byte(cacheSaltHeader))
+	expectedShardKey := hex.EncodeToString(hash[16:])
+	actualShardKey := resp.Header().Get("Request-Shard-Key")
+	assert.Equal(expectedShardKey, actualShardKey)
+}
+
 func TestTools(t *testing.T) {
 	strPtr := func(s string) *string { return &s }
 
@@ -438,7 +503,7 @@ func newTestServer(apiKey *string, secret secretmanager.Secret, openAIServerAddr
 	return &Server{
 		apiKey:           apiKey,
 		defaultCacheSalt: defaultCacheSalt,
-		sm:               stubSecretManager{Secret: secret},
+		sm:               &stubSecretManager{secrets: []secretmanager.Secret{secret}},
 		forwarder:        forwarder.New("tcp", openAIServerAddr, slog.Default()),
 		log:              slog.Default(),
 		isApp:            isApp,
@@ -509,11 +574,21 @@ func prepareRequest(ctx context.Context, require *require.Assertions, prompt *st
 }
 
 type stubSecretManager struct {
-	secretmanager.Secret
+	secrets    []secretmanager.Secret
+	nextSecret int
 }
 
-func (s stubSecretManager) LatestSecret(_ context.Context) (secretmanager.Secret, error) {
-	return s.Secret, nil
+func (s *stubSecretManager) LatestSecret(_ context.Context) (secretmanager.Secret, error) {
+	if len(s.secrets) == 0 {
+		return secretmanager.Secret{}, fmt.Errorf("no secrets available")
+	}
+	secret := s.secrets[s.nextSecret%len(s.secrets)]
+	return secret, nil
+}
+
+func (s *stubSecretManager) ForceUpdate(_ context.Context) error {
+	s.nextSecret = (s.nextSecret + 1) % len(s.secrets) // Reset to the next secret
+	return nil
 }
 
 func toPtr(s string) *string {

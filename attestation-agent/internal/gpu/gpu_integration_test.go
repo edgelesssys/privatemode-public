@@ -63,3 +63,25 @@ func TestCCFeatures(t *testing.T) {
 	assert.Equal(nvml.SUCCESS, ret)
 	t.Log("Attestation Report", report)
 }
+
+// TestDeviceInfo tests the retrieval of GPU device information.
+func TestDeviceInfo(t *testing.T) {
+	assert := assert.New(t)
+	require := require.New(t)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	client, err := NewClient(logger)
+	require.NoError(err)
+
+	gpus, err := client.ListGPUs()
+	require.NoError(err)
+	assert.NotEmpty(gpus)
+
+	for _, gpu := range gpus {
+		info, err := gpu.Info()
+		assert.NoError(err)
+		assert.NotNil(info)
+		t.Logf("GPU ID: %s, Architecture: %d, Driver Version: %s, VBIOS Version: %s",
+			gpu.ID(), info.Architecture, info.DriverVersion, info.VBIOSVersion)
+	}
+}

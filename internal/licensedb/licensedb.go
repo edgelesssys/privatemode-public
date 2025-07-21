@@ -1,4 +1,4 @@
-// package licensedb handles interactions with Continuum's license database.
+// Package licensedb handles interactions with Continuum's license database.
 package licensedb
 
 import (
@@ -50,7 +50,7 @@ func New(ctx context.Context, userName, databaseName, sqlConnectionString string
 	dbURI := fmt.Sprintf("%s:empty@cloudsqlconn(:)/%s?parseTime=true", userName, databaseName)
 
 	// Open connection with GORM
-	db, err := gorm.Open(gormmysql.Open(dbURI), &gorm.Config{}) // nolint:exhaustruct
+	db, err := gorm.Open(gormmysql.Open(dbURI), &gorm.Config{}) //nolint:exhaustruct
 	if err != nil {
 		return nil, fmt.Errorf("opening sql database: %w", err)
 	}
@@ -74,14 +74,14 @@ func NewFromSQLDatabase(dialect Dialect, db *sql.DB) (*LicenseDB, error) {
 
 	switch dialect {
 	case DialectMySQL:
-		gormDB, err = gorm.Open(gormmysql.New(gormmysql.Config{ // nolint:exhaustruct
+		gormDB, err = gorm.Open(gormmysql.New(gormmysql.Config{ //nolint:exhaustruct
 			Conn: db,
-		}), &gorm.Config{}) // nolint:exhaustruct
+		}), &gorm.Config{}) //nolint:exhaustruct
 
 	case DialectSQLite:
-		gormDB, err = gorm.Open(gormsqlite.New(gormsqlite.Config{ // nolint:exhaustruct
+		gormDB, err = gorm.Open(gormsqlite.New(gormsqlite.Config{ //nolint:exhaustruct
 			Conn: db,
-		}), &gorm.Config{}) // nolint:exhaustruct
+		}), &gorm.Config{}) //nolint:exhaustruct
 
 	default:
 		return nil, fmt.Errorf("unsupported SQL dialect: %s", dialect)

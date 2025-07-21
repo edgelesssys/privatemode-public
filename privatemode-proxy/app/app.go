@@ -83,7 +83,7 @@ func (a *App) OnStartup(ctx context.Context) {
 		_, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
 			Type:          runtime.ErrorDialog,
 			Title:         "Configuration Error",
-			Message:       fmt.Errorf("Error %w.\n\nPlease make sure the configuration file is correct. If the problem persists, please contact support@privatemode.ai", err).Error(),
+			Message:       fmt.Errorf("Error %w.\n\nPlease make sure the configuration file is correct. If the problem persists, please contact support@privatemode.ai", err).Error(), //nolint:staticcheck
 			Buttons:       []string{"Close"},
 			DefaultButton: "CLose",
 			CancelButton:  "Close",
@@ -175,12 +175,12 @@ func loadRuntimeConfig(workspace string, log *slog.Logger) (jsonConfig, error) {
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return jsonConfig{}, fmt.Errorf("reading configuration file: %w", err) //nolint:exhaustruct
+		return jsonConfig{}, fmt.Errorf("reading configuration file: %w", err)
 	}
 
 	var configFile jsonConfig
 	if err := json.Unmarshal(data, &configFile); err != nil {
-		return jsonConfig{}, fmt.Errorf("parsing configuration file: %w", err) //nolint:exhaustruct
+		return jsonConfig{}, fmt.Errorf("parsing configuration file: %w", err)
 	}
 
 	if configFile.AccessKey == "" {

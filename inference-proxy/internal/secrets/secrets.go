@@ -1,4 +1,4 @@
-// package secrets implements a thread-safe map of secrets.
+// Package secrets implements a thread-safe map of secrets.
 package secrets
 
 import (

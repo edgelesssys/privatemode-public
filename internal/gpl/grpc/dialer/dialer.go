@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package dialer provides a grpc dialer that can be used to create grpc client connections.
+// Package dialer provides a grpc dialer that can be used to create grpc client connections.
 package dialer
 
 import (

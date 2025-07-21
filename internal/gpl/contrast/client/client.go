@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 /*
-package client implements a client to interact with Continuum's API.
+Package client implements a client to interact with Continuum's API.
 */
 package client
 
 import (
 	"crypto/tls"
-	"io"
 	"log/slog"
 	"time"
 )
@@ -62,14 +61,14 @@ type Opts struct {
 func applyDefaultOpts(o *Opts) *Opts {
 	if o == nil {
 		return &Opts{
-			Log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Log:           slog.New(slog.DiscardHandler),
 			RetryInterval: 5 * time.Second,
 			MaxRetries:    10,
 		}
 	}
 
 	if o.Log == nil {
-		o.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
+		o.Log = slog.New(slog.DiscardHandler)
 	}
 	if o.RetryInterval == 0 {
 		o.RetryInterval = 5 * time.Second

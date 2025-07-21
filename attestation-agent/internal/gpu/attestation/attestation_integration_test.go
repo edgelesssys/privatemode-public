@@ -46,7 +46,7 @@ func TestIssueVerify(t *testing.T) {
 	require.NoError(err)
 	require.Equal(32, n)
 
-	eat, err := issuer.Issue(t.Context(), nonce)
+	eat, _, err := issuer.Issue(t.Context(), nonce)
 	require.NoError(err)
 
 	err = verifier.Verify(t.Context(), eat, nonce)

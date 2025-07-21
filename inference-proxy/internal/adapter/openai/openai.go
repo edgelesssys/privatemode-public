@@ -1,5 +1,5 @@
 /*
-package openai implements an inference API adapter for the [OpenAI API spec].
+Package openai implements an inference API adapter for the [OpenAI API spec].
 
 [OpenAI API sepc]: https://platform.openai.com/docs/api-reference
 */
@@ -24,6 +24,9 @@ type Adapter struct {
 	forwarder     mutatingForwarder
 	workloadTasks []string
 
+	saltValidator forwarder.RequestMutator
+	saltInjector  forwarder.RequestMutator
+
 	log *slog.Logger
 }
 
@@ -37,6 +40,8 @@ func New(workloadTasks []string, cipher *cipher.Cipher, forwarder mutatingForwar
 		cipher:        cipher,
 		forwarder:     forwarder,
 		workloadTasks: workloadTasks,
+		saltInjector:  openai.CacheSaltInjector(openai.RandomPromptCacheSalt, log),
+		saltValidator: openai.CacheSaltValidator(log),
 		log:           log,
 	}, nil
 }
@@ -51,6 +56,10 @@ func (t *Adapter) ServeMux() *http.ServeMux {
 	// Create chat completion: https://platform.openai.com/docs/api-reference/chat/create
 	srv.HandleFunc("/v1/chat/completions", t.forwardChatCompletionsRequest()) // cannot restrict to POST method because OPTIONS is needed for CORS by the browser
 
+	// Legacy chat completions endpoint: https://platform.openai.com/docs/api-reference/completions/create
+	// Reuse the same handler as for /v1/chat/completions since the unencrypted fields are the same.
+	srv.HandleFunc(openai.LegacyCompletionsEndpoint, t.forwardChatCompletionsRequest())
+
 	// Create embeddings: https://platform.openai.com/docs/api-reference/embeddings/create
 	srv.HandleFunc("POST /v1/embeddings", t.forwardEmbeddingsRequest)
 
@@ -58,6 +67,8 @@ func (t *Adapter) ServeMux() *http.ServeMux {
 	srv.HandleFunc("GET /v1/models", t.forwardModelsRequest)
 
 	srv.HandleFunc(openai.TranscriptionsEndpoint, t.forwardTranscriptionsRequest)
+
+	srv.HandleFunc(openai.TranslationsEndpoint, t.forwardTranslationsRequest)
 
 	// TODO: vllm only supports /v1/chat/completions and /v1/models
 	// Until vllm implements more endpoints we won't put effort into implementing these endpoints
@@ -169,18 +180,26 @@ func (t *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Re
 	)
 }
 
+func (t *Adapter) forwardTranslationsRequest(w http.ResponseWriter, r *http.Request) {
+	session := t.cipher.NewResponseCipher()
+
+	t.forwarder.Forward(
+		w, r,
+		forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), openai.PlainTranslationFields, t.log),
+		forwarder.WithFullResponseMutation(session.EncryptResponse(r.Context())),
+		forwarder.NoHeaderMutation,
+	)
+}
+
 // forwardChatCompletionsRequest returns a handler to forward chat completions with field mutation using the given selectors.
 func (t *Adapter) forwardChatCompletionsRequest() func(http.ResponseWriter, *http.Request) {
-	saltInjector := openai.CacheSaltInjector(openai.RandomPromptCacheSalt, t.log)
-	saltValidator := openai.CacheSaltValidator(t.log)
-
 	return func(w http.ResponseWriter, r *http.Request) {
 		session := t.cipher.NewResponseCipher()
 
-		saltMutator := saltValidator
+		saltMutator := t.saltValidator
 		clientVersion := r.Header.Get(constants.PrivatemodeVersionHeader)
 		if semver.Compare(clientVersion, "v1.17.0") < 0 { // clients without cache_salt
-			saltMutator = saltInjector
+			saltMutator = t.saltInjector
 		}
 		t.forwarder.Forward(
 			w, r,

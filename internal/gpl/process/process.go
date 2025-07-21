@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package process defines utility functions used for running the main process of a Go binary.
+// Package process defines utility functions used for running the main process of a Go binary.
 package process
 
 import (

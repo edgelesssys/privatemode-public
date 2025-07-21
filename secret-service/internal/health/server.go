@@ -1,4 +1,4 @@
-// package health implements a gRPC health check server
+// Package health implements a gRPC health check server
 package health
 
 import (

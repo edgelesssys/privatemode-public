@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package server implements the HTTP server to forward encrypted requests to the API.
+// Package server implements the HTTP server to forward encrypted requests to the API.
 package server
 
 import (
@@ -17,15 +17,15 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/edgelesssys/continuum/internal/gpl/auth"
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
-	"github.com/edgelesssys/continuum/internal/gpl/crypto"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
 	"github.com/edgelesssys/continuum/internal/gpl/openai"
 	"github.com/edgelesssys/continuum/internal/gpl/process"
-	"github.com/edgelesssys/continuum/internal/gpl/secretmanager"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
@@ -40,14 +40,11 @@ type Server struct {
 }
 
 type apiForwarder interface {
-	Forward(
+	ForwardWithRetry(
 		w http.ResponseWriter, req *http.Request,
-		requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator, headerMutator forwarder.HeaderMutator,
+		requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator,
+		headerMutator forwarder.HeaderMutator, retryCallback forwarder.RetryCallback,
 	)
-}
-
-type secretManager interface {
-	LatestSecret(ctx context.Context) (secretmanager.Secret, error)
 }
 
 // New sets up a new Server.
@@ -56,10 +53,12 @@ func New(
 	log *slog.Logger, apiKey *string, promptCacheSalt string, isApp bool,
 ) *Server {
 	log.Info("version", slog.String("version", constants.Version()))
+	fwd := forwarder.NewWithClient(client, apiEndpoint, protocolScheme, log)
+
 	return &Server{
 		apiKey:           apiKey,
 		defaultCacheSalt: promptCacheSalt,
-		forwarder:        forwarder.NewWithClient(client, apiEndpoint, protocolScheme, log),
+		forwarder:        fwd,
 		sm:               sm,
 		log:              log,
 		isApp:            isApp,
@@ -82,10 +81,12 @@ func (s *Server) Serve(ctx context.Context, lis net.Listener, tlsConfig *tls.Con
 func (s *Server) GetHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(openai.ChatCompletionsEndpoint, s.chatCompletionsHandler)
+	mux.HandleFunc(openai.LegacyCompletionsEndpoint, s.chatCompletionsHandler) // Reuse the same handler as for /v1/chat/completions since the unencrypted fields are the same
 	mux.HandleFunc("/unstructured/", s.unstructuredHandler)
 	mux.HandleFunc(openai.ModelsEndpoint, s.noEncryptionHandler)
 	mux.HandleFunc(openai.EmbeddingsEndpoint, s.embeddingsHandler)
 	mux.HandleFunc(openai.TranscriptionsEndpoint, s.transcriptionsHandler)
+	mux.HandleFunc(openai.TranslationsEndpoint, s.translationsHandler)
 
 	mux.HandleFunc("/", http.NotFound) // Reject requests to unknown endpoints
 
@@ -133,101 +134,115 @@ func (s *Server) shardKeyInjector() forwarder.RequestMutator {
 	}
 }
 
-func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
-	s.setRequestHeaders(r)
+func (s *Server) inferenceHandler(
+	requestMutator func(*RenewableRequestCipher) forwarder.RequestMutator, responseMutator func(*RenewableRequestCipher) forwarder.ResponseMutator,
+) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.setRequestHeaders(r)
 
-	rc, err := s.getRequestCipher(r)
-	if err != nil {
-		forwarder.HTTPError(w, r, http.StatusInternalServerError, "creating request cipher: %s", err)
-		return
+		rc, err := NewRenewableRequestCipher(s.sm, r)
+		if err != nil {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "creating request cipher: %s", err)
+			return
+		}
+
+		// Set up retry logic for specific status codes with exponential backoff
+		retryCallback := func(statusCode int, body []byte, attempt int) (bool, time.Duration) {
+			shouldRetry := statusCode == 500 && attempt <= 1 && strings.Contains(string(body), constants.ErrorNoSecretForID)
+			if !shouldRetry {
+				return false, 0
+			}
+
+			// Force a new rc for the next attempt
+			if err := rc.ResetSecret(r); err != nil {
+				s.log.Error("resetting request cipher", "error", err)
+				return false, 0
+			}
+
+			// For now only one retry immediately as we only handle NoSecretForID
+			return true, 0
+		}
+
+		s.forwarder.ForwardWithRetry(
+			w, r,
+			requestMutator(rc),
+			responseMutator(rc),
+			allowWails,
+			retryCallback,
+		)
 	}
+}
 
-	s.forwarder.Forward(
-		w, r,
-		forwarder.RequestMutatorChain(
-			s.cacheSaltInjector(),
-			s.shardKeyInjector(),
-			forwarder.WithFullJSONRequestMutation(rc.Encrypt, openai.PlainCompletionsRequestFields, s.log),
-		),
-		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, openai.PlainCompletionsResponseFields, false),
-		allowWails,
-	)
+func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
+	s.inferenceHandler(
+		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
+			return forwarder.RequestMutatorChain(
+				s.cacheSaltInjector(),
+				s.shardKeyInjector(),
+				forwarder.WithFullJSONRequestMutation(cw.Encrypt, openai.PlainCompletionsRequestFields, s.log),
+			)
+		},
+		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
+			return forwarder.WithFullJSONResponseMutation(cw.DecryptResponse, openai.PlainCompletionsResponseFields, false)
+		},
+	)(w, r)
 }
 
 func (s *Server) embeddingsHandler(w http.ResponseWriter, r *http.Request) {
-	s.setRequestHeaders(r)
-
-	rc, err := s.getRequestCipher(r)
-	if err != nil {
-		forwarder.HTTPError(w, r, http.StatusInternalServerError, "creating request cipher: %s", err)
-		return
-	}
-
-	s.forwarder.Forward(
-		w, r,
-		forwarder.WithFullJSONRequestMutation(rc.Encrypt, openai.PlainEmbeddingsRequestFields, s.log),
-		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, openai.PlainEmbeddingsResponseFields, false),
-		allowWails,
-	)
+	s.inferenceHandler(
+		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
+			return forwarder.WithFullJSONRequestMutation(cw.Encrypt, openai.PlainEmbeddingsRequestFields, s.log)
+		},
+		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
+			return forwarder.WithFullJSONResponseMutation(cw.DecryptResponse, openai.PlainEmbeddingsResponseFields, false)
+		},
+	)(w, r)
 }
 
 func (s *Server) transcriptionsHandler(w http.ResponseWriter, r *http.Request) {
-	s.setRequestHeaders(r)
+	s.inferenceHandler(
+		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
+			return forwarder.WithFormRequestMutation(cw.Encrypt, openai.PlainTranscriptionFields, s.log)
+		},
+		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
+			return forwarder.WithFullResponseMutation(cw.DecryptResponse)
+		},
+	)(w, r)
+}
 
-	rc, err := s.getRequestCipher(r)
-	if err != nil {
-		forwarder.HTTPError(w, r, http.StatusInternalServerError, "creating request cipher: %s", err)
-		return
-	}
-
-	s.forwarder.Forward(
-		w, r,
-		forwarder.WithFormRequestMutation(rc.Encrypt, openai.PlainTranscriptionFields, s.log),
-		forwarder.WithFullResponseMutation(rc.DecryptResponse),
-		allowWails,
-	)
+func (s *Server) translationsHandler(w http.ResponseWriter, r *http.Request) {
+	s.inferenceHandler(
+		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
+			return forwarder.WithFormRequestMutation(cw.Encrypt, openai.PlainTranslationFields, s.log)
+		},
+		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
+			return forwarder.WithFullResponseMutation(cw.DecryptResponse)
+		},
+	)(w, r)
 }
 
 func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
-	s.setRequestHeaders(r)
-
-	rc, err := s.getRequestCipher(r)
-	if err != nil {
-		forwarder.HTTPError(w, r, http.StatusInternalServerError, "creating request cipher: %s", err)
-		return
-	}
-
-	s.forwarder.Forward(
-		w, r,
-		forwarder.WithFullRequestMutation(rc.Encrypt, s.log),
-		// currently only json response mutation is supported
-		forwarder.WithFullJSONResponseMutation(rc.DecryptResponse, nil, false),
-		allowWails,
-	)
+	s.inferenceHandler(
+		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
+			return forwarder.WithFullRequestMutation(cw.Encrypt, s.log)
+		},
+		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
+			// currently only json response mutation is supported
+			return forwarder.WithFullJSONResponseMutation(cw.DecryptResponse, nil, false)
+		},
+	)(w, r)
 }
 
 func (s *Server) noEncryptionHandler(w http.ResponseWriter, r *http.Request) {
 	s.setRequestHeaders(r)
 
-	s.forwarder.Forward(
+	s.forwarder.ForwardWithRetry(
 		w, r,
 		forwarder.NoRequestMutation,
 		forwarder.NoResponseMutation{},
 		allowWails,
+		forwarder.NoRetry,
 	)
-}
-
-func (s *Server) getRequestCipher(r *http.Request) (*crypto.RequestCipher, error) {
-	secret, err := s.sm.LatestSecret(r.Context())
-	if err != nil {
-		return nil, fmt.Errorf("get latest secret: %w", err)
-	}
-
-	rc, err := crypto.NewRequestCipher(secret.Data, secret.ID)
-	if err != nil {
-		return nil, fmt.Errorf("creating request cipher: %w", err)
-	}
-	return rc, nil
 }
 
 func (s *Server) getClientHeader() string {
@@ -242,6 +257,8 @@ func (s *Server) setRequestHeaders(r *http.Request) {
 	if s.apiKey != nil {
 		r.Header.Set("Authorization", fmt.Sprintf("%s %s", auth.Bearer, *s.apiKey))
 	}
+	requestID := "proxy_" + uuid.New().String()
+	r.Header.Set(constants.RequestIDHeader, requestID)
 	r.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
 	r.Header.Set(constants.PrivatemodeOSHeader, runtime.GOOS)
 	r.Header.Set(constants.PrivatemodeArchitectureHeader, runtime.GOARCH)

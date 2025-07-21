@@ -1,4 +1,4 @@
-// packager server implements the user facing server that receives requests and forwards them to the appropriate inference API adapter.
+// Package server implements the user facing server that receives requests and forwards them to the appropriate inference API adapter.
 package server
 
 import (

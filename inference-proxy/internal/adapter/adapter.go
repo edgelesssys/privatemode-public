@@ -1,4 +1,4 @@
-// package adapter sets up an inference adapter for the given API type.
+// Package adapter sets up an inference adapter for the given API type.
 package adapter
 
 import (

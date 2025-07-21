@@ -14,10 +14,11 @@ yq eval -i '.ReferenceValues.snp[].MinimumTCB.MicrocodeVersion=84' "$manifest"
 
 # configure GuestPolicy and PlatformInfo
 yq eval -i '.ReferenceValues.snp[].GuestPolicy={ "SMT":true, "MigrateMA":false, "Debug":false, "CXLAllowed":false }' "$manifest"
-yq eval -i '.ReferenceValues.snp[].PlatformInfo={ "SMTEnabled":false, "AliasCheckComplete":true }' "$manifest"
+yq eval -i '.ReferenceValues.snp[].PlatformInfo={ "SMTEnabled":false, "ECCEnabled":true, "AliasCheckComplete":true }' "$manifest"
 
 # add required SAN for secret-service mesh cert.
-yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) += [env(SECRET_SERVICE_K8S_DOMAIN)]' "$manifest"
+yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) += [env(SECRET_SERVICE_K8S_INTERNAL_DOMAIN)]' "$manifest"
+yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) += [strenv(SECRET_SERVICE_K8S_HEADLESS_DOMAIN)]' "$manifest"
 yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) += [env(SECRET_SERVICE_DOMAIN)]' "$manifest"
 
 # always accepts the production URL. This is required so the manifest set during staging is still valid for production.

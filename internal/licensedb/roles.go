@@ -125,7 +125,7 @@ func (l *LicenseDB) UpdateRole(ctx context.Context, role Role) error {
 // AddModelEndpointPairingsToRole adds new [ModelEndpointPairing]s to a [Role].
 // Creates any [ModelEndpointPairing] that don't already exist.
 func (l *LicenseDB) AddModelEndpointPairingsToRole(ctx context.Context, roleID uint, pairings []ModelEndpointPairing) error {
-	err := l.db.WithContext(ctx).Model(&Role{ID: roleID}).Association("ModelEndpointPairings").Append(pairings) // nolint:exhaustruct
+	err := l.db.WithContext(ctx).Model(&Role{ID: roleID}).Association("ModelEndpointPairings").Append(pairings) //nolint:exhaustruct
 	if err != nil {
 		return fmt.Errorf("updating associations for role %d: %w", roleID, err)
 	}
@@ -135,7 +135,7 @@ func (l *LicenseDB) AddModelEndpointPairingsToRole(ctx context.Context, roleID u
 // RemoveModelEndpointPairingsFromRole removes [ModelEndpointPairing]s from a [Role].
 // [ModelEndpointPairing]s are not deleted, they may still be referenced by other roles.
 func (l *LicenseDB) RemoveModelEndpointPairingsFromRole(ctx context.Context, roleID uint, pairings []ModelEndpointPairing) error {
-	err := l.db.WithContext(ctx).Model(&Role{ID: roleID}).Association("ModelEndpointPairings").Delete(pairings) // nolint:exhaustruct
+	err := l.db.WithContext(ctx).Model(&Role{ID: roleID}).Association("ModelEndpointPairings").Delete(pairings) //nolint:exhaustruct
 	if err != nil {
 		return fmt.Errorf("removing associations for role %d: %w", roleID, err)
 	}

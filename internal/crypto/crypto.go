@@ -1,4 +1,4 @@
-// package crypto provides functions to for cryptography and random numbers.
+// Package crypto provides functions to for cryptography and random numbers.
 package crypto
 
 import (

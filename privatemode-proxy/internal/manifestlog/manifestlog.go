@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package manifestlog contains the functionality to log manifest updates. This ensures traceability of the manifest history.
+// Package manifestlog contains the functionality to log manifest updates. This ensures traceability of the manifest history.
 package manifestlog
 
 import (

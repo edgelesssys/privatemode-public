@@ -1,4 +1,4 @@
-// package cipher handles the server-side decryption of sensitive data in inference requests and encryption of responses using AES-GCM.
+// Package cipher handles the server-side decryption of sensitive data in inference requests and encryption of responses using AES-GCM.
 package cipher
 
 import (
@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
+	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	crypto "github.com/edgelesssys/continuum/internal/gpl/crypto"
 )
 
@@ -28,7 +29,7 @@ func New(secrets *secrets.Secrets) *Cipher {
 func (c *Cipher) encryptResponse(ctx context.Context, id, message string, requestNonce []byte, sequenceNumber uint32) (string, error) {
 	secret, ok := c.inferenceSecrets.Get(ctx, id)
 	if !ok {
-		return "", fmt.Errorf("no secret for ID %q", id)
+		return "", fmt.Errorf("%s %q", constants.ErrorNoSecretForID, id)
 	}
 	return crypto.EncryptMessage(message, secret, id, requestNonce, sequenceNumber)
 }
@@ -43,7 +44,7 @@ func (c *Cipher) decryptRequest(ctx context.Context, message string, nonce []byt
 	}
 	secret, ok := c.inferenceSecrets.Get(ctx, id)
 	if !ok {
-		return "", "", fmt.Errorf("no secret for ID %q", id)
+		return "", "", fmt.Errorf("%s %q", constants.ErrorNoSecretForID, id)
 	}
 	text, err = crypto.DecryptMessage(message, secret, nonce, sequenceNumber)
 	return text, id, err

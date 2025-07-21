@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package constants defines constants such as file names and paths used by Continuum.
+// Package constants defines constants such as file names and paths used by Continuum.
 package constants
 
 import (
@@ -25,8 +25,10 @@ const (
 	WorkloadTaskVision = "vision"
 	// WorkloadTaskEmbed is the vLLM task for creating embeddings.
 	WorkloadTaskEmbed = "embed"
-	// WorkloadTaskTranscribe indicates models that support the /v1/transcriptions API.
+	// WorkloadTaskTranscribe indicates models that support the /v1/audio/transcriptions API.
 	WorkloadTaskTranscribe = "transcribe"
+	// WorkloadTaskTranslate indicates models that support the /v1/audio/translations API.
+	WorkloadTaskTranslate = "translate"
 
 	// CacheDirEnv is the environment variable that specifies the cache directory of Continuum.
 	// If unset, [os.UserCacheDir()] is used.
@@ -76,6 +78,10 @@ const (
 	PrivatemodeClientProxy = "Proxy"
 	// PrivatemodeClientAPIGateway is the PrivatemodeClientHeader value for the Api Gateway.
 	PrivatemodeClientAPIGateway = "ApiGateway"
+	// RequestIDHeader is the header used to identify requests. It will be set by envoy if not set by the client.
+	// X-Request-ID is mostly standard and also supported by envoy.
+	// cf. https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers#config-http-conn-man-headers-x-request-id
+	RequestIDHeader = "X-Request-ID"
 
 	// SecretServiceEndpoint is the endpoint of the secret service.
 	SecretServiceEndpoint = "secret.privatemode.ai:443"
@@ -83,6 +89,10 @@ const (
 	APIEndpoint = "api.privatemode.ai:443"
 	// CoordinatorEndpoint is the endpoint of the Contrast coordinator.
 	CoordinatorEndpoint = "coordinator.privatemode.ai:443"
+
+	// ErrorNoSecretForID is the error message returned when no secret is found for a given ID.
+	// NOTE: This is used for error checking in the PM proxy and should not be changed lightly for backwards compatibility.
+	ErrorNoSecretForID = "no secret for ID"
 )
 
 // ContinuumBaseDir is the base directory for files created or used by Continuum.

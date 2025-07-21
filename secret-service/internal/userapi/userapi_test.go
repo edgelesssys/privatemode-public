@@ -63,7 +63,7 @@ func TestSetSecrets(t *testing.T) {
 				return
 			}
 			assert.NoError(err)
-			assert.EqualValues(tc.secretReq.Secrets, tc.secretSetter.gotSecrets)
+			assert.Equal(tc.secretReq.Secrets, tc.secretSetter.gotSecrets)
 		})
 	}
 }

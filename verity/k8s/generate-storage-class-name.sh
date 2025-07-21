@@ -15,4 +15,4 @@ model_source_cleaned=$(echo "${model_source_cleaned}" | tr -s '-')
 # convert to lowercase
 storage_class_name=$(echo "${model_source_cleaned}" | tr '[:upper:]' '[:lower:]')
 
-echo "${storage_class_name}"
+echo "${storage_class_name}-reproducible"

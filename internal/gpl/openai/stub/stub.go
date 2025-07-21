@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package stub implements a stubbed OpenAI API handler.
+// Package stub implements a stubbed OpenAI API handler.
 package stub
 
 import (

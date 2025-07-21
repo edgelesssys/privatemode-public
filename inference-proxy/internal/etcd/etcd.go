@@ -1,4 +1,4 @@
-// package etcd implements a client to interact with etcd.
+// Package etcd implements a client to interact with etcd.
 package etcd
 
 import (

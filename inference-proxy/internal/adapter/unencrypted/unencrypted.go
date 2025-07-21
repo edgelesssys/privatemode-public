@@ -1,5 +1,5 @@
 /*
-package unencrypted implements an API adapter for development. It forwards all requests without encryption.
+Package unencrypted implements an API adapter for development. It forwards all requests without encryption.
 
 DO NOT USE IN PRODUCTION.
 */

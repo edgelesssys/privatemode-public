@@ -30,6 +30,7 @@ func TestEtcd(t *testing.T) {
 	tmpDir := t.TempDir()
 	// Overwrite Continuum's base dir to ensure any etcd data is stored in the tempdir
 	t.Setenv("CONTINUUM_BASE_DIR", tmpDir)
+	t.Setenv("HOSTNAME", "secret-service-0")
 
 	fs := afero.Afero{Fs: afero.NewOsFs()}
 
@@ -42,7 +43,8 @@ func TestEtcd(t *testing.T) {
 	require.NoError(fs.MkdirAll(filepath.Join(tmpDir, "pki"), 0o700))
 	createEtcdCertificates(require, serverCrt, serverKey, caCrt, fs)
 
-	etcdServer, done, err := New(t.Context(), "0.0.0.0", serverCrt, serverKey, caCrt, fs, log)
+	etcdServer, done, err := New(t.Context(), Bootstrap,
+		"test-namespace", serverCrt, serverKey, caCrt, fs, log)
 	require.NoError(err)
 	defer done()
 

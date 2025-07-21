@@ -14,6 +14,7 @@ import (
 	"github.com/edgelesssys/continuum/attestation-agent/internal/gpu"
 	"github.com/edgelesssys/continuum/attestation-agent/internal/gpu/attestation"
 	"github.com/edgelesssys/continuum/attestation-agent/internal/gpu/attestation/policy"
+	"github.com/edgelesssys/continuum/attestation-agent/internal/ocsp"
 	"github.com/edgelesssys/continuum/internal/crypto"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
 	"github.com/edgelesssys/continuum/internal/gpl/process"
@@ -85,6 +86,8 @@ func verifyAndEnable(ctx context.Context, gpuPolicy *policy.NvidiaHopper, log *s
 	}
 	gpuIssuers := attestation.NewIssuers(availableGPUs, log)
 
+	ocspClient := ocsp.New(log)
+
 	gpuVerifier := attestation.NewVerifier(gpuPolicy, log)
 	log.Info("Verifying GPUs", "amount", len(gpuIssuers))
 	for _, gpuIssuer := range gpuIssuers {
@@ -92,10 +95,15 @@ func verifyAndEnable(ctx context.Context, gpuPolicy *policy.NvidiaHopper, log *s
 		if err != nil {
 			return fmt.Errorf("generating nonce: %w", err)
 		}
-		gpuEAT, err := gpuIssuer.Issue(ctx, nonce)
+		gpuEAT, gpuCertChain, err := gpuIssuer.Issue(ctx, nonce)
 		if err != nil {
 			return fmt.Errorf("issuing GPU report: %w", err)
 		}
+
+		if err := ocspClient.VerifyCertChain(ctx, gpuCertChain, ocsp.VerificationModeGPUAttestation); err != nil {
+			return fmt.Errorf("verifying GPU certificate chain: %w", err)
+		}
+
 		if err := gpuVerifier.Verify(ctx, gpuEAT, nonce); err != nil {
 			return fmt.Errorf("verifying GPU report: %w", err)
 		}

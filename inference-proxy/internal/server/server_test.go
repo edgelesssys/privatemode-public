@@ -34,7 +34,7 @@ func BenchmarkServeOpenAI(b *testing.B) {
 func benchmarkServe(b *testing.B, apiType string) {
 	require := require.New(b)
 
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 
 	echoServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(w, r.Body)

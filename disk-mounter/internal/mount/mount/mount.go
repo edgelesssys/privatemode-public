@@ -1,4 +1,4 @@
-// package mount implements safe mounting of dm-verity protected disks.
+// Package mount implements safe mounting of dm-verity protected disks.
 package mount
 
 import (

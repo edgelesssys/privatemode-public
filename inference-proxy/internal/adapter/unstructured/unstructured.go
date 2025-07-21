@@ -1,5 +1,5 @@
 /*
-package unstructured implements request encryption for the Unstructured API.
+Package unstructured implements request encryption for the Unstructured API.
 */
 package unstructured
 

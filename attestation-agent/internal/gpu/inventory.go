@@ -1,3 +1,5 @@
+//go:build gpu
+
 package gpu
 
 import (

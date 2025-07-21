@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// package crypto provides an API for encrypting inference requests and responses using AES-GCM.
+// Package crypto provides an API for encrypting inference requests and responses using AES-GCM.
 // Each message is encrypted using a unique IV and a secret key, called the inference secret.
 // The inference secret is associated with an inference secret ID. The ID is included in the encrypted message
 // as a hint for the decrypting party to select the correct decryption key.

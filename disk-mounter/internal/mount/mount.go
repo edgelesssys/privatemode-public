@@ -1,4 +1,4 @@
-// package mount handles mounting of model disks.
+// Package mount handles mounting of model disks.
 package mount
 
 import (

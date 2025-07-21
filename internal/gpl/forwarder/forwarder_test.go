@@ -191,3 +191,91 @@ func TestHTTPError(t *testing.T) {
 		})
 	}
 }
+
+func TestForwardRetry(t *testing.T) {
+	testCases := map[string]struct {
+		delay            time.Duration
+		shouldRetry      bool
+		expectedCode     int
+		expectedAttempts int
+	}{
+		"no delay":   {0, true, http.StatusOK, 3},
+		"with delay": {10 * time.Millisecond, true, http.StatusOK, 3},
+		"no retry":   {0, false, http.StatusInternalServerError, 1},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+
+			// Track attempts and responses
+			attemptCount := 0
+			responses := []struct {
+				statusCode int
+				body       string
+			}{
+				{500, "Internal Server Error"},
+				{500, "Still failing"},
+				{200, `{"success": true}`},
+			}
+
+			stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if attemptCount < len(responses) {
+					response := responses[attemptCount]
+					w.WriteHeader(response.statusCode)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(response.body))
+				} else {
+					w.WriteHeader(http.StatusInternalServerError)
+					_, _ = w.Write([]byte("Unexpected attempt"))
+				}
+				attemptCount++
+			}))
+			defer stubServer.Close()
+
+			forwarder := New("tcp", stubServer.Listener.Addr().String(), slog.Default())
+
+			retryCallback := func(statusCode int, body []byte, attempt int) (bool, time.Duration) {
+				if !tc.shouldRetry {
+					return false, 0
+				}
+
+				// Verify we get the correct response body for each attempt
+				expectedBodies := []string{"Internal Server Error", "Still failing"}
+				if attempt <= len(expectedBodies) {
+					assert.Contains(string(body), expectedBodies[attempt-1], "Response body should match expected for attempt %d", attempt)
+				}
+
+				shouldRetry := statusCode == 500 && attempt < 3
+				return shouldRetry, tc.delay
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/test", nil)
+			resp := httptest.NewRecorder()
+
+			startTime := time.Now()
+			forwarder.ForwardWithRetry(
+				resp,
+				req,
+				NoRequestMutation,
+				NoResponseMutation{},
+				NoHeaderMutation,
+				retryCallback,
+			)
+			elapsed := time.Since(startTime)
+
+			assert.Equal(tc.expectedCode, resp.Code)
+			assert.Equal(tc.expectedAttempts, attemptCount, "Should have made exactly %d attempts", tc.expectedAttempts)
+
+			if tc.expectedCode == http.StatusOK {
+				assert.Equal(`{"success": true}`, resp.Body.String())
+			}
+
+			if tc.delay > 0 && tc.shouldRetry {
+				// Should have waited for 2 retries * delay = minimum delay
+				expectedMinDelay := 2 * tc.delay
+				assert.GreaterOrEqual(elapsed, expectedMinDelay, "Should have waited at least %v for delays", expectedMinDelay)
+			}
+		})
+	}
+}

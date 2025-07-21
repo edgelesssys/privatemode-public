@@ -2,8 +2,8 @@
 
 set -e
 
-if [[ -z ${DISK_SIZE_GB} ]] || [[ -z ${MODEL_SOURCE} ]] || [[ -z ${CSI_PLUGIN_NAME} ]] || [[ -z ${COMMIT_HASH} ]]; then
-  echo "Usage: DISK_SIZE_GB=<disk_size_in_GiB> MODEL_SOURCE=<source_url> CSI_PLUGIN_NAME=<plugin_name> COMMIT_HASH=<commit_hash> [GIT_PAT=<git_pat>] [EXCLUDED_MODEL_REPO_FILES=file1,file2] $0"
+if [[ -z ${DISK_SIZE_GB} ]] || [[ -z ${MODEL_SOURCE} ]] || [[ -z ${COMMIT_HASH} ]]; then
+  echo "Usage: DISK_SIZE_GB=<disk_size_in_GiB> MODEL_SOURCE=<source_url> COMMIT_HASH=<commit_hash> [GIT_PAT=<git_pat>] [EXCLUDED_MODEL_REPO_FILES=file1,file2] $0"
   exit 1
 fi
 
@@ -49,7 +49,7 @@ if wait -n "${completion_pid}" "${failure_pid}"; then
 fi
 
 verity_hash=$(kubectl logs job/verity-disk-generator | awk '/All done\./{found=1; next} found' | jq -r '.[0].roothash')
-storage_class_name="$("${script_dir}/generate-model-name.sh" "${MODEL_SOURCE}")"
+storage_class_name="$("${script_dir}/generate-storage-class-name.sh" "${MODEL_SOURCE}")"
 pv_name="$(kubectl get -f /tmp/pvc.yaml -o jsonpath='{.spec.volumeName}')"
 
 sed -e "s|NAME_SUFFIX|${pvc_name_suffix}|g" \
@@ -90,6 +90,7 @@ sed -e "s|NUM_NODES|${num_nodes}|g" \
   -e "s|DISK_SIZE_GB|${DISK_SIZE_GB}|g" \
   -e "s|MODEL_SOURCE|${MODEL_SOURCE}|g" \
   -e "s|COMMIT_HASH|${COMMIT_HASH}|g" \
+  -e "s|EXCLUDED_FILES|${EXCLUDED_MODEL_REPO_FILES}|g" \
   -e "s|NAME_SUFFIX|${pvc_name_suffix}|g" \
   -e "s|BACKING_IMAGE_CHECKSUM|${backing_image_checksum}|g" \
   -e "s|STORAGE_CLASS_NAME|${storage_class_name}|g" \

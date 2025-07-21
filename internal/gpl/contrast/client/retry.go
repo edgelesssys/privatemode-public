@@ -17,7 +17,7 @@ func retryAPICall(
 	ctx context.Context, do func(context.Context) error,
 	retryInterval time.Duration, maxAttempts int,
 ) (retErr error) {
-	for attempts := 0; attempts < maxAttempts; attempts++ {
+	for range maxAttempts {
 		retErr = do(ctx)
 		if retErr == nil {
 			return nil

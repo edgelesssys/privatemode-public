@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: GPL-3.0-only
 
-// auth provides functions for authenticating API requests.
+// Package auth provides functions for authenticating API requests.
 package auth
 
 import (
