@@ -20,18 +20,24 @@ import (
 //go:embed gpu_device_identity_ca.pem
 var gpuDeviceIdentityCACertPEM []byte
 
-var gpuDeviceIdentityCACert = mustParseCertificate(gpuDeviceIdentityCACertPEM)
+//go:embed rim_signing_root_ca.pem
+var rimSigningRootCACertPEM []byte
+
+var (
+	gpuDeviceIdentityCACert = mustParseCertificate(gpuDeviceIdentityCACertPEM)
+	rimSigningRootCACert    = mustParseCertificate(rimSigningRootCACertPEM)
+)
 
 // VerificationMode defines what type of certificate chain is being verified.
-type VerificationMode int
+type VerificationMode string
 
 const (
 	// VerificationModeGPUAttestation is used for verifying GPU attestation certificates.
-	VerificationModeGPUAttestation VerificationMode = iota
+	VerificationModeGPUAttestation VerificationMode = "GPU_ATTESTATION"
 	// VerificationModeVBIOSRIM is used for verifying certificates returned by the RIM service for VBIOS reference values.
-	VerificationModeVBIOSRIM
+	VerificationModeVBIOSRIM VerificationMode = "VBIOS_RIM_CERT"
 	// VerificationModeDriverRIM is used for verifying certificates returned by the RIM service for Driver reference values.
-	VerificationModeDriverRIM
+	VerificationModeDriverRIM VerificationMode = "DRIVER_RIM_CERT"
 )
 
 const nvidiaOCSPURL = "https://ocsp.ndis.nvidia.com"
@@ -54,16 +60,19 @@ func New(log *slog.Logger) *Client {
 
 // VerifyCertChain checks the status of a certificate against NVIDIA's OCSP server.
 func (c *Client) VerifyCertChain(ctx context.Context, certChain []*x509.Certificate, mode VerificationMode) error {
-	// Set root CA to a known good trust anchor
-	switch mode {
-	case VerificationModeGPUAttestation:
-		certChain[(len(certChain) - 1)] = gpuDeviceIdentityCACert
-	}
-
 	// Start by verifying the certificate chain
 	if len(certChain) < 2 {
 		return errors.New("certificate chain must contain at least two certificates")
 	}
+
+	// Set root CA to a known good trust anchor
+	switch mode {
+	case VerificationModeGPUAttestation:
+		certChain[(len(certChain) - 1)] = gpuDeviceIdentityCACert
+	case VerificationModeVBIOSRIM, VerificationModeDriverRIM:
+		certChain[(len(certChain) - 1)] = rimSigningRootCACert
+	}
+
 	rootPool := x509.NewCertPool()
 	rootPool.AddCert(certChain[len(certChain)-1])
 	intermediatePool := x509.NewCertPool()

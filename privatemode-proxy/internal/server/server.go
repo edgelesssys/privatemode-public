@@ -93,9 +93,13 @@ func (s *Server) GetHandler() http.Handler {
 	return mux
 }
 
+func (s *Server) useRandomCacheSalt() bool {
+	return s.defaultCacheSalt == ""
+}
+
 func (s *Server) cacheSaltInjector() forwarder.RequestMutator {
 	var cacheSaltGenerator func() (string, error)
-	if s.defaultCacheSalt == "" {
+	if s.useRandomCacheSalt() {
 		cacheSaltGenerator = openai.RandomPromptCacheSalt
 	} else {
 		cacheSaltGenerator = func() (string, error) {
@@ -104,6 +108,69 @@ func (s *Server) cacheSaltInjector() forwarder.RequestMutator {
 	}
 
 	return openai.CacheSaltInjector(cacheSaltGenerator, s.log)
+}
+
+func (s *Server) generateShardKey(cacheSalt string, content string) (string, error) {
+	cacheSaltHash := sha256.Sum256([]byte(cacheSalt))
+	shardKeyStr := hex.EncodeToString(cacheSaltHash[:])[:constants.CacheSaltHashLength]
+
+	// Estimate number of tokens n as content length // 4
+	n := len(content) / 4
+
+	// Currently, only 1Mio tokens to limit the shard key size. Limiting factors are proxies,
+	// where nginx supports only 4kb. But currently, this only goes to the API Gateway such
+	// that we could also work with headers larger than 4kb. Envoy also supports more. But
+	// could still be a problem for client side proxies.
+	//
+	// For extending this beyond 1Mio token context size we should have a clear plan on how to
+	// support larger keys and/or compress a bit more for large context (e.g., > 100k tokens).
+	if n > 1_000_000 {
+		s.log.Error("Context too large for shard key generation", slog.Int("tokens", n))
+		return "", fmt.Errorf("context too large: ~%d tokens", n)
+	}
+
+	blockSize := 16
+
+	// No caching if n < blockSize
+	// -> return the base shard key immediately
+	if n < blockSize {
+		return shardKeyStr, nil
+	}
+
+	// Iterate over content, starting with step size 16, doubling with each step
+	// using 4 chars to represent 1 token.
+	contentBytes := []byte(content)
+
+	// Use the cache salt as initial hash.
+	var chunkHash [32]byte
+	copy(chunkHash[:], cacheSaltHash[:])
+	shardKeyStr += "-"
+	for i := 0; i+blockSize <= len(contentBytes)/4; {
+		end := i + blockSize
+		chunk := contentBytes[i*4 : end*4]
+
+		// We prefix the chunk with the cache salt to avoid exposing any information
+		// and to make the sequence unique even if there are minor changes not captured by the
+		// 6 bit value extracted below. This also avoids side channel attacks, as the cache
+		// salt is never exposed.
+		chunkHash = sha256.Sum256(append(chunkHash[:], chunk...))
+		last6Bits := chunkHash[len(chunkHash)-1] & 0x3F
+		shardKeyStr += string("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[last6Bits])
+
+		// increase step size
+		// - step = 16 from 16...100k -> 62 chars
+		// - step = 128 from 1k...100k -> 774 chars
+		// - step = 512 from 100k...1M -> 1758 chars
+		i += blockSize
+		switch i {
+		case 1024:
+			blockSize = 128
+		case 100_096: // 774*128+1024
+			blockSize = 512
+		}
+	}
+
+	return shardKeyStr, nil
 }
 
 func (s *Server) shardKeyInjector() forwarder.RequestMutator {
@@ -121,13 +188,42 @@ func (s *Server) shardKeyInjector() forwarder.RequestMutator {
 			return nil
 		}
 		cacheSalt := gjson.Get(httpBody, "cache_salt").String()
-		if cacheSalt == "" {
-			return fmt.Errorf("missing field 'cache_salt'")
+
+		// If there is no explicit cache salt, we use the default cache salt.
+		if cacheSalt == "" && !s.useRandomCacheSalt() {
+			cacheSalt = s.defaultCacheSalt
 		}
 
-		hash := sha256.Sum256([]byte(cacheSalt))
-		shardKey := hex.EncodeToString(hash[16:])
-		r.Header.Set(constants.PrivatemodeShardKeyHeader, shardKey)
+		// If there is no cache salt, we use default sharding without a shard key.
+		if cacheSalt != "" {
+			// /chat/completions
+			tools := gjson.Get(httpBody, "tools").String()
+			messages := gjson.Get(httpBody, "messages").String()
+
+			// /completions
+			prompt := gjson.Get(httpBody, "prompt").String()
+			suffix := gjson.Get(httpBody, "suffix").String()
+
+			// NOTE: The order is important and must match the chat template of the model.
+			// For many models, tools are defined first, whithin or after the system message.
+			// This is the case for Llama and DeepSeek. Gemma does not have tools right now.
+			//
+			// Mistral puts tools right before the last user message. Once we use a model
+			// that does not store tools in the beginning, we may want to create a
+			// model-specific shard key to avoid cache misses due to changing tools.
+			// Potentially, we may also adjust the chat template for such models but this
+			// could have a performance impact.
+			content := tools + messages + prompt + suffix
+			shardKey, err := s.generateShardKey(cacheSalt, content)
+			if err != nil {
+				return fmt.Errorf("generating shard key: %w", err)
+			}
+
+			// TODO(dr75): For now don't use the full shard key as the load balancing
+			// implementation is still missing and using the full key now would destroy
+			// cache-awareness.
+			r.Header.Set(constants.PrivatemodeShardKeyHeader, shardKey[:constants.CacheSaltHashLength])
+		}
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 		return nil
@@ -177,8 +273,8 @@ func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) 
 	s.inferenceHandler(
 		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
 			return forwarder.RequestMutatorChain(
+				s.shardKeyInjector(), // we don't want a shard key for random cache salts, so we inject before
 				s.cacheSaltInjector(),
-				s.shardKeyInjector(),
 				forwarder.WithFullJSONRequestMutation(cw.Encrypt, openai.PlainCompletionsRequestFields, s.log),
 			)
 		},

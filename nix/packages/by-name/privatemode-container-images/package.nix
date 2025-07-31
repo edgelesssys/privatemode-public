@@ -20,6 +20,7 @@
   apigateway ? null,
   gpu-injector ? null,
   fake-workload ? null,
+  rim-cache ? null,
 }:
 let
   privatemode-proxy-amd64 = privatemode-proxy.image.overrideAttrs (_: {
@@ -57,6 +58,8 @@ let
     apigateway.image
     gpu-injector.image
     fake-workload.image
+    rim-cache.image
+    contrast.image
   ];
 
   toOciImage =

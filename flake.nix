@@ -32,7 +32,10 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          config.allowUnfree = true;
+          config = {
+            allowUnfree = true;
+            permittedInsecurePackages = [ "libsoup-2.74.3" ];
+          };
 
           overlays = [
             (_final: prev: (import ./nix/packages { inherit (prev) lib callPackage; }))
@@ -48,7 +51,8 @@
         # Note that it's *not* a legacy attribute.
         legacyPackages = {
           generate = pkgs.callPackage ./nix/generate.nix { };
-        } // pkgs;
+        }
+        // pkgs;
 
         devShells = {
           default = pkgs.callPackage ./nix/devShells/devshell.nix { };

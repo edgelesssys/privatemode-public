@@ -2,6 +2,7 @@ package forwarder
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -52,6 +53,74 @@ func TestForwardStreaming(t *testing.T) {
 		expectedResponse += `data: {"field": "plainText"}` + "\n\n"
 	}
 	assert.Equal(expectedResponse, resp.Body.String())
+}
+
+func TestForwardStreamingAborted(t *testing.T) {
+	assert := assert.New(t)
+
+	mutator := &stubMutator{
+		mutateResponse: `"plainText"`,
+	}
+	responseMutator := WithFullJSONResponseMutation(mutator.mutate, nil, false)
+
+	sentFirstPart := make(chan struct{})
+
+	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		// Send a complete chunk
+		_, _ = w.Write([]byte("data: {\"field\": \"encryptedData\"}\n\n"))
+		w.(http.Flusher).Flush()
+
+		// Start sending a partial chunk
+		_, _ = w.Write([]byte("data: {\"field\": "))
+		w.(http.Flusher).Flush()
+
+		// Wait before cancelling to let the client start reading
+		time.Sleep(10 * time.Millisecond)
+		sentFirstPart <- struct{}{}
+		time.Sleep(100 * time.Millisecond)
+		_, _ = w.Write([]byte("\"encryptedData\"}\n\n"))
+	}))
+	defer stubServer.Close()
+
+	forwarder := New("tcp", stubServer.Listener.Addr().String(), slog.Default())
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	// Wrap req.Context() in a cancelable context
+	ctx, cancel := context.WithCancel(req.Context())
+	defer cancel()
+	req = req.WithContext(ctx)
+	resp := httptest.NewRecorder()
+
+	go func() {
+		<-sentFirstPart
+		cancel()
+	}()
+
+	forwarder.Forward(
+		resp,
+		req,
+		NoRequestMutation,
+		responseMutator,
+		NoHeaderMutation,
+	)
+
+	assert.Equal(http.StatusOK, resp.Code)
+	assert.Equal("text/event-stream", resp.Header().Get("Content-Type"))
+
+	// Use bufio.Scanner to verify streaming response is chunked line by line
+	scanner := bufio.NewScanner(resp.Body)
+	chunkCount := 0
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			fmt.Printf("chunk %d: %s\n", chunkCount, line)
+			chunkCount++
+		}
+	}
+	assert.NoError(scanner.Err())
+	assert.Equal(1, chunkCount, "Should have received 1 complete chunk before abort")
 }
 
 func TestForwardNonStreaming(t *testing.T) {

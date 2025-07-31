@@ -1,6 +1,56 @@
 package rim
 
-import "encoding/xml"
+import (
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/xml"
+	"fmt"
+	"strings"
+)
+
+// Resource is a direct reference measurement for a RIM bundle.
+type Resource struct {
+	Type         string   `xml:"type,attr"`
+	Index        uint8    `xml:"index,attr"`
+	Active       bool     `xml:"active,attr"`
+	Alternatives int      `xml:"alternatives,attr"`
+	Name         string   `xml:"name,attr"`
+	Size         int      `xml:"size,attr"`
+	Hashes       []string `xml:"hash,attr"`
+}
+
+// UnmarshalXML implements the [xml.Unmarshaler] interface.
+func (r *Resource) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var tmp struct {
+		Type         string     `xml:"type,attr"`
+		Index        uint8      `xml:"index,attr"`
+		Active       bool       `xml:"active,attr"`
+		Alternatives int        `xml:"alternatives,attr"`
+		Name         string     `xml:"name,attr"`
+		Size         int        `xml:"size,attr"`
+		Attr         []xml.Attr `xml:",any,attr"`
+	}
+	if err := d.DecodeElement(&tmp, &start); err != nil {
+		return err
+	}
+
+	r.Type = tmp.Type
+	r.Index = tmp.Index
+	r.Active = tmp.Active
+	r.Alternatives = tmp.Alternatives
+	r.Name = tmp.Name
+	r.Size = tmp.Size
+
+	r.Hashes = make([]string, 0)
+
+	for _, attr := range tmp.Attr {
+		if strings.HasPrefix(attr.Name.Local, "Hash") {
+			r.Hashes = append(r.Hashes, attr.Value)
+		}
+	}
+
+	return nil
+}
 
 // SoftwareIdentity is an ISO-IEC 19770-2 Software Identification document as returned by the NVIDIA RIM service.
 type SoftwareIdentity struct {
@@ -38,21 +88,9 @@ type SoftwareIdentity struct {
 		FirmwareManufacturerID  string `xml:"FirmwareManufacturerId,attr"`
 	} `xml:"Meta"`
 	Payload struct {
-		Text     string `xml:",chardata"`
-		SHA384   string `xml:"SHA384,attr"`
-		Resource []struct {
-			Text         string `xml:",chardata"`
-			Type         string `xml:"type,attr"`
-			Index        string `xml:"index,attr"`
-			Active       string `xml:"active,attr"`
-			Alternatives string `xml:"alternatives,attr"`
-			Hash0        string `xml:"Hash0,attr"`
-			Name         string `xml:"name,attr"`
-			Size         string `xml:"size,attr"`
-			Hash1        string `xml:"Hash1,attr"`
-			Hash2        string `xml:"Hash2,attr"`
-			Hash3        string `xml:"Hash3,attr"`
-		} `xml:"Resource"`
+		Text     string     `xml:",chardata"`
+		SHA384   string     `xml:"SHA384,attr"`
+		Resource []Resource `xml:"Resource"`
 	} `xml:"Payload"`
 	Signature struct {
 		Text       string `xml:",chardata"`
@@ -93,4 +131,21 @@ type SoftwareIdentity struct {
 			} `xml:"X509Data"`
 		} `xml:"KeyInfo"`
 	} `xml:"Signature"`
+}
+
+// SigningCerts returns the certificate chain used to sign the SoftwareIdentity document.
+func (s SoftwareIdentity) SigningCerts() ([]*x509.Certificate, error) {
+	certs := make([]*x509.Certificate, len(s.Signature.KeyInfo.X509Data.X509Certificate))
+	for i, certPEM := range s.Signature.KeyInfo.X509Data.X509Certificate {
+		certDER, err := base64.StdEncoding.DecodeString(certPEM)
+		if err != nil {
+			return nil, fmt.Errorf("decoding signing certificate: %w", err)
+		}
+		cert, err := x509.ParseCertificate(certDER)
+		if err != nil {
+			return nil, fmt.Errorf("parsing signing certificate: %w", err)
+		}
+		certs[i] = cert
+	}
+	return certs, nil
 }

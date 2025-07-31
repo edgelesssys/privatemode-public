@@ -369,9 +369,23 @@ func mutateSelectJSONFields(data []byte, mutate MutationFunc, mutateFields Field
 	return result, nil
 }
 
+// isValidJSON returns nil if data is valid JSON or empty, an "incomplete JSON" error if incomplete, or a formatted error otherwise.
+func isValidJSON(data []byte) error {
+	if len(data) == 0 || gjson.ValidBytes(data) {
+		return nil
+	}
+	trimmed := bytes.TrimSpace(data)
+	err := errors.New("invalid JSON data")
+	if (bytes.HasPrefix(trimmed, []byte("{")) && !bytes.HasSuffix(trimmed, []byte("}"))) ||
+		(bytes.HasPrefix(trimmed, []byte("[")) && !bytes.HasSuffix(trimmed, []byte("]"))) {
+		err = errors.New("incomplete JSON")
+	}
+	return fmt.Errorf("mutation on invalid JSON data: %w", err)
+}
+
 func mutateAllJSONFields(data []byte, mutate MutationFunc, skipFields FieldSelector) ([]byte, error) {
-	if len(data) != 0 && !gjson.ValidBytes(data) {
-		return nil, errors.New("mutation on invalid JSON data")
+	if err := isValidJSON(data); err != nil {
+		return nil, err
 	}
 
 	// Collect all top level indices of the given JSON data

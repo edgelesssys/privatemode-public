@@ -1,6 +1,6 @@
 replicaCount: 1
 image:
-  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy@sha256:0ed7d9a837a0cc221492c09bcfbb32de6af119d08b826bc7cd0345d8892d95aa
+  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.22.1-pre
   pullPolicy: IfNotPresent
   restartPolicy: Always
 service:

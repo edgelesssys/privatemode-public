@@ -1,6 +1,7 @@
 //go:build gpu
+// +build gpu
 
-package nras
+package attestation
 
 import (
 	"crypto/rand"
@@ -9,16 +10,13 @@ import (
 	"testing"
 
 	"github.com/edgelesssys/continuum/attestation-agent/internal/gpu"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestAttestGPU(t *testing.T) {
+func TestIssueVerify(t *testing.T) {
 	require := require.New(t)
-	assert := assert.New(t)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	nrasClient := NewClient(logger)
 
 	gpuClient, err := gpu.NewClient(logger)
 	require.NoError(err)
@@ -27,26 +25,16 @@ func TestAttestGPU(t *testing.T) {
 	require.NoError(err)
 	require.NotEmpty(devices)
 
-	d := devices[0]
-
+	// Test attestation on just a single GPU
+	issuer := NewIssuer(devices[0], logger)
 	nonce := [32]byte{}
 	n, err := rand.Read(nonce[:])
 	require.NoError(err)
 	require.Equal(32, n)
 
-	report, err := d.AttestationReport(nonce)
+	report, _, err := issuer.Issue(nonce)
 	require.NoError(err)
 
-	cert, err := d.Certificate()
+	_, err = ParseReport(report)
 	require.NoError(err)
-
-	eat, err := nrasClient.AttestGPU(
-		t.Context(),
-		ArchHopper,
-		nonce,
-		report,
-		cert,
-	)
-	assert.NoError(err)
-	assert.NotEmpty(eat)
 }

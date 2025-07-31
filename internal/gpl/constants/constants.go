@@ -93,6 +93,9 @@ const (
 	// ErrorNoSecretForID is the error message returned when no secret is found for a given ID.
 	// NOTE: This is used for error checking in the PM proxy and should not be changed lightly for backwards compatibility.
 	ErrorNoSecretForID = "no secret for ID"
+
+	// CacheSaltHashLength is the length of the cache salt hash, i.e., the first bytes of the shard key.
+	CacheSaltHashLength = 16
 )
 
 // ContinuumBaseDir is the base directory for files created or used by Continuum.

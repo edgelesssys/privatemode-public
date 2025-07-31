@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
@@ -188,20 +189,30 @@ func TestPromptEncryption(t *testing.T) {
 
 				// cache salt should never be empty
 				cacheSaltHeader := resp.Header().Get("Request-Cache-Salt")
+				actualShardKey := resp.Header().Get("Request-Shard-Key")
 				assert.NotEmpty(cacheSaltHeader)
+
+				expectedCacheSalt := tc.proxyCacheSalt
 
 				// cache salt is actually used; request cache salt takes precedence
 				if tc.requestCacheSalt != "" {
-					assert.Equal(tc.requestCacheSalt, cacheSaltHeader)
-				} else if tc.proxyCacheSalt != "" {
-					assert.Equal(tc.proxyCacheSalt, cacheSaltHeader)
+					expectedCacheSalt = tc.requestCacheSalt
 				}
 
-				// correct shard key header was set if there is a cache salt
-				hash := sha256.Sum256([]byte(cacheSaltHeader))
-				expectedShardKey := hex.EncodeToString(hash[16:])
-				actualShardKey := resp.Header().Get("Request-Shard-Key")
-				assert.Equal(expectedShardKey, actualShardKey)
+				if expectedCacheSalt != "" {
+					// explicit cache salt is used; requires shard key
+					assert.Equal(expectedCacheSalt, cacheSaltHeader)
+
+					hash := sha256.Sum256([]byte(expectedCacheSalt))
+					expectedShardKey := hex.EncodeToString(hash[:8])
+					assert.Equal(expectedShardKey, actualShardKey)
+				} else {
+					// random cache salt
+					assert.NotEmpty(cacheSaltHeader)
+
+					// no shard key if random salt
+					assert.Empty(actualShardKey)
+				}
 			}
 			if tc.expectedBody != "" {
 				body, err := io.ReadAll(resp.Body)
@@ -272,13 +283,10 @@ func TestInvalidSecret(t *testing.T) {
 	require.Len(res.Choices, 1)
 	assert.Equal("Echo: Hello", *res.Choices[0].Message.Content)
 
-	cacheSaltHeader := resp.Header().Get("Request-Cache-Salt")
-	assert.NotEmpty(cacheSaltHeader)
-
-	hash := sha256.Sum256([]byte(cacheSaltHeader))
-	expectedShardKey := hex.EncodeToString(hash[16:])
-	actualShardKey := resp.Header().Get("Request-Shard-Key")
-	assert.Equal(expectedShardKey, actualShardKey)
+	// the test runs with automatically generated cache salt, so the header is set
+	// but no shard key is generated as caching is disabled
+	assert.NotEmpty(resp.Header().Get("Request-Cache-Salt"))
+	assert.Empty(resp.Header().Get("Request-Shard-Key"))
 }
 
 func TestTools(t *testing.T) {
@@ -494,6 +502,80 @@ func TestUnstructuredEncrypted(t *testing.T) {
 
 			assert.Equal(t, "test field", jsonResp["testField"])
 			assert.Equal(t, "some content", jsonResp["testContent"])
+		})
+	}
+}
+
+func TestShardKeyGeneration(t *testing.T) {
+	server := &Server{log: slog.Default()}
+	cacheSalt := "test-salt"
+
+	// Test different token count ranges to verify k calculation
+	testCases := map[string]struct {
+		contentLength     int
+		contentHashLength int
+		contentKey        string
+		expectError       bool
+	}{
+		"empty":                 {contentLength: 0, contentHashLength: 0},
+		"1->0, block size 16*4": {contentLength: 1, contentHashLength: 0},
+		// 1 block of 16 tokens
+		"63->1, block size 16*4": {contentLength: 16*4 - 1, contentHashLength: 0},
+		"64->1, block size 16*4": {contentLength: 16 * 4, contentHashLength: 1, contentKey: "Q"},
+		// 2 blocks of 16 tokens
+		"127->1, block size 16*4": {contentLength: 32*4 - 1, contentHashLength: 1, contentKey: "Q"},
+		"128->2, block size 16*4": {contentLength: 32 * 4, contentHashLength: 2, contentKey: "QK"},
+		"129->2, block size 16*4": {contentLength: 32*4 + 1, contentHashLength: 2, contentKey: "QK"},
+		// 3 blocks of 16 tokens
+		"191->2, block size 16*4":    {contentLength: 48*4 - 1, contentHashLength: 2, contentKey: "QK"},
+		"192->3, block size 16*4":    {contentLength: 48 * 4, contentHashLength: 3, contentKey: "QKx"},
+		"193->3, block size 16*4":    {contentLength: 48*4 + 1, contentHashLength: 3, contentKey: "QKx"},
+		"4095->63, block size 16*4":  {contentLength: 1024*4 - 1, contentHashLength: 63, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVlj"},
+		"4096->64, block size 128*4": {contentLength: 1024 * 4, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
+		"4097->64, block size 128*4": {contentLength: 1024*4 + 1, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
+		"4607->64, block size 128*4": {contentLength: (1024+128)*4 - 1, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
+		"4224->64, block size 128*4": {contentLength: (1024 + 128) * 4, contentHashLength: 65, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljTI"},
+		"100k-1, block size 128*4":   {contentLength: 100_096*4 - 1, contentHashLength: 64 + 773},
+		"100k, block size 512*4":     {contentLength: 100_096 * 4, contentHashLength: 64 + 774},
+		"100k+1, block size 512*4":   {contentLength: 100_096*4 + 1, contentHashLength: 64 + 774},
+		"1M-1, block size 512*4":     {contentLength: 1_000_000*4 - 1, contentHashLength: 64 + 774 + 1757},
+		"1M, block size 512*4":       {contentLength: 1_000_000 * 4, contentHashLength: 64 + 774 + 1757},
+		"1M+0.75, block size 512*4":  {contentLength: 1_000_000*4 + 3, contentHashLength: 64 + 774 + 1757},
+		"1M+1, error":                {contentLength: 1_000_000*4 + 4, contentHashLength: -1, expectError: true},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+			content := string(bytes.Repeat([]byte("a"), tc.contentLength))
+
+			start := time.Now()
+			shardKey, err := server.generateShardKey(cacheSalt, content)
+			duration := time.Since(start)
+
+			// 1 Mio tokens take about 7.5ms on a Mac M2. In CI it takes 28ms.
+			// Check for 50ms. That is, 100k tokens are below 5ms, which is an acceptable delay for such large context.
+			assert.Less(duration.Nanoseconds(), int64(50_000_000), "shard key generation took too long: %s", duration)
+
+			if tc.expectError {
+				require.Error(err)
+				return
+			}
+
+			require.NoError(err)
+
+			// "saltHash-contentHash"
+			shardKeyLength := constants.CacheSaltHashLength + tc.contentHashLength
+			if tc.contentHashLength > 0 {
+				shardKeyLength++ // '-'
+			}
+			assert.Len(shardKey, shardKeyLength)
+
+			if len(tc.contentKey) > 0 {
+				actualContentHash := shardKey[constants.CacheSaltHashLength:]
+				assert.Equal("-"+tc.contentKey, actualContentHash)
+			}
 		})
 	}
 }

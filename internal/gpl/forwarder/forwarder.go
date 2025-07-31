@@ -97,8 +97,9 @@ func New(network, address string, log *slog.Logger) *Forwarder {
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial(network, address)
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				dialer := net.Dialer{}
+				return dialer.DialContext(ctx, network, address)
 			},
 		},
 	}
@@ -186,7 +187,7 @@ func (f *Forwarder) ForwardWithRetry(
 
 		// Write response to client using a small buffer to ensure smooth streaming.
 		if _, err := io.CopyBuffer(w, responseMutator.Reader(resp.Body), make([]byte, copyBufferSize)); err != nil {
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) || req.Context().Err() == context.Canceled {
 				f.logWarning("Connection closed by client before forwarding finished", err, req)
 			} else {
 				f.logError("Failed creating new body for forwarded message", err, req)

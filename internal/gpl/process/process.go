@@ -54,10 +54,10 @@ func HTTPServeContext(ctx context.Context, server *http.Server, listener net.Lis
 	go func() {
 		defer wg.Done()
 		if server.TLSConfig == nil {
-			log.Info("Starting HTTP server without TLS", "endpoint", server.Addr)
+			log.Info("Starting HTTP server without TLS", "endpoint", listener.Addr().String())
 			serveErr <- server.Serve(listener)
 		} else {
-			log.Info("Starting HTTPS server", "endpoint", server.Addr)
+			log.Info("Starting HTTPS server", "endpoint", listener.Addr().String())
 			serveErr <- server.ServeTLS(listener, "", "")
 		}
 	}()
