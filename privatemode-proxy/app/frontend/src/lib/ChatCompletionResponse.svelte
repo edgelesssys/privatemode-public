@@ -19,7 +19,7 @@ export class ChatCompletionResponse {
     if (opts.onMessageChange) this.messageChangeListeners.push(opts.onMessageChange)
   }
 
-  private offsetTotals: Usage
+  private offsetTotals: Usage | undefined = undefined
   private isFill: boolean = false
   private didFill: boolean = false
 
@@ -28,10 +28,10 @@ export class ChatCompletionResponse {
 
   private messages: Message[]
 
-  private error: string
+  private error: string = ''
 
-  private model: Model
-  private lastModel: Model
+  private model: Model | undefined = undefined
+  private lastModel: Model | undefined = undefined
 
   private setModel = (model: Model) => {
     if (!model) return
@@ -40,20 +40,20 @@ export class ChatCompletionResponse {
     this.model = model
   }
 
-  private finishResolver: (value: Message[]) => void
-  private errorResolver: (error: string) => void
+  private finishResolver!: (value: Message[]) => void
+  private errorResolver!: (error: string) => void
   private finishPromise = new Promise<Message[]>((resolve, reject) => {
     this.finishResolver = resolve
     this.errorResolver = reject
   })
 
-  private promptTokenCount:number
+  private promptTokenCount: number = 0
   private finished = false
   private messageChangeListeners: ((m: Message[]) => void)[] = []
   private finishListeners: ((m: Message[]) => void)[] = []
 
   private initialFillMerge (existingContent:string, newContent:string):string {
-    const modelDetail = getModelDetail(this.model)
+    const modelDetail = getModelDetail(this.model || '')
     if (!this.didFill && this.isFill && modelDetail.preFillMerge) {
       existingContent = modelDetail.preFillMerge(existingContent, newContent)
     }
@@ -142,7 +142,7 @@ export class ChatCompletionResponse {
         message.content = this.initialFillMerge(message.content, choice.delta?.content)
         message.content += choice.delta.content
       }
-      completionTokenCount += countTokens(this.model, message.content)
+      completionTokenCount += countTokens(this.model || '', message.content)
       message.model = response.model
       message.finish_reason = choice.finish_reason
       message.streaming = !choice.finish_reason && !this.finished

@@ -82,6 +82,10 @@ const (
 	// X-Request-ID is mostly standard and also supported by envoy.
 	// cf. https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers#config-http-conn-man-headers-x-request-id
 	RequestIDHeader = "X-Request-ID"
+	// PrivatemodeNvidiaOCSPPolicyHeader is the header used to allow specific NVIDIA OCSP status codes.
+	PrivatemodeNvidiaOCSPPolicyHeader = "Privatemode-NVIDIA-OCSP-Policy"
+	// PrivatemodeNvidiaOCSPPolicyMACHeader is the header used to verify the integrity of the Privatemode-NVIDIA-OCSP-Policy header.
+	PrivatemodeNvidiaOCSPPolicyMACHeader = "Privatemode-NVIDIA-OCSP-Policy-MAC"
 
 	// SecretServiceEndpoint is the endpoint of the secret service.
 	SecretServiceEndpoint = "secret.privatemode.ai:443"
@@ -96,6 +100,22 @@ const (
 
 	// CacheSaltHashLength is the length of the cache salt hash, i.e., the first bytes of the shard key.
 	CacheSaltHashLength = 16
+	// CacheBlockSizeTokens is the number of tokens in a cache block.
+	CacheBlockSizeTokens = 16
+	// ShardKeyFirstBoundaryBlocksPerChar is the number of blocks per character before the first boundary.
+	ShardKeyFirstBoundaryBlocksPerChar = 1
+	// ShardKeyFirstBoundaryBlocks is the number of cache blocks before the first boundary.
+	ShardKeyFirstBoundaryBlocks = 1024 / CacheBlockSizeTokens
+	// ShardKeySecondBoundaryBlocksPerChar is the number of blocks per character between the first and second boundary.
+	// 8 blocks * 16 tokens = 128 tokens.
+	ShardKeySecondBoundaryBlocksPerChar = 8
+	// ShardKeySecondBoundaryBlocks is the number of cache blocks between the first and second boundary.
+	ShardKeySecondBoundaryBlocks = 100_096 / CacheBlockSizeTokens
+	// ShardKeyThirdBoundaryBlocksPerChar is the number of blocks per character after the second boundary.
+	// 32 blocks * 16 tokens = 512 tokens.
+	ShardKeyThirdBoundaryBlocksPerChar = 32
+	// ShardKeyThirdBoundaryBlocks is the number of cache blocks after the second boundary.
+	ShardKeyThirdBoundaryBlocks = 1_000_000 / CacheBlockSizeTokens
 )
 
 // ContinuumBaseDir is the base directory for files created or used by Continuum.

@@ -9,10 +9,8 @@ lerna-debug.log*
 
 testfiles
 
-node_modules
-/wailsjs/
+node_modules/
 *.local
-src-tauri/gen/
 package.json.md5
 
 # required for downstream build processes

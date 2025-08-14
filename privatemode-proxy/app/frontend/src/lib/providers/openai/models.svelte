@@ -149,14 +149,15 @@ export const chatModels : Record<string, ModelDetail> = {
 export const fetchRemoteModels = async () => {
   const supportedModels = await getSupportedModels()
 
+  const detailedModels: Record<string, ModelDetail> = {}
   Object.keys(supportedModels).forEach((key) => {
-        supportedModels[key] = {
+        detailedModels[key] = {
           ...chatModelBase,
-          ...supportedModels[key]
+          ...(typeof supportedModels[key] === 'object' && supportedModels[key] !== null ? supportedModels[key] : {})
         }
   })
 
-  return supportedModels
+  return detailedModels
 }
 
 const imageModelBase = {

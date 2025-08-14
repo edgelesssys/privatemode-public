@@ -35,7 +35,7 @@
   import send from '../assets/send.svg'
   import { FILE_MESSAGE_PREFIX } from './FileUploadService.svelte'
   import logoSmall from '../assets/logo-small.svg'
-  import { TestChatController } from './SmokeTest';
+  import { TestChatController } from './SmokeTest'
 
   export let params = { chatId: '' }
   const chatId: number = parseInt(params.chatId)
@@ -46,7 +46,7 @@
   let recording = false
   let lastSubmitRecorded = false
   let isUploading = false
-  let uploadStatus = { progress: 0, filename: null }
+  let uploadStatus: { progress: number; filename: string | null } = { progress: 0, filename: null }
   let uploadErrorMessage = ''
   let fileUploadButton: any // reference to the FileUploadButton component
   let selectedFile: File | null = null
@@ -63,37 +63,37 @@
   $: isSendButtonDisabled = (promptInput === '' && !fileUploaded) || isUploading
 
   // Implement methods of chat controller for automation
-  let sendButton: HTMLButtonElement | null = null;
+  let sendButton: HTMLButtonElement | null = null
   
   TestChatController.sendMessage = async () => {
     if (sendButton && !sendButton.disabled) {
-      sendButton.click();
+      sendButton.click()
     } else {
-      const error = sendButton ? 'error: send button is disabled' : 'error: send button not found';
-      throw new Error(error);
+      const error = sendButton ? 'error: send button is disabled' : 'error: send button not found'
+      throw new Error(error)
     }
-  };
+  }
   TestChatController.setMessageInput = async (value: string) => {
-    promptInput = value;
+    promptInput = value
     // works also with 10ms, so 100 should be safe
-    await new Promise(resolve => setTimeout(resolve, 100));
-  };
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
   TestChatController.activateMessageInput = async () => {
-    focusInput();
-  };
+    focusInput()
+  }
   TestChatController.getLastMessageContent = async (role: string) => {
     // Find the last message in $currentChatMessages matching the given role
-    const last = [...$currentChatMessages].reverse().find(m => m.role === role);
+    const last = [...$currentChatMessages].reverse().find(m => m.role === role)
     if (last && last.content) {
-      return last.content;
+      return last.content
     }
 
     // If no message is found, throw an error and return the last message ignoring the role
     // Do not try to get the content as it might be an error message with no content field
-    const lastMessage = $currentChatMessages[$currentChatMessages.length - 1];
-    const messageString = JSON.stringify(lastMessage);
-    throw new Error(`No message found for role: ${role}; last message: ${messageString}`);
-  };
+    const lastMessage = $currentChatMessages[$currentChatMessages.length - 1]
+    const messageString = JSON.stringify(lastMessage)
+    throw new Error(`No message found for role: ${role}; last message: ${messageString}`)
+  }
 
   let scDelay
   const onStateChange = async (...args: any[]) => {
@@ -250,7 +250,10 @@
   const handleUploadStart = (event: CustomEvent<{filename: string}>) => {
     isUploading = true
     uploadErrorMessage = ''
-    uploadStatus = { progress: 0, filename: event.detail.filename }
+    uploadStatus = {
+      progress: 0,
+      filename: event.detail.filename
+    }
     // Reset the updating state to hide the cancel button
     chatRequest.updating = false
     chatRequest.updatingMessage = ''
@@ -450,17 +453,7 @@
     <div class="level-item">
       <p class="subtitle is-5">
         <span>{chat.name || `Chat ${chat.id}`}</span>
-        <!-- <a href={'#'} class="greyscale ml-2 is-hidden has-text-weight-bold editbutton" title="Rename chat" on:click|preventDefault={promptRename}><Fa icon={faPenToSquare} /></a> -->
-        <!-- <a href={'#'} class="greyscale ml-2 is-hidden has-text-weight-bold editbutton" title="Suggest a chat name" on:click|preventDefault={suggestName}><Fa icon={faLightbulb} /></a> -->
-        <!-- <a href={'#'} class="greyscale ml-2 is-hidden has-text-weight-bold editbutton" title="Copy this chat" on:click|preventDefault={() => { copyChat(chatId) }}><Fa icon={faClone} /></a> -->
-        <!-- <a href={'#'} class="greyscale ml-2 is-hidden has-text-weight-bold editbutton" title="Delete this chat" on:click|preventDefault={deleteChat}><Fa icon={faTrash} /></a> -->
       </p>
-    </div>
-  </div>
-
-  <div class="level-right">
-    <div class="level-item">
-      <!-- <button class="button is-warning" on:click={() => { clearMessages(chatId); window.location.reload() }}><span class="greyscale mr-2"><Fa icon={faTrash} /></span> Clear messages</button> -->
     </div>
   </div>
 </nav>
@@ -476,10 +469,6 @@
     </div>
   </article>
 {/if}
-
-<!--{#if $currentChatId !== 0 && ($currentChatMessages.length === 0 || ($currentChatMessages.length === 1 && $currentChatMessages[0].role === 'system'))}
-  <Prompts bind:input />
-{/if}-->
 </div>
 </div>
 <Footer class="prompt-input-container" strongMask={true}>
@@ -524,13 +513,6 @@
       />
     </p>
     <div class="chat-page-controls">
-    <!-- Microphone button removed as it's not used in current implementation -->
-    <!-- <p class="control settings">
-      <button title="Chat/Profile Settings" class="button" on:click|preventDefault={showSettingsModal}><span class="icon"><Fa icon={faGear} /></span></button>
-    </p>
-    <p class="control queue">
-      <button title="Queue message, don't send yet" class:is-disabled={chatRequest.updating} class="button is-ghost" on:click|preventDefault={addNewMessage}><span class="icon"><Fa icon={faArrowUpFromBracket} /></span></button>
-    </p> -->
     {#if chatRequest.updating}
     <p class="control send">
       <button title="Cancel Response" class="button is-danger" type="button" on:click={cancelRequest}><span class="icon">
@@ -544,7 +526,6 @@
     {:else}
     <FileUploadButton 
       bind:this={fileUploadButton}
-      bind:selectedFile={selectedFile}
       disabled={chatRequest.updating || fileUploaded || isUploading}
       on:fileSelected={handleFileSelected}
       on:uploadStart={handleUploadStart}
@@ -557,23 +538,6 @@
     {/if}
     </div>
   </form>
-  <!-- <p class="chat-page-demo">
-    The Privatemode preview is serving open-source models and brought to you by
-    <a
-      href="https://www.edgeless.systems/"
-      target="_blank"
-      rel="noopener noreferrer">Edgeless Systems</a
-    >.
-  </p> -->
-      <!-- a target to scroll to -->
-    <!-- <div class="content has-text-centered running-total-container">
-      {#each Object.entries(chat.usage || {}) as [model, usage]}
-      <p class="is-size-7 running-totals">
-        <em>{getModelDetail(model || '').label || model}</em> total <span class="has-text-weight-bold">{usage.total_tokens}</span>
-        tokens ~= <span class="has-text-weight-bold">${getPrice(usage, model).toFixed(6)}</span>
-      </p>
-      {/each}
-    </div> -->
     </div>
 </Footer>
 {/if}

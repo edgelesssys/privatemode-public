@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	internalOCSP "github.com/edgelesssys/continuum/internal/gpl/ocsp"
 	"golang.org/x/crypto/ocsp"
 )
 
@@ -59,10 +60,12 @@ func New(log *slog.Logger) *Client {
 }
 
 // VerifyCertChain checks the status of a certificate against NVIDIA's OCSP server.
-func (c *Client) VerifyCertChain(ctx context.Context, certChain []*x509.Certificate, mode VerificationMode) error {
+func (c *Client) VerifyCertChain(ctx context.Context,
+	certChain []*x509.Certificate, mode VerificationMode,
+) (internalOCSP.Status, error) {
 	// Start by verifying the certificate chain
 	if len(certChain) < 2 {
-		return errors.New("certificate chain must contain at least two certificates")
+		return internalOCSP.StatusUnknown, errors.New("certificate chain must contain at least two certificates")
 	}
 
 	// Set root CA to a known good trust anchor
@@ -85,7 +88,7 @@ func (c *Client) VerifyCertChain(ctx context.Context, certChain []*x509.Certific
 		Roots:         rootPool,
 		Intermediates: intermediatePool,
 	}); err != nil {
-		return fmt.Errorf("verifying certificate chain: %w", err)
+		return internalOCSP.StatusUnknown, fmt.Errorf("verifying certificate chain: %w", err)
 	}
 
 	// The leaf certificate of the GPU attestation cert chain is not registered in the OCSP responder,
@@ -97,62 +100,70 @@ func (c *Client) VerifyCertChain(ctx context.Context, certChain []*x509.Certific
 
 	// Check if any of the certificates where revoked by NVIDIA's OCSP server
 	c.log.Info("Checking OCSP status of certificate chain", "mode", mode)
+	statusResponses := []internalOCSP.Status{}
 	for i := range len(certChain) - 1 {
-		if err := c.verifyCertificate(ctx, certChain[i], certChain[i+1]); err != nil {
-			return fmt.Errorf("OCSP verification failed for certificate %d: %w", i, err)
+		status, err := c.verifyCertificate(ctx, certChain[i], certChain[i+1])
+		if err != nil {
+			c.log.Error("OCSP verification failed", "error", err,
+				"cert", certChain[i].Subject.CommonName, "issuer", certChain[i+1].Subject.CommonName)
 		}
+		statusResponses = append(statusResponses, status)
 	}
 
-	return nil
+	return internalOCSP.CombineStatuses(statusResponses), nil
 }
 
-func (c *Client) verifyCertificate(ctx context.Context, cert, issuer *x509.Certificate) error {
+func (c *Client) verifyCertificate(ctx context.Context, cert, issuer *x509.Certificate) (internalOCSP.Status, error) {
 	reqBytes, err := ocsp.CreateRequest(cert, issuer, &ocsp.RequestOptions{
 		Hash: crypto.SHA384, // NVIDIA uses SHA-384 for OCSP requests
 	})
 	if err != nil {
-		return err
+		return internalOCSP.StatusUnknown, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(reqBytes))
 	if err != nil {
-		return err
+		return internalOCSP.StatusUnknown, err
 	}
 	req.Header.Set("Content-Type", "application/ocsp-request")
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return err
+		return internalOCSP.StatusUnknown, err
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return internalOCSP.StatusUnknown, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code %s: %s", resp.Status, string(respBody))
+		return internalOCSP.StatusUnknown, fmt.Errorf("unexpected status code %s: %s", resp.Status, string(respBody))
 	}
 
 	ocspResp, err := ocsp.ParseResponse(respBody, issuer)
 	if err != nil {
-		return fmt.Errorf("failed to parse OCSP response: %w", err)
+		return internalOCSP.StatusUnknown, fmt.Errorf("failed to parse OCSP response: %w", err)
 	}
 
+	status := internalOCSP.StatusGood
 	if ocspResp.Status != ocsp.Good {
 		var msg string
 		switch ocspResp.Status {
 		case ocsp.Revoked:
 			msg = "certificate is revoked"
+			status = internalOCSP.StatusRevoked
 		case ocsp.Unknown:
 			msg = "certificate is unknown to the OCSP responder"
+			status = internalOCSP.StatusUnknown
 		default:
 			msg = fmt.Sprintf("unexpected OCSP status %d", ocspResp.Status)
+			status = internalOCSP.StatusUnknown
 		}
-		return fmt.Errorf("OCSP status verification failed: %s", msg)
+		return status, fmt.Errorf("OCSP status verification failed: %s", msg)
 	}
 
-	return nil
+	return status, nil
 }
 
 func mustParseCertificate(pemData []byte) *x509.Certificate {

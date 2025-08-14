@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,6 +20,8 @@ import (
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
 	"github.com/edgelesssys/continuum/internal/gpl/process"
 	"github.com/spf13/cobra"
+
+	internalOSCP "github.com/edgelesssys/continuum/internal/gpl/ocsp"
 )
 
 var (
@@ -26,6 +29,9 @@ var (
 	driverVersions []string
 	vbiosVersions  []string
 )
+
+// OCSPStatusFile is the file where the OCSP status of the GPU, VBIOS, and driver is stored.
+const OCSPStatusFile = "/run/continuum/ocsp-status.json"
 
 func main() {
 	cmd := &cobra.Command{
@@ -53,49 +59,75 @@ func main() {
 func run(cmd *cobra.Command, _ []string) error {
 	log := logging.NewLogger(logLevel)
 
-	if err := verifyAndEnable(cmd.Context(), log); err != nil {
+	ocspStatus, err := verifyAndEnable(cmd.Context(), log)
+	if err != nil {
 		return fmt.Errorf("failed to verify GPUs: %w", err)
+	}
+
+	log.Info("Writing OCSP status to file", "file", OCSPStatusFile)
+	if err := os.MkdirAll("/run/continuum", 0o644); err != nil {
+		return fmt.Errorf("creating directory for OCSP status file: %w", err)
+	}
+	statusBytes, err := json.Marshal(ocspStatus)
+	if err != nil {
+		return fmt.Errorf("marshalling OCSP status: %w", err)
+	}
+	if err := os.WriteFile(OCSPStatusFile, statusBytes, 0o644); err != nil {
+		return fmt.Errorf("writing OCSP status file: %w", err)
+	}
+	log.Info("OCSP status written successfully", "file", OCSPStatusFile)
+
+	// TODO(msanft): Remove once the attestation verdict is delegated to the privatemode-proxy.
+	for _, status := range ocspStatus {
+		if status.GPU != internalOSCP.StatusGood ||
+			status.VBIOS != internalOSCP.StatusGood ||
+			status.Driver != internalOSCP.StatusGood {
+			return fmt.Errorf("GPU attestation failed: %s", status)
+		}
 	}
 
 	return nil
 }
 
 // verifyAndEnable verifies the GPUs and sets them to ready state.
-func verifyAndEnable(ctx context.Context, log *slog.Logger) error {
+func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOSCP.StatusInfo, error) {
 	// set up issuer
 	gpuClient, err := gpu.NewClient(log)
 	if err != nil {
-		return fmt.Errorf("creating GPU client: %w", err)
+		return nil, fmt.Errorf("creating GPU client: %w", err)
 	}
 	defer gpuClient.Close()
 	availableGPUs, err := gpuClient.ListGPUs()
 	if err != nil {
-		return fmt.Errorf("listing GPUs: %w", err)
+		return nil, fmt.Errorf("listing GPUs: %w", err)
 	}
 	gpuIssuers := attestation.NewIssuers(availableGPUs, log)
 
 	rimClient := rim.New("https://rim-cache/", log) // Use the local RIM cache
 	ocspClient := ocsp.New(log)
 
+	statusInfos := make([]internalOSCP.StatusInfo, len(gpuIssuers))
+
 	log.Info("Verifying GPUs", "amount", len(gpuIssuers))
-	for _, gpuIssuer := range gpuIssuers {
+	for i, gpuIssuer := range gpuIssuers {
 		nonce, err := generateNonce()
 		if err != nil {
-			return fmt.Errorf("generating nonce: %w", err)
+			return nil, fmt.Errorf("generating nonce: %w", err)
 		}
 
 		report, gpuCertChain, err := gpuIssuer.Issue(nonce)
 		if err != nil {
-			return fmt.Errorf("issuing GPU report: %w", err)
+			return nil, fmt.Errorf("issuing GPU report: %w", err)
 		}
 
 		parsedReport, err := attestation.ParseReport(report)
 		if err != nil {
-			return fmt.Errorf("parsing GPU report: %w", err)
+			return nil, fmt.Errorf("parsing GPU report: %w", err)
 		}
 
-		if err := ocspClient.VerifyCertChain(ctx, gpuCertChain, ocsp.VerificationModeGPUAttestation); err != nil {
-			return fmt.Errorf("verifying GPU certificate chain: %w", err)
+		statusInfos[i].GPU, err = ocspClient.VerifyCertChain(ctx, gpuCertChain, ocsp.VerificationModeGPUAttestation)
+		if err != nil {
+			return nil, fmt.Errorf("verifying GPU certificate chain: %w", err)
 		}
 
 		log.Info("Verifying GPU attestation report")
@@ -105,38 +137,41 @@ func verifyAndEnable(ctx context.Context, log *slog.Logger) error {
 			AllowedVBIOSVersions:  vbiosVersions,
 			CertChain:             gpuCertChain,
 		}); err != nil {
-			return fmt.Errorf("verifying GPU report: %w", err)
+			return nil, fmt.Errorf("verifying GPU report: %w", err)
 		}
 
 		driverRIM, err := rimClient.FetchDriverRIM(ctx, rim.GPUArchHopper, parsedReport.DriverVersion())
 		if err != nil {
-			return fmt.Errorf("fetching driver RIM: %w", err)
+			return nil, fmt.Errorf("fetching driver RIM: %w", err)
 		}
-		if err := verifyRIMCertChain(ctx, driverRIM, ocsp.VerificationModeDriverRIM, ocspClient); err != nil {
-			return fmt.Errorf("verifying driver RIM certificate chain: %w", err)
+		statusInfos[i].Driver, err = verifyRIMCertChain(ctx, driverRIM, ocsp.VerificationModeDriverRIM, ocspClient)
+		if err != nil {
+			return nil, fmt.Errorf("verifying driver RIM certificate chain: %w", err)
 		}
 
 		vbiosVersion, err := parsedReport.VBIOSVersion()
 		if err != nil {
-			return fmt.Errorf("getting VBIOS version: %w", err)
+			return nil, fmt.Errorf("getting VBIOS version: %w", err)
 		}
 		vbiosRIM, err := rimClient.FetchVBIOSRIM(ctx, parsedReport.Project(), parsedReport.ProjectSKU(), parsedReport.ChipSKU(), vbiosVersion)
 		if err != nil {
-			return fmt.Errorf("fetching VBIOS RIM: %w", err)
+			return nil, fmt.Errorf("fetching VBIOS RIM: %w", err)
 		}
-		if err := verifyRIMCertChain(ctx, vbiosRIM, ocsp.VerificationModeVBIOSRIM, ocspClient); err != nil {
-			return fmt.Errorf("verifying VBIOS RIM certificate chain: %w", err)
+		statusInfos[i].VBIOS, err = verifyRIMCertChain(ctx, vbiosRIM, ocsp.VerificationModeVBIOSRIM, ocspClient)
+		if err != nil {
+			return nil, fmt.Errorf("verifying VBIOS RIM certificate chain: %w", err)
 		}
 
 		log.Info("Validating GPU attestation report measurements")
 		if err := parsedReport.ValidateMeasurements(driverRIM, vbiosRIM, nil); err != nil {
-			return fmt.Errorf("validating measurements: %w", err)
+			return nil, fmt.Errorf("validating measurements: %w", err)
 		}
 	}
 	if err := gpuClient.SetGPUsReady(); err != nil {
-		return fmt.Errorf("failed to set GPUs ready: %w", err)
+		return nil, fmt.Errorf("failed to set GPUs ready: %w", err)
 	}
-	return nil
+
+	return statusInfos, nil
 }
 
 func generateNonce() ([32]byte, error) {
@@ -147,15 +182,18 @@ func generateNonce() ([32]byte, error) {
 	return sha256.Sum256(nonce), nil
 }
 
-func verifyRIMCertChain(ctx context.Context, softwareIdentity *rim.SoftwareIdentity, mode ocsp.VerificationMode, ocspClient *ocsp.Client) error {
+func verifyRIMCertChain(ctx context.Context, softwareIdentity *rim.SoftwareIdentity,
+	mode ocsp.VerificationMode, ocspClient *ocsp.Client,
+) (internalOSCP.Status, error) {
 	certChain, err := softwareIdentity.SigningCerts()
 	if err != nil {
-		return fmt.Errorf("parsing RIM certificates: %w", err)
+		return internalOSCP.StatusUnknown, fmt.Errorf("parsing RIM certificates: %w", err)
 	}
-	if err := ocspClient.VerifyCertChain(ctx, certChain, mode); err != nil {
-		return fmt.Errorf("verifying RIM certificate chain: %w", err)
+	ocspStatus, err := ocspClient.VerifyCertChain(ctx, certChain, mode)
+	if err != nil {
+		return ocspStatus, fmt.Errorf("verifying RIM certificate chain: %w", err)
 	}
-	return nil
+	return ocspStatus, nil
 }
 
 func must(err error) {

@@ -29,11 +29,6 @@ $: activeChatId = $params && $params.chatId ? parseInt($params.chatId) : undefin
 </nav>
 
 <style>
-	.navbar-item-text {
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	
 	.navbar {
 		transition: top 0.3s ease;
 		position: relative; /* Changed from sticky since parent is now sticky */

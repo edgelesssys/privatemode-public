@@ -48,9 +48,9 @@
 
       // Store the file locally and start upload immediately
       let file = target.files[0]
-      const isWindows = navigator.platform.startsWith('Win');
+      const isWindows = navigator.platform.startsWith('Win')
       if (isWindows) {
-        file = await normalizeFile(file);
+        file = await normalizeFile(file)
       }
       console.log('File selected:', file.name, file.type, file.size)
 

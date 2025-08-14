@@ -11,10 +11,9 @@ import (
 )
 
 var mockEntry = LicenseEntry{
-	LicenseKey:       "00000000-0000-0000-0000-000000000000",
-	OrganizationName: "Test Org",
-	IssueDate:        time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
-	OrganizationID:   1,
+	LicenseKey:     "00000000-0000-0000-0000-000000000000",
+	IssueDate:      time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+	OrganizationID: 1,
 	Organization: Organization{
 		Model: gorm.Model{
 			ID:        1,
@@ -43,12 +42,9 @@ var mockEntry = LicenseEntry{
 		},
 	},
 	ExpirationDate:            time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-	UsageLimit:                10,
-	PromptTokensPerMinute:     100,
-	CompletionTokensPerMinute: 50,
-	RequestsPerMinute:         10,
-	StripeCustomerID:          nil,
-	Type:                      "Test Type",
+	PromptTokensPerMinute:     toPtr(int64(100)),
+	CompletionTokensPerMinute: toPtr(int64(50)),
+	RequestsPerMinute:         toPtr(int64(10)),
 	Comment:                   "Test Comment",
 }
 
@@ -72,19 +68,16 @@ func TestUpdateLicenseEntry(t *testing.T) {
 
 	require.NoError(sut.InsertLicenseEntry(ctx, mockEntry))
 
-	updatedOrg := "Test Org 2"
-	var updatedUsage int64 = 2
+	updatedOrg := uint(42)
 	entry := UpdateLicenseEntry{
-		LicenseKey:   mockEntry.LicenseKey,
-		Organization: &updatedOrg,
-		UsageLimit:   &updatedUsage,
+		LicenseKey:     mockEntry.LicenseKey,
+		OrganizationID: &updatedOrg,
 	}
 
 	require.NoError(sut.UpdateLicenseEntry(ctx, entry))
 	retrieved, err := sut.GetLicenseEntryByLicenseKey(ctx, mockEntry.LicenseKey)
 	require.NoError(err)
-	require.Equal(updatedOrg, retrieved.OrganizationName)
-	require.Equal(updatedUsage, retrieved.UsageLimit)
+	require.Equal(updatedOrg, retrieved.OrganizationID)
 }
 
 func setupTestDB(t *testing.T) *LicenseDB {
@@ -102,4 +95,8 @@ func setupTestDB(t *testing.T) *LicenseDB {
 	require.NoError(ldb.AutoMigrate(t.Context()))
 
 	return ldb
+}
+
+func toPtr[T any](v T) *T {
+	return &v
 }

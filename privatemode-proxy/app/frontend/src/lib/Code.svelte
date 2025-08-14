@@ -88,7 +88,7 @@
   }
 
   // For copying code - reference: https://vyacheslavbasharov.com/blog/adding-click-to-copy-code-markdown-blog
-  const copyFunction = (event) => {
+  const copyFunction = (event: MouseEvent) => {
     // Get the button the user clicked on
     const clickedElement = event.target as HTMLButtonElement
 

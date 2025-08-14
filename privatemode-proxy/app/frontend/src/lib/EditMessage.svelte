@@ -1,14 +1,12 @@
 <script lang="ts">
   import Code from './Code.svelte'
   import { afterUpdate, createEventDispatcher, onMount } from 'svelte'
-  import { deleteMessage, deleteSummaryMessage, truncateFromMessage, submitExitingPromptsNow, continueMessage, updateMessages } from './Storage.svelte'
+  import { deleteMessage, deleteSummaryMessage, continueMessage, updateMessages } from './Storage.svelte'
   import SvelteMarkdown from 'svelte-markdown'
   import type { Message, Model, Chat } from './Types.svelte'
   import Fa from 'svelte-fa/src/fa.svelte'
-  import { faTrash, faDiagramPredecessor, faDiagramNext, faCircleCheck, faPaperPlane, faEye, faEyeSlash, faDownload, faClipboard, faFile } from '@fortawesome/free-solid-svg-icons/index'
+  import { faTrash, faDiagramPredecessor, faDiagramNext, faDownload, faClipboard, faFile } from '@fortawesome/free-solid-svg-icons/index'
   import { errorNotice, scrollToMessage } from './Util.svelte'
-  import { openModal } from 'svelte-modals'
-  import PromptConfirm from './PromptConfirm.svelte'
   import { getImage } from './ImageStore.svelte'
   import { parseFileMessage } from './FileUploadService.svelte'
   import logoSmall from '../assets/logo-small.svg'
@@ -93,7 +91,6 @@
 
   const continueIncomplete = () => {
     editing = false
-    truncateFromMessage(chatId, message.uuid)
     $continueMessage = message.uuid
   }
 
@@ -115,8 +112,6 @@
       event.stopPropagation()
       event.preventDefault()
       exit()
-      checkTruncate()
-      setTimeout(checkTruncate, 10)
     }
   }
 
@@ -131,39 +126,17 @@
     lastTap = new Date().getTime()
   }
 
-  let waitingForDeleteConfirm:any = 0
-
   const checkDelete = () => {
-    clearTimeout(waitingForTruncateConfirm); waitingForTruncateConfirm = 0
-    if (!waitingForDeleteConfirm) {
-      // wait a second for another click to avoid accidental deletes
-      waitingForDeleteConfirm = setTimeout(() => { waitingForDeleteConfirm = 0 }, 1000)
-      return
-    }
-    clearTimeout(waitingForDeleteConfirm)
-    waitingForDeleteConfirm = 0
     if (message.summarized) {
-      // is in a summary, so we're summarized
       errorNotice('Sorry, you can\'t delete a summarized message')
       return
     }
     if (message.summary) {
-      // We're linked to messages we're a summary of
-      openModal(PromptConfirm, {
-        title: 'Delete Summary',
-        message: '<p>Are you sure you want to delete this summary?</p><p>Your session may be too long to submit again after you do.</p>',
-        asHtml: true,
-        class: 'is-warning',
-        confirmButtonClass: 'is-warning',
-        confirmButton: 'Delete Summary',
-        onConfirm: () => {
-          try {
-            deleteSummaryMessage(chatId, message.uuid)
-          } catch (e: unknown) {
-            errorNotice('Unable to delete summary:', e instanceof Error ? e : undefined)
-          }
-        }
-      })
+      try {
+        deleteSummaryMessage(chatId, message.uuid)
+      } catch (e: unknown) {
+        errorNotice('Unable to delete summary:', e instanceof Error ? e : undefined)
+      }
     } else {
       try {
         deleteMessage(chatId, message.uuid)
@@ -171,40 +144,6 @@
         errorNotice('Unable to delete:', e instanceof Error ? e : undefined)
       }
     }
-  }
-
-  let waitingForTruncateConfirm:any = 0
-
-  const checkTruncate = () => {
-    clearTimeout(waitingForDeleteConfirm); waitingForDeleteConfirm = 0
-    if (!waitingForTruncateConfirm) {
-      // wait a second for another click to avoid accidental deletes
-      waitingForTruncateConfirm = setTimeout(() => { waitingForTruncateConfirm = 0 }, 1000)
-      return
-    }
-    clearTimeout(waitingForTruncateConfirm)
-    waitingForTruncateConfirm = 0
-    if (message.summarized) {
-      // is in a summary, so we're summarized
-      errorNotice('Sorry, you can\'t truncate a summarized message')
-      return
-    }
-    try {
-      truncateFromMessage(chatId, message.uuid)
-      $submitExitingPromptsNow = true
-    } catch (e: unknown) {
-      errorNotice('Unable to delete:', e instanceof Error ? e : undefined)
-    }
-  }
-
-  const setSuppress = (value:boolean) => {
-    if (message.summarized) {
-      // is in a summary, so we're summarized
-      errorNotice('Sorry, you can\'t suppress a summarized message')
-      return
-    }
-    message.suppress = value
-    updateMessages(chatId)
   }
 
   const downloadImage = () => {
@@ -297,18 +236,6 @@
   <div class="tool-drawer-mask"></div>
   <div class="tool-drawer">
     <div class="button-pack">
-      <!-- {#if message.finish_reason === 'length' || message.finish_reason === 'abort'}
-      <a
-        href={'#'}
-        title="Continue "
-        class="msg-incomplete button is-small"
-        on:click|preventDefault={() => {
-          continueIncomplete()
-        }}
-      >
-      <span class="icon"><Fa icon={faEllipsis} /></span>
-      </a>
-      {/if} -->
       {#if message.summarized}
       <a
         href={'#'}
@@ -344,44 +271,8 @@
           checkDelete()
         }}
       >
-      {#if waitingForDeleteConfirm}
-      <span class="icon"><Fa icon={faCircleCheck} /></span>
-      {:else}
       <span class="icon"><Fa icon={faTrash} /></span>
-      {/if}
       </a>
-      {/if}
-      {#if !isImage && !message.summarized && !isError}
-        <a
-          href={'#'}
-          title="Truncate from here and send"
-          class="msg-truncate button is-small"
-          on:click|preventDefault={() => {
-            checkTruncate()
-          }}
-        >
-        {#if waitingForTruncateConfirm}
-        <span class="icon"><Fa icon={faCircleCheck} /></span>
-        {:else}
-        <span class="icon"><Fa icon={faPaperPlane} /></span>
-        {/if}
-        </a>
-      {/if}
-      {#if !isImage && !message.summarized && !isSystem && !isError}
-        <a
-          href={'#'}
-          title={(message.suppress ? 'Uns' : 'S') + 'uppress message from submission'}
-          class="msg-supress button is-small"
-          on:click|preventDefault={() => {
-            setSuppress(!message.suppress)
-          }}
-        >
-        {#if message.suppress}
-        <span class="icon"><Fa icon={faEye} /></span>
-        {:else}
-        <span class="icon"><Fa icon={faEyeSlash} /></span>
-        {/if}
-        </a>
       {/if}
       {#if !isImage}
         <a

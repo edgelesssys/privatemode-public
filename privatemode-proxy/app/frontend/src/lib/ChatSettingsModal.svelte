@@ -42,7 +42,7 @@
   
   let showSettingsModal = 0
   let showProfileMenu:boolean = false
-  let profileFileInput
+  let profileFileInput: HTMLInputElement | null = null
   let defaultProfile
   let isDefault = false
 
@@ -50,7 +50,7 @@
   const modelSetting = getChatSettingObjectByKey('model') as ChatSetting & SettingSelect
   const imageModelSetting = getChatSettingObjectByKey('imageGenerationModel') as ChatSetting & SettingSelect
   const chatDefaults = getChatDefaults()
-  const excludeFromProfile = getExcludeFromProfile()
+  const excludeFromProfile: { [key: string]: boolean } = getExcludeFromProfile()
 
   $: chat = $chatsStorage.find((chat) => chat.id === chatId) as Chat
   $: chatSettings = chat.settings
@@ -127,7 +127,7 @@
       await applyProfile(chatId, clone.profile)
       refreshSettings()
     } catch (e) {
-      errorNotice('Error cloning profile:', e)
+      errorNotice('Error cloning profile:', e as any)
     }
   }
 
@@ -153,7 +153,7 @@
       refreshSettings()
     } catch (e) {
       console.error(e)
-      errorNotice('Error deleting profile:', e)
+      errorNotice('Error deleting profile:', e as any)
     }
   }
 
@@ -163,21 +163,23 @@
     refreshSettings()
   }
 
-  const importProfileFromFile = async (e) => {
-    const image = e.target.files[0]
-    e.target.value = null
+  const importProfileFromFile = async (e: Event) => {
+    const input = e.target as HTMLInputElement
+    const image = input.files && input.files[0]
+    if (!image) return
+    input.value = ''
     const reader = new FileReader()
     reader.readAsText(image)
-    reader.onload = async (e) => {
-      const json = (e.target || {}).result as string
+    reader.onload = async (ev) => {
+      const json = (ev.target as FileReader).result as string
       try {
         const profile = JSON.parse(json)
         profile.profileName = await newNameForProfile(profile.profileName || '')
         profile.profile = null
         await saveCustomProfile(profile)
         refreshSettings()
-      } catch (e) {
-        errorNotice('Unable to import profile:', e)
+      } catch (err) {
+        errorNotice('Unable to import profile:', err as Error)
       }
     }
   }
@@ -223,7 +225,7 @@
       await saveCustomProfile(chat.settings)
       refreshSettings()
     } catch (e) {
-      errorNotice('Error saving profile:', e)
+      errorNotice('Error saving profile:', e as Error)
     }
   }
 
@@ -240,7 +242,7 @@
     replace(`/chat/${newChatId}`)
   }
 
-  const deepEqual = (x:any, y:any) => {
+  const deepEqual = (x: any, y: any): boolean => {
     const ok = Object.keys; const tx = typeof x; const ty = typeof y
     return x && y && tx === 'object' && tx === ty
       ? (
@@ -316,9 +318,6 @@
                 <a href={'#'} class="dropdown-item" on:click|preventDefault={startNewChat}>
                   <span class="menu-icon"><Fa icon={faSquarePlus}/></span> Start New Chat from Current
                 </a>
-                <!-- <a href={'#'} class="dropdown-item" on:click|preventDefault={applyToChat}>
-                  <span class="menu-icon"><Fa icon={faCheckCircle}/></span> Apply Prompts to Current Chat
-                </a> -->
                 <hr class="dropdown-divider">
                 <a href={'#'} 
                   class="dropdown-item"
@@ -326,7 +325,7 @@
                 >
                   <span class="menu-icon"><Fa icon={faDownload}/></span> Backup Profile JSON
                 </a>
-                <a href={'#'} class="dropdown-item" on:click|preventDefault={() => { showProfileMenu = false; profileFileInput.click() }}>
+                <a href={'#'} class="dropdown-item" on:click|preventDefault={() => { showProfileMenu = false; profileFileInput && profileFileInput.click() }}>
                   <span class="menu-icon"><Fa icon={faUpload}/></span> Restore Profile JSON
                 </a>
                 <a href={'#'} class="dropdown-item" on:click|preventDefault={() => { showProfileMenu = false; copySettingsAsUri() }}>

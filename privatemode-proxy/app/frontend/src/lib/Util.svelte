@@ -4,9 +4,8 @@
   import PromptNotice from './PromptNotice.svelte'
   import { addChat, getChat } from './Storage.svelte'
   import { replace } from 'svelte-spa-router'
-  // import PromptConfirm from './PromptConfirm.svelte'
   import type { ChatSettings } from './Types.svelte'
-  export const isNativeApp = window['go'] !== undefined
+  export const isNativeApp = window.go !== undefined
   export const sizeTextElements = (force?: boolean) => {
     const els = document.querySelectorAll('textarea.auto-size')
     for (let i:number = 0, l = els.length; i < l; i++) {
@@ -84,7 +83,7 @@
   export const dispatchModalEsc = ():boolean|void => {
     const stack = Array.from(document.querySelectorAll('.modal, .has-esc')).filter(s =>
       window.getComputedStyle(s).getPropertyValue('display') !== 'none'
-    )
+    ).map(s => s as HTMLElement)
     const top:HTMLElement = stack.length === 1
       ? stack[0]
       : stack.find(m1 => {

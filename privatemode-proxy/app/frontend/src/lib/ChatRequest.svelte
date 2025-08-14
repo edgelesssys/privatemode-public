@@ -18,8 +18,8 @@ export class ChatRequest {
         this.updatingMessage = ''
       }
     
-      private chat: Chat
-      updating: boolean|number = false
+      private chat!: Chat
+      updating: boolean | undefined = false
       updatingMessage: string = ''
       controller:AbortController
       providerData: Record<string, any> = {}
@@ -38,7 +38,7 @@ export class ChatRequest {
       }
 
       // Common error handler
-      async handleError (response) {
+      async handleError (response: Response) {
         let errorMessage = ''
         const responseClone = response.clone()
         try {
@@ -226,7 +226,7 @@ export class ChatRequest {
           model: chatSettings.model,
           messages: messagePayload,
           // Provide the settings by mapping the settingsMap to key/value pairs
-          ...getRequestSettingList().reduce((acc, setting) => {
+          ...getRequestSettingList().reduce((acc: Record<string, any>, setting) => {
             const key = setting.key
             let value = getChatSettingValueNullDefault(chatId, setting)
             if (key in overrides) value = overrides[key]
@@ -264,7 +264,7 @@ export class ChatRequest {
             }
             if (value !== null) acc[key] = value
             return acc
-          }, {}),
+          }, {} as Record<string, any>),
           stream: opts.streaming
         }
 
@@ -276,11 +276,10 @@ export class ChatRequest {
           // run request for given model
           await modelDetail.request(request, _this, chatResponse, opts)
         } catch (e) {
-        // console.error(e)
-          console.error(e, e.stack)
+          if (e instanceof Error) { console.error(e, e.stack) } else { console.error(e) }
           _this.updating = false
           _this.updatingMessage = ''
-          chatResponse.updateFromError(e.message)
+          chatResponse.updateFromError(e instanceof Error ? e.message : String(e))
         }
 
         return chatResponse
@@ -373,7 +372,7 @@ export class ChatRequest {
         }
 
         // Get extra counts for when the prompts are finally sent.
-        const countPadding = this.getTokenCountPadding(filtered, chat)
+        const countPadding = await this.getTokenCountPadding(filtered, chat)
 
         let threshold = chatSettings.summaryThreshold
         if (threshold < 1) threshold = Math.round(maxTokens * threshold)
@@ -512,8 +511,8 @@ export class ChatRequest {
                 return summary
               }
             } catch (e) {
-              console.error(e, e.stack)
-              if (e.message?.includes('network error') && networkRetry > 0) {
+              if (e instanceof Error) { console.error(e, e.stack) } else { console.error(e) }
+              if (e instanceof Error && e.message?.includes('network error') && networkRetry > 0) {
                 networkRetry--
                 error = true
               } else {

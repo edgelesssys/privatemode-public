@@ -35,6 +35,7 @@ type Flags struct {
 	APIEndpoint           string
 	APIKey                *string
 	PromptCacheSalt       string
+	AcceptedOCSPStatus    []string
 }
 
 // ContrastFlags holds the configuration for the Contrast deployment.

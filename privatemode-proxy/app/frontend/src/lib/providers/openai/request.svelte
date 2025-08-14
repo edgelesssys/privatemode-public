@@ -51,7 +51,7 @@ export const chatRequest = async (
           openWhenHidden: true,
           onmessage (ev) {
           // Remove updating indicator
-            chatRequest.updating = 1 // hide indicator, but still signal we're updating
+            chatRequest.updating = true // hide indicator, but still signal we're updating
             chatRequest.updatingMessage = ''
             // console.log('ev.data', ev.data)
             if (!chatResponse.hasFinished()) {
@@ -72,7 +72,8 @@ export const chatRequest = async (
             throw err
           },
           async onopen (response) {
-            if (response.ok && response.headers.get('content-type').startsWith(EventStreamContentType)) {
+            const contentType = response.headers.get('content-type')
+            if (response.ok && contentType && contentType.startsWith(EventStreamContentType)) {
             // everything's good
             } else {
             // client-side errors are usually non-retriable:
@@ -165,11 +166,11 @@ export const imageRequest = async (
         } else {
           const json = await response.json()
           // console.log('image json', json, json?.data[0])
-          const images = json?.data.map(d => d.b64_json)
+          const images = json?.data.map((d: ResponseImageDetail) => d.b64_json)
           chatResponse.updateImageFromSyncResponse(images, prompt, imageModel)
         }
   } catch (e) {
-        chatResponse.updateFromError(e)
+        chatResponse.updateFromError(typeof e === 'string' ? e : (e instanceof Error ? e.message : String(e)))
         throw e
   }
   return chatResponse

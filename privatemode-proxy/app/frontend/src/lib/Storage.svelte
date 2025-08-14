@@ -64,7 +64,7 @@
     const chatId = newChatID()
 
     profile = JSON.parse(JSON.stringify(profile || await getProfile(''))) as ChatSettings
-    const nameMap = chats.reduce((a, chat) => { a[chat.name] = chat; return a }, {})
+    const nameMap = chats.reduce((a: Record<string, Chat>, chat) => { a[chat.name] = chat; return a }, {} as Record<string, Chat>)
 
     // Add a new chat
     chats.push({
@@ -175,11 +175,11 @@
   }
   
   // Reset all setting to current profile defaults
-  export const resetChatSettings = async (chatId, resetAll:boolean = false) => {
+  export const resetChatSettings = async (chatId: number, resetAll:boolean = false) => {
     const chats = get(chatsStorage)
     const chat = chats.find((chat) => chat.id === chatId) as Chat
     const profile = await getProfile(chat.settings.profile)
-    const exclude = getExcludeFromProfile()
+    const exclude = getExcludeFromProfile() as Record<string, boolean>
     if (resetAll) {
       // Reset to base defaults first, then apply profile
       Object.entries(getChatDefaults()).forEach(([k, v]) => {
@@ -411,7 +411,7 @@
   export const copyChat = async (chatId: number) => {
     const chats = get(chatsStorage)
     const chat = chats.find((chat) => chat.id === chatId) as Chat
-    const nameMap = chats.reduce((a, chat) => { a[chat.name] = chat; return a }, {})
+    const nameMap = chats.reduce((a: Record<string, Chat>, chat) => { a[chat.name] = chat; return a }, {} as Record<string, Chat>)
     const cname = newName(chat.name, nameMap)
     const chatCopy = JSON.parse(JSON.stringify(chat))
 
@@ -445,7 +445,7 @@
     }
   }
   
-  export const setChatSettingValueByKey = (chatId: number, key: keyof ChatSettings, value) => {
+  export const setChatSettingValueByKey = (chatId: number, key: keyof ChatSettings, value: any) => {
     const setting = getChatSettingObjectByKey(key)
     if (setting) return setChatSettingValue(chatId, setting, value)
     if (!(key in chatDefaults)) throw new Error('Invalid chat setting: ' + key)
@@ -460,7 +460,7 @@
     settings[key] = cleanSettingValue(typeof d, value)
   }
 
-  export const setChatSettingValue = (chatId: number, setting: ChatSetting, value) => {
+  export const setChatSettingValue = (chatId: number, setting: ChatSetting, value: any) => {
     const chats = get(chatsStorage)
     const chat = chats.find((chat) => chat.id === chatId) as Chat
     let settings = chat.settings as any
@@ -481,18 +481,18 @@
     return value
   }
   
-  export const setGlobalSettingValueByKey = (key: keyof GlobalSettings, value) => {
+  export const setGlobalSettingValueByKey = (key: keyof GlobalSettings, value: any) => {
     return setGlobalSettingValue(getGlobalSettingObjectByKey(key), value)
   }
 
-  export const setGlobalSettingValue = (setting: GlobalSetting, value) => {
-    const store = get(globalStorage)
-    store[setting.key as any] = cleanSettingValue(setting.type, value)
+  export const setGlobalSettingValue = (setting: GlobalSetting, value: any) => {
+    const store = get(globalStorage);
+    (store as any)[setting.key] = cleanSettingValue(setting.type, value)
     globalStorage.set(store)
   }
 
   
-  export const getGlobalSettingValue = (key:keyof GlobalSetting, value):any => {
+  export const getGlobalSettingValue = (key: keyof GlobalSettings): any => {
     const store = get(globalStorage)
     return store[key]
   }

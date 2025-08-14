@@ -98,6 +98,7 @@ export type ChatSettings = {
     repetitionPenalty: number;
     holdSocket: boolean;
     isDirty?: boolean;
+    [key: string]: any; // Allow additional properties
   } & Request;
 
 export type Chat = {
@@ -161,8 +162,6 @@ export type GlobalSettings = {
     hideSummarized: boolean;
     chatSort: ChatSortOptions;
     openAICompletionEndpoint: string;
-    enablePetals: boolean;
-    pedalsEndpoint: string;
     openAiEndpoint: string;
   };
 

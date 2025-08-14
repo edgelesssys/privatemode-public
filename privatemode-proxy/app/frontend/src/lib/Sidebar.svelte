@@ -1,26 +1,19 @@
 <script lang="ts">
   import { params } from 'svelte-spa-router'
   import ChatMenuItem from './ChatMenuItem.svelte'
-  import { chatsStorage, pinMainMenu, checkStateChange, getChatSortOption, setChatSortOption, deleteAllChats } from './Storage.svelte'
-  import Fa from 'svelte-fa/src/fa.svelte'
-  import { faSquarePlus, faKey } from '@fortawesome/free-solid-svg-icons/index'
-  import ChatOptionMenu from './ChatOptionMenu.svelte'
+  import { chatsStorage, pinMainMenu, checkStateChange, getChatSortOption, deleteAllChats } from './Storage.svelte'
   import logo from '../assets/logo.svg'
   import { clickOutside } from 'svelte-use-click-outside'
   import { startNewChatWithWarning } from './Util.svelte'
-  import { chatSortOptions } from './Settings.svelte'
   import { hasActiveModels } from './Models.svelte'
-  import { writable } from 'svelte/store'
-  import info from '../assets/info.svg'
   import plus from '../assets/plus.svg'
   import trash from '../assets/trash-white.svg'
   import docs from '../assets/docs.svg'
-  import closeMenu from '../assets/close.svg'
-  import rocket from '../assets/rocket.svg'
+  import support from '../assets/support.svg'
   import { replace } from 'svelte-spa-router'
   import settings from '../assets/settings.svg'
   import security from '../assets/security.svg'
-  import { TestChatController } from './SmokeTest';
+  import { TestChatController } from './SmokeTest'
   $: sortedChats = $chatsStorage.sort(getChatSortOption().sortFn)
   $: activeChatId = $params && $params.chatId ? parseInt($params.chatId) : undefined
 
@@ -40,39 +33,36 @@
 
   $: onStateChange($checkStateChange)
 
-  const showSortMenu = false
-
   const delAllChats = () => {
     replace('/').then(() => {
       deleteAllChats()
     })
   }
 
-  let newChatButton: HTMLButtonElement | null = null;
+  let newChatButton: HTMLButtonElement | null = null
 
   TestChatController.newChat = async () => {
     if (newChatButton && !newChatButton.disabled) {
-      newChatButton.click();
+      newChatButton.click()
       // works also with 10ms, so 100 should be safe
       await new Promise(resolve => setTimeout(resolve, 100))
     } else {
-      throw new Error('New chat button is not available or disabled');
+      throw new Error('New chat button is not available or disabled')
     }
-  };
+  }
 
   TestChatController.deleteActiveChat = async () => {
-    const index = $chatsStorage.findIndex(c => c.id === activeChatId);
+    const index = $chatsStorage.findIndex(c => c.id === activeChatId)
     if (index !== -1) {
       chatsStorage.update(chats => {
-        chats.splice(index, 1);
-        return chats;
-      });
+        chats.splice(index, 1)
+        return chats
+      })
     } else {
-      throw new Error(`Chat with id ${activeChatId} not found`);
+      throw new Error(`Chat with id ${activeChatId} not found`)
     }
-  };
+  }
 
-  
 </script>
 
 <aside class="menu main-menu" class:pinned={$pinMainMenu} use:clickOutside={() => { $pinMainMenu = false }}>
@@ -108,42 +98,19 @@
         {/key}
       {/if}
     </ul>
-    <!-- <p class="menu-label">Actions</p> -->
-		 <!-- Clear button is absent on design, but I styled it anyway. Please uncomment if you think it needs to be there -->
-    <!-- <div class="level is-mobile bottom-buttons mb-1">
-      {#if sortedChats.length > 1}
-				<div class="clear-trigger w-100">
-					<button
-						class="button text-white panel-block m-0"
-						aria-haspopup="true"
-						aria-controls="dropdown-menu3"
-						on:click|preventDefault={() => delAllChats()}
-					>
-							<img
-								src={trash}
-								alt="clear icon"
-								width="14"
-								height="14"
-								class="mr-2"
-							/>
-						<span class="level-left-text">Clear conversations</span>
-					</button>
-				</div>
-      {/if}
-    </div> -->
 
     <div class="side-info-block">
-    <a href="#/" class="flex attestation-link">
-      <img src={security} alt="security shield" width="15" height="15" />
+    <div class="flex attestation-link">
+      <img src={security} alt="security shield" width="20" height="20" />
       <p>Your session is secure</p>
-    </a>
+    </div>
     {#if sortedChats.length > 1}
       <a
         href="#/"
         class="flex"
         on:click|preventDefault={() => delAllChats()}
       >
-        <img src={trash} alt="clear icon" width="15" height="15" />
+        <img src={trash} alt="clear icon" width="20" height="20" />
         <p>Clear conversations</p>
       </a>
     {/if}
@@ -151,7 +118,7 @@
       href="#/"
       class="flex"
     >
-      <img src={settings} alt="key icon" width="15" height="15" />
+      <img src={settings} alt="key icon" width="20" height="20" />
       <p>Settings</p>
     </a>
     <a
@@ -160,8 +127,17 @@
       target="_blank"
       rel="noopener noreferrer"
     >
-      <img src={docs} alt="docs icon" width="11.5" height="14" />
+      <img src={docs} alt="docs icon" width="20" height="20" />
       <p>Documentation</p>
+    </a>
+    <a
+      href="https://www.privatemode.ai/contact"
+      class="flex"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <img src={support} alt="support icon" width="20" height="20" />
+      <p>Need help?</p>
     </a>
     </div>
   </div>
@@ -174,5 +150,10 @@
 <style>
   .attestation-link p {
     color: #75FB7A !important;
+  }
+
+  .attestation-link:hover {
+    /* remove the background styling of .side-info-block */
+    background: rgb(0, 0, 0, 0) !important;
   }
 </style>

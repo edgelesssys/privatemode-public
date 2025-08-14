@@ -129,7 +129,7 @@ func (s *Server) generateShardKey(cacheSalt string, content string) (string, err
 		return "", fmt.Errorf("context too large: ~%d tokens", n)
 	}
 
-	blockSize := 16
+	blockSize := constants.ShardKeyFirstBoundaryBlocksPerChar * constants.CacheBlockSizeTokens
 
 	// No caching if n < blockSize
 	// -> return the base shard key immediately
@@ -163,10 +163,10 @@ func (s *Server) generateShardKey(cacheSalt string, content string) (string, err
 		// - step = 512 from 100k...1M -> 1758 chars
 		i += blockSize
 		switch i {
-		case 1024:
-			blockSize = 128
-		case 100_096: // 774*128+1024
-			blockSize = 512
+		case constants.ShardKeyFirstBoundaryBlocks * constants.CacheBlockSizeTokens:
+			blockSize = constants.ShardKeySecondBoundaryBlocksPerChar * constants.CacheBlockSizeTokens
+		case constants.ShardKeySecondBoundaryBlocks * constants.CacheBlockSizeTokens:
+			blockSize = constants.ShardKeyThirdBoundaryBlocksPerChar * constants.CacheBlockSizeTokens
 		}
 	}
 

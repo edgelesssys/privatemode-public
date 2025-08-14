@@ -37,7 +37,7 @@
     if (!onClose || !onClose()) closeModal()
   }
 
-  const doSubmit = (value) => {
+  const doSubmit = (value: any) => {
     onSubmit(value)
     closeModal()
   }

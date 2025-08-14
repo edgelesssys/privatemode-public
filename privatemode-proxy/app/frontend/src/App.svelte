@@ -10,7 +10,7 @@
   import Chat from './lib/Chat.svelte'
   import NewChat from './lib/NewChat.svelte'
   import ToastContainer from './lib/ToastContainer.svelte'
-  import { chatsStorage, setGlobalSettingValueByKey } from './lib/Storage.svelte'
+  import { chatsStorage } from './lib/Storage.svelte'
   import { Modals, closeModal } from 'svelte-modals'
   import { dispatchModalEsc, checkModalEsc } from './lib/Util.svelte'
   import { set as setOpenAI } from './lib/providers/openai/util.svelte'
@@ -23,11 +23,6 @@
   if (urlParams.has('key')) {
     setOpenAI({ apiKey: urlParams.get('key') as string })
   }
-  if (urlParams.has('petals')) {
-    console.log('enablePetals')
-    setGlobalSettingValueByKey('enablePetals', true)
-  }
-
   // The definition of the routes with some conditions
   const routes = {
     '/': Home,

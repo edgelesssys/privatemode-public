@@ -1,10 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte'
-  // import { getProfile } from './Profiles.svelte'
   import { cleanSettingValue, setChatSettingValue } from './Storage.svelte'
   import type { Chat, ChatSetting, ChatSettings, ControlAction, FieldControl, SettingPrompt } from './Types.svelte'
   import { autoGrowInputOnEvent, errorNotice, valueOf } from './Util.svelte'
-  // import { replace } from 'svelte-spa-router'
   import Fa from 'svelte-fa/src/fa.svelte'
   import { openModal } from 'svelte-modals'
   import PromptConfirm from './PromptConfirm.svelte'
@@ -86,7 +84,7 @@
         (typeof setting.beforeChange === 'function') && setting.beforeChange(chatId, setting, el.checked || el.value) &&
           refreshSettings()
       } catch (e) {
-        errorNotice('Unable to change:', e)
+        errorNotice('Unable to change:', e as Error)
       }
       switch (setting.type) {
         case 'boolean':
@@ -105,7 +103,7 @@
         }
       } catch (e) {
         setChatSettingValue(chatId, setting, val)
-        errorNotice('Unable to change:', e)
+        errorNotice('Unable to change:', e as Error)
       }
       dispatch('change', setting)
     }

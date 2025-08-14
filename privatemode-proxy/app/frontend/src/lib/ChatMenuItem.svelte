@@ -1,14 +1,9 @@
 <script lang="ts">
   import { replace } from 'svelte-spa-router'
   import type { Chat } from './Types.svelte'
-  import { deleteChat, pinMainMenu, saveChatStore } from './Storage.svelte'
-  import Fa from 'svelte-fa/src/fa.svelte'
-  import { faTrash, faCircleCheck, faPencil } from '@fortawesome/free-solid-svg-icons/index'
-  import { faMessage } from '@fortawesome/free-regular-svg-icons/index'
+  import { deleteChat, saveChatStore } from './Storage.svelte'
   import { onMount } from 'svelte'
   import { hasActiveModels } from './Models.svelte'
-  import trash from '../assets/trash-white.svg'
-  import editIcon from '../assets/edit.svg'
   import threeDots from '../assets/three-dots-vertical.svg'
 
   export let chat:Chat
@@ -21,20 +16,6 @@
   let isDropdownOpen:boolean = false
 
   const waitingForConfirm:any = 0
-
-  const checkDropdownPosition = (dropdownMenu: HTMLElement) => {
-    const menuExpansionList = document.querySelector('.menu-expansion-list') as HTMLElement
-    if (menuExpansionList) {
-      const dropdownRect = dropdownMenu.getBoundingClientRect()
-      const menuRect = menuExpansionList.getBoundingClientRect()
-
-      if (dropdownRect.bottom > menuRect.bottom) {
-        dropdownMenu.classList.add('dropdown-menu-up')
-      } else {
-        dropdownMenu.classList.remove('dropdown-menu-up')
-      }
-    }
-  }
 
   onMount(async () => {
     if (!chat.name) {
@@ -98,16 +79,13 @@
         const sel = window.getSelection()
         range.selectNodeContents(el)
         range.collapse(false) // false means collapse to end
-        sel.removeAllRanges()
-        sel.addRange(range)
+        if (sel) {
+          sel.removeAllRanges()
+          sel.addRange(range)
+        }
       }
     }, 0)
   }
-
-  // const share = () => {
-  //   // TODO: implement share chat
-  //   isDropdownOpen = false
-  // }
 </script>
 
 <li class="chat-menu-item-wrapper position-relative">
@@ -120,7 +98,7 @@
       </div>
 
       <div class="dropdown">
-        <button class="border-0 p-0 px-2 bg-transparent d-flex align-items-center justify-content-center" type="button" on:click|preventDefault={() => isDropdownOpen = !isDropdownOpen}>
+        <button class="border-0 p-0 px-2 bg-transparent d-flex align-items-center justify-content-center" type="button" on:click|preventDefault={() => { isDropdownOpen = !isDropdownOpen }}>
           <img src={threeDots} alt="edit" width="16" height="16" />
         </button>
         
@@ -130,11 +108,6 @@
               Rename
             </button>
           </li>
-          <!-- <li class="dropdown-item">
-            <button class="p-0 px-1" on:click|preventDefault={() => share()}>
-              Share Chat
-            </button>
-          </li> -->
           <li class="dropdown-item">
             <button class="p-0 px-1" on:click|preventDefault={() => delChat()}>
               Delete
@@ -178,11 +151,6 @@
     right: 0;
     top: 100%;
     z-index: 1000;
-  }
-
-  .dropdown-menu.dropdown-menu-up {
-    top: auto;
-    bottom: 100%;
   }
 
   .dropdown-item {

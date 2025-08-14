@@ -33,22 +33,24 @@
   export const show = (showHide:boolean = true) => {
     showChatMenu = showHide
   }
-  // export let style: string = 'is-right'
+  export let style: string = 'is-right'
 
   $: sortedChats = $chatsStorage.sort((a, b) => b.id - a.id)
 
   let showChatMenu = false
-  let chatFileInput
-  let profileFileInput
+  let chatFileInput: HTMLInputElement | null = null
+  let profileFileInput: HTMLInputElement | null = null
 
-  const importChatFromFile = (e) => {
+  const importChatFromFile = (e: Event) => {
     close()
-    const image = e.target.files[0]
-    e.target.value = null
+    const input = e.target as HTMLInputElement
+    const image = input.files?.[0]
+    input.value = ''
+    if (!image) return
     const reader = new FileReader()
     reader.readAsText(image)
     reader.onload = e => {
-      const json = (e.target || {}).result as string
+      const json = (e.target as FileReader).result as string
       addChatFromJSON(json)
     }
   }
@@ -125,12 +127,13 @@
     })
   }
 
-  const importProfileFromFile = async (e) => {
-    const image = e.target.files[0]
-    e.target.value = null
+  const importProfileFromFile = async (e: Event) => {
+    const input = e.target as HTMLInputElement
+    const image = input.files?.[0]
+    input.value = ''
     const reader = new FileReader()
     reader.onload = async (e) => {
-      const json = (e.target || {}).result as string
+      const json = (e.target as FileReader).result as string
       try {
         const profile = JSON.parse(json) as ChatSettings
         profile.profileName = await newNameForProfile(profile.profileName || '')
@@ -148,18 +151,20 @@
           onCancel: () => {}
         })
       } catch (e) {
-        errorNotice('Unable to import profile:', e)
+        errorNotice('Unable to import profile:', e instanceof Error ? e : new Error(String(e)))
       }
     }
     reader.onerror = e => {
       errorNotice('Unable to import profile:', new Error('Unknown error'))
     }
-    reader.readAsText(image)
+    if (image) {
+      reader.readAsText(image)
+    }
   }
 
 </script>
 
-<!-- <div class="dropdown {style}" class:is-active={showChatMenu} use:clickOutside={() => { showChatMenu = false }}>
+<div class="dropdown {style}" class:is-active={showChatMenu} use:clickOutside={() => { showChatMenu = false }}>
   <div class="dropdown-trigger">
     <button class="button is-ghost default-text" aria-haspopup="true"
       aria-controls="dropdown-menu3"
@@ -197,14 +202,14 @@
       <a href={'#'} class="dropdown-item" class:is-disabled={!chatId} on:click|preventDefault={() => { close(); exportChatAsJSON(chatId) }}>
         <span class="menu-icon"><Fa icon={faDownload}/></span> Backup Chat JSON
       </a>
-      <a href={'#'} class="dropdown-item" class:is-disabled={!hasActiveModels()} on:click|preventDefault={() => { if (chatId) close(); chatFileInput.click() }}>
+      <a href={'#'} class="dropdown-item" class:is-disabled={!hasActiveModels()} on:click|preventDefault={() => { if (chatId) close(); if (chatFileInput) chatFileInput.click() }}>
         <span class="menu-icon"><Fa icon={faUpload}/></span> Restore Chat JSON
       </a>
       <a href={'#'} class="dropdown-item" class:is-disabled={!chatId} on:click|preventDefault={() => { if (chatId) close(); exportAsMarkdown(chatId) }}>
         <span class="menu-icon"><Fa icon={faFileExport}/></span> Export Chat Markdown
       </a>
       <hr class="dropdown-divider">
-      <a href={'#'} class="dropdown-item" class:is-disabled={!hasActiveModels()} on:click|preventDefault={() => { if (chatId) close(); profileFileInput.click() }}>
+      <a href={'#'} class="dropdown-item" class:is-disabled={!hasActiveModels()} on:click|preventDefault={() => { if (chatId) close(); if (profileFileInput) profileFileInput.click() }}>
         <span class="menu-icon"><Fa icon={faUpload}/></span> Restore Profile JSON
       </a>
       <hr class="dropdown-divider">
@@ -228,7 +233,7 @@
       </a>
     </div>
   </div>
-</div> -->
+</div>
 
 <input style="display:none" type="file" accept=".json" on:change={(e) => importChatFromFile(e)} bind:this={chatFileInput} >
 <input style="display:none" type="file" accept=".json" on:change={async (e) => await importProfileFromFile(e)} bind:this={profileFileInput} >

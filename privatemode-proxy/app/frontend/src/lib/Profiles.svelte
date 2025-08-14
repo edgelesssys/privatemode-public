@@ -111,7 +111,7 @@ export const setSystemPrompt = (chatId: number) => {
 }
 
 // Restart currently loaded profile
-export const restartProfile = async (chatId:number, noApply:boolean = false) => {
+export const restartProfile = async (chatId:number, noApply:boolean = false): Promise<void> => {
     const settings = getChatSettings(chatId)
     if (!settings.profile && !noApply) return await applyProfile(chatId, '', true)
     // Clear current messages
@@ -134,7 +134,7 @@ export const restartProfile = async (chatId:number, noApply:boolean = false) => 
 
 export const newNameForProfile = async (name:string) => {
     const profiles = await getProfileSelect()
-    return newName(name, profiles.reduce((a, p) => { a[p.text] = p; return a }, {}))
+    return newName(name, profiles.reduce((a: Record<string, SelectOption>, p) => { a[p.text] = p; return a }, {}))
 }
 
 // Apply currently selected profile

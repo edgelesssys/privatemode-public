@@ -40,7 +40,10 @@ export default defineConfig(({ command, mode, ssrBuild }) => {
     }
   } else {
     return {
-      plugins
+      plugins,
+      server: {
+        host: '127.0.0.1' // Force Vite to use IPv4 for availability in Docker
+      }
     }
   }
 })

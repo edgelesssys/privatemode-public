@@ -1,9 +1,9 @@
 services:
-  chatgpt_web:
-    container_name: chatgpt_web
+  chatgpt-web:
+    container_name: chatgpt-web
     restart: always
     depends_on:
-      - mocked_api
+      - privatemode-proxy
     env_file:
       - .env
     ports:
@@ -14,11 +14,10 @@ services:
       context: "."
       dockerfile: Dockerfile
 
-  mocked_api:
-    container_name: mocked_api
-    build:
-        context: "."
-        dockerfile: mocked_api/Dockerfile-mockapi
+  privatemode-proxy:
+    container_name: privatemode-proxy
+    image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:latest
     restart: always
+    command: ["--apiKey", "<API-KEY-HERE>"]
     ports:
-      - 5174:5174
+      - 8080:8080

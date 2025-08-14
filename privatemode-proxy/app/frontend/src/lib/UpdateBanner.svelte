@@ -86,6 +86,10 @@
 
 {#if showUpdateBanner}
 <div class="update-banner-container update-banner">
-  <span class="is-size-7">{updateMessage} <a href={downloadLink} target="_blank" rel="noopener noreferrer">Download {latestVersion}</a></span>
+  <span class="is-size-7">
+    <p>{updateMessage}</p>
+    <a href={downloadLink} target="_blank" rel="noopener noreferrer">Download {latestVersion}</a>
+    <span class="is-size-7"> | Current version: {APP_VERSION}</span>
+  </span>
 </div>
 {/if} 

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetTotalUsageInPeriodByOrganization(t *testing.T) {
+func TestGetTotalUsageInPeriod(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
 
@@ -18,12 +18,16 @@ func TestGetTotalUsageInPeriodByOrganization(t *testing.T) {
 	org1 := uint(1)
 	org2 := uint(2)
 
+	license1 := "license1"
+	license2 := "license2"
+	license3 := "license3"
+
 	startDate := time.Date(2025, 5, 1, 0, 0, 0, 0, time.UTC)
 
 	// Fill DB with test data
 	usageEntries := []UsageEntry{
 		{
-			LicenseKey:         "license1",
+			LicenseKey:         license1,
 			OrganizationID:     &org1,
 			CachedPromptTokens: 100,
 			PromptTokens:       100,
@@ -31,7 +35,7 @@ func TestGetTotalUsageInPeriodByOrganization(t *testing.T) {
 			Timestamp:          startDate.Add(time.Hour),
 		},
 		{
-			LicenseKey:         "license2",
+			LicenseKey:         license2,
 			OrganizationID:     &org1,
 			CachedPromptTokens: 100,
 			PromptTokens:       100,
@@ -39,7 +43,7 @@ func TestGetTotalUsageInPeriodByOrganization(t *testing.T) {
 			Timestamp:          startDate.Add(time.Hour * 2),
 		},
 		{
-			LicenseKey:         "license3",
+			LicenseKey:         license1,
 			OrganizationID:     &org1,
 			CachedPromptTokens: 100,
 			PromptTokens:       100,
@@ -47,7 +51,7 @@ func TestGetTotalUsageInPeriodByOrganization(t *testing.T) {
 			Timestamp:          startDate.Add(time.Hour * 3),
 		},
 		{
-			LicenseKey:         "license4",
+			LicenseKey:         license3,
 			OrganizationID:     &org2,
 			CachedPromptTokens: 50,
 			PromptTokens:       50,
@@ -58,20 +62,24 @@ func TestGetTotalUsageInPeriodByOrganization(t *testing.T) {
 
 	require.NoError(db.InsertUsageEntries(t.Context(), usageEntries))
 
-	totalUsage, err := db.GetTotalUsageInPeriodByOrganization(t.Context(), startDate, startDate.Add(time.Hour*24))
+	totalUsage, err := db.GetTotalUsageInPeriod(t.Context(), startDate, startDate.Add(time.Hour*24))
 	assert.NoError(err)
-	assert.Len(totalUsage, 2)
+	assert.Len(totalUsage, 3)
 
 	for _, entry := range totalUsage {
-		switch entry.OrganizationID {
-		case &org1:
-			assert.Equal(int64(300), entry.CachedPromptTokens, "Cached prompt tokens for org1 should be 300")
-			assert.Equal(int64(300), entry.PromptTokens, "Prompt tokens for org1 should be 300")
-			assert.Equal(int64(300), entry.CompletionTokens, "Completion tokens for org1 should be 300")
-		case &org2:
-			assert.Equal(int64(50), entry.CachedPromptTokens, "Cached prompt tokens for org2 should be 50")
-			assert.Equal(int64(50), entry.PromptTokens, "Prompt tokens for org2 should be 50")
-			assert.Equal(int64(50), entry.CompletionTokens, "Completion tokens for org2 should be 50")
+		switch entry.LicenseKey {
+		case license1:
+			assert.Equal(int64(200), entry.CachedPromptTokens, "Cached prompt tokens for license1 should be 200")
+			assert.Equal(int64(200), entry.PromptTokens, "Prompt tokens for license1 should be 200")
+			assert.Equal(int64(200), entry.CompletionTokens, "Completion tokens for license1 should be 200")
+		case license2:
+			assert.Equal(int64(100), entry.CachedPromptTokens, "Cached prompt tokens for license2 should be 100")
+			assert.Equal(int64(100), entry.PromptTokens, "Prompt tokens for license2 should be 100")
+			assert.Equal(int64(100), entry.CompletionTokens, "Completion tokens for license2 should be 100")
+		case license3:
+			assert.Equal(int64(50), entry.CachedPromptTokens, "Cached prompt tokens for license3 should be 50")
+			assert.Equal(int64(50), entry.PromptTokens, "Prompt tokens for license3 should be 50")
+			assert.Equal(int64(50), entry.CompletionTokens, "Completion tokens for license3 should be 50")
 		}
 	}
 }

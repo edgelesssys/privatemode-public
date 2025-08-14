@@ -26,6 +26,7 @@ var (
 	apiEndpoint           string
 	port                  string
 	manifestPath          string
+	acceptedOCSPStatus    []string
 	tlsCertPath           string
 	tlsKeyPath            string
 	insecureAPIConnection bool
@@ -60,7 +61,9 @@ func New() *cobra.Command {
 	cmd.Flags().StringVar(&port, "port", "8080", "The port on which the proxy listens for incoming API requests.")
 	cmd.Flags().StringVar(&workspace, "workspace", ".", fmt.Sprintf("The path into which the binary writes files. This includes the manifest log data in the '%s' subdirectory.", constants.ManifestDir))
 	cmd.Flags().StringVar(&manifestPath, "manifestPath", "", "The path for the manifest file. If not provided, the manifest will be read from the remote source.")
-
+	cmd.Flags().StringSliceVar(&acceptedOCSPStatus, "acceptedOCSPStatus", []string{"GOOD"},
+		"The OCSP status codes that the proxy accepts. If the OCSP status is not in this list, the request will be rejected. Can be a list of GOOD, UNKNOWN, REVOKED.")
+	must(cmd.Flags().MarkHidden("acceptedOCSPStatus"))
 	// prompt caching
 	cmd.Flags().BoolVar(&sharedPromptCache, "sharedPromptCache", false, "If set, caching of prompts between all users of the proxy is enabled. This reduces response times for long conversations or common documents.")
 	cmd.Flags().StringVar(&promptCacheSalt, "promptCacheSalt", "", "The salt used to isolate prompt caches. If empty (default), the same random salt is used for all requests, enabling sharing the cache between all users of the same proxy. Requires 'sharedPromptCache' to be enabled!")
@@ -132,6 +135,7 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 		APIEndpoint:           apiEndpoint,
 		APIKey:                apiKey,
 		PromptCacheSalt:       cacheSalt,
+		AcceptedOCSPStatus:    acceptedOCSPStatus,
 	}
 	manager, err := setup.SecretManager(cmd.Context(), flags, log)
 	if err != nil {

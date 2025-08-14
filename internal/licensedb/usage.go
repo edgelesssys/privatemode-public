@@ -69,7 +69,6 @@ func (l *LicenseDB) GetUsageEntriesByLicenseKeyInPeriod(
 }
 
 // GetTotalUsageInPeriod returns the total usage for all license keys between the given dates.
-// TODO: remove in favor of [LicenseDB.GetTotalUsageInPeriodByOrganization] once all legacy keys are expired.
 func (l *LicenseDB) GetTotalUsageInPeriod(ctx context.Context, startDate, endDate time.Time) ([]UsageEntry, error) {
 	var entries []UsageEntry
 
@@ -87,34 +86,6 @@ func (l *LicenseDB) GetTotalUsageInPeriod(ctx context.Context, startDate, endDat
 		startDate, endDate,
 	).Scan(&entries)
 
-	if result.Error != nil {
-		return nil, fmt.Errorf("querying total usage in period: %w", result.Error)
-	}
-
-	// Set the timestamp to the end date for all entries
-	for i := range entries {
-		entries[i].Timestamp = endDate
-	}
-
-	return entries, nil
-}
-
-// GetTotalUsageInPeriodByOrganization returns the total usage for all organizations between the given dates.
-func (l *LicenseDB) GetTotalUsageInPeriodByOrganization(ctx context.Context, startDate, endDate time.Time) ([]UsageEntry, error) {
-	var entries []UsageEntry
-
-	query := fmt.Sprintf(`
-		SELECT
-			organization_id,
-			SUM(prompt_tokens) as prompt_tokens,
-			SUM(completion_tokens) as completion_tokens,
-			SUM(cached_prompt_tokens) as cached_prompt_tokens
-		FROM %s
-		WHERE timestamp BETWEEN ? AND ?
-		AND organization_id IS NOT NULL
-		GROUP BY organization_id`, TokenUsageTable)
-
-	result := l.db.WithContext(ctx).Raw(query, startDate, endDate).Scan(&entries)
 	if result.Error != nil {
 		return nil, fmt.Errorf("querying total usage in period: %w", result.Error)
 	}
@@ -175,6 +146,17 @@ type UsageEntry struct {
 	Timestamp          time.Time     `gorm:"column:timestamp;type:TIMESTAMP;default:CURRENT_TIMESTAMP"`
 	OrganizationID     *uint         `gorm:"column:organization_id"` // TODO(daniel-weisse): make not nullable, after migration
 	Organization       *Organization `gorm:"foreignKey:OrganizationID"`
+}
+
+// Add sums up the usage of two entries and returns the result.
+// Metadata (LicenseKey, Timestamp, etc.) of the first entry is preserved.
+func (e UsageEntry) Add(other UsageEntry) UsageEntry {
+	e.ID = 0
+	e.PromptTokens += other.PromptTokens
+	e.CachedPromptTokens += other.CachedPromptTokens
+	e.CompletionTokens += other.CompletionTokens
+	e.FileSizeMB += other.FileSizeMB
+	return e
 }
 
 // TableName overrides the table name.

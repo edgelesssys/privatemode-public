@@ -1,16 +1,14 @@
 <script context="module" lang="ts">
-  import { apiKeyStorage, getApiBase, globalStorage } from './Storage.svelte'
+  import { apiKeyStorage, getApiBase } from './Storage.svelte'
   import { get } from 'svelte/store'
   import type { ModelDetail, Model, SelectOption, Chat } from './Types.svelte'
   import { mergeProfileFields } from './Profiles.svelte'
   import { getChatSettingObjectByKey } from './Settings.svelte'
   import { valueOf } from './Util.svelte'
   import { chatModels as openAiModels, imageModels as openAiImageModels, fetchRemoteModels, fallbackModelDetail } from './providers/openai/models.svelte'
-  import { chatModels as petalsModels } from './providers/petals/models.svelte'
 
 export const supportedChatModels : Record<string, ModelDetail> = {
-    ...openAiModels,
-    ...petalsModels
+    ...openAiModels
 }
 
 export const supportedImageModels : Record<string, ModelDetail> = {
@@ -158,8 +156,7 @@ export const countTokens = (model: Model, value: string): number => {
 }
 
 export const hasActiveModels = (): boolean => {
-    const globalSettings = get(globalStorage) || {}
-    return !!get(apiKeyStorage) || !!globalSettings.enablePetals
+    return !!get(apiKeyStorage)
 }
 
 const sortModelsAlphabetically = (a: SelectOption, b: SelectOption): number => {

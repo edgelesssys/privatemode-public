@@ -96,14 +96,8 @@ func (l *LicenseDB) UpdateLicenseEntry(ctx context.Context, entry UpdateLicenseE
 	if entry.Name != nil {
 		updates["name"] = *entry.Name
 	}
-	if entry.Organization != nil {
-		updates["organization"] = *entry.Organization
-	}
 	if entry.ExpirationDate != nil {
 		updates["expiration_date"] = *entry.ExpirationDate
-	}
-	if entry.UsageLimit != nil {
-		updates["usage_limit"] = *entry.UsageLimit
 	}
 	if entry.PromptTokensPerMinute != nil {
 		updates["prompt_tokens_per_minute"] = *entry.PromptTokensPerMinute
@@ -113,12 +107,6 @@ func (l *LicenseDB) UpdateLicenseEntry(ctx context.Context, entry UpdateLicenseE
 	}
 	if entry.RequestsPerMinute != nil {
 		updates["requests_per_minute"] = *entry.RequestsPerMinute
-	}
-	if entry.StripeCustomerID != nil {
-		updates["stripe_customer_id"] = *entry.StripeCustomerID
-	}
-	if entry.Type != nil {
-		updates["type"] = *entry.Type
 	}
 	if entry.Comment != nil {
 		updates["comment"] = *entry.Comment
@@ -142,15 +130,15 @@ func (l *LicenseDB) UpdateLicenseEntry(ctx context.Context, entry UpdateLicenseE
 type LicenseEntry struct {
 	Name                      string       `json:"name" gorm:"column:name;type:varchar(256)"` // used to separate multiple keys in the user portal.
 	LicenseKey                string       `json:"license_key" gorm:"column:license_key;primaryKey;type:varchar(36)"`
-	OrganizationName          string       `json:"organization" gorm:"column:organization;type:varchar(256);not null"` // TODO(daniel-weisse): maybe remove once we moved to v2
 	IssueDate                 time.Time    `json:"issue_date" gorm:"column:issue_date;type:DATE;not null"`
-	ExpirationDate            time.Time    `json:"expiration_date" gorm:"column:expiration_date;type:DATE;not null"`                                           // TODO(daniel-weisse): remove once we moved to v2
-	UsageLimit                int64        `json:"usage_limit" gorm:"column:usage_limit;type:BIGINT;not null"`                                                 // TODO(daniel-weisse): remove once we moved to v2
-	PromptTokensPerMinute     int64        `json:"prompt_tokens_per_minute" gorm:"column:prompt_tokens_per_minute;type:BIGINT;not null;default:20000"`         // TODO(daniel-weisse): remove once we moved to v2
-	CompletionTokensPerMinute int64        `json:"completion_tokens_per_minute" gorm:"column:completion_tokens_per_minute;type:BIGINT;not null;default:10000"` // TODO(daniel-weisse): remove once we moved to v2
-	RequestsPerMinute         int64        `json:"requests_per_minute" gorm:"column:requests_per_minute;type:BIGINT;not null;default:20"`                      // TODO(daniel-weisse): remove once we moved to v2
-	StripeCustomerID          *string      `json:"stripe_customer_id" gorm:"column:stripe_customer_id;type:varchar(255)"`                                      // TODO(daniel-weisse): remove once we moved to v2
-	Type                      string       `json:"type" gorm:"column:type;type:varchar(256);not null;default:'api'"`                                           // TODO(daniel-weisse): remove once we moved to v2
+	ExpirationDate            time.Time    `json:"expiration_date" gorm:"column:expiration_date;type:DATE;not null"` // TODO(daniel-weisse): consider removing or letting users set it themselves
+	PromptTokensPerMinute     *int64       `json:"prompt_tokens_per_minute,omitempty" gorm:"column:prompt_tokens_per_minute;type:BIGINT"`
+	CompletionTokensPerMinute *int64       `json:"completion_tokens_per_minute,omitempty" gorm:"column:completion_tokens_per_minute;type:BIGINT"`
+	FileSizeMBPerMinute       *int64       `json:"file_size_mb_per_minute" gorm:"column:file_size_mb_per_minute;type:BIGINT"`
+	RequestsPerMinute         *int64       `json:"requests_per_minute,omitempty" gorm:"column:requests_per_minute;type:BIGINT"`
+	MonthlyPromptTokens       *int64       `json:"monthly_prompt_tokens" gorm:"column:monthly_prompt_tokens;type:BIGINT"`
+	MonthlyCompletionTokens   *int64       `json:"monthly_completion_tokens" gorm:"column:monthly_completion_tokens;type:BIGINT"`
+	MonthlyFileSizeMB         *int64       `json:"monthly_file_size_mb" gorm:"column:monthly_file_size_mb;type:BIGINT"`
 	OrganizationID            uint         `json:"organization_id" gorm:"column:organization_id;index"`
 	Organization              Organization `json:"organization_v2" gorm:"foreignKey:OrganizationID"` // JSON field is suffixed with v2, since organization shouldn't be taken to remain compatible with v1
 	Comment                   string       `json:"comment" gorm:"column:comment;type:TEXT"`
@@ -163,35 +151,47 @@ func (LicenseEntry) TableName() string {
 
 // TableHeader returns the column names of the table as a tab-separated string.
 func (e LicenseEntry) TableHeader() string {
-	return "Key\tName\tOrg\tOrgID\tIssued\tExpires\tLimit\tPrompt/Min\tCompl/Min\tReq/Min\tStripeID\tType\tComment"
+	return "Key\tName\tOrgID\tIssued\tExpires\tPrompt/Min\tCompl/Min\tReq/Min\tStripeID\tComment"
 }
 
 // String returns the entry as a tab-separated string.
 func (e LicenseEntry) String() string {
-	stripeCustomerID := ""
-	if e.StripeCustomerID != nil {
-		stripeCustomerID = *e.StripeCustomerID
+	var promptTokensPerMinute, completionTokensPerMinute, requestsPerMinute int64
+	if e.PromptTokensPerMinute != nil {
+		promptTokensPerMinute = *e.PromptTokensPerMinute
 	}
-	return fmt.Sprintf("%s\t%s\t%s\t%d\t%s\t%s\t%d\t%d\t%d\t%d\t%s\t%s\t%s",
-		e.LicenseKey, e.Name, e.OrganizationName, e.OrganizationID,
+	if e.CompletionTokensPerMinute != nil {
+		completionTokensPerMinute = *e.CompletionTokensPerMinute
+	}
+	if e.RequestsPerMinute != nil {
+		requestsPerMinute = *e.RequestsPerMinute
+	}
+	return fmt.Sprintf("%s\t%s\t%d\t%s\t%s\t%d\t%d\t%d\t%s",
+		e.LicenseKey, e.Name, e.OrganizationID,
 		e.IssueDate.Format("02.01.2006"), e.ExpirationDate.Format("02.01.2006"),
-		e.UsageLimit, e.PromptTokensPerMinute, e.CompletionTokensPerMinute,
-		e.RequestsPerMinute, stripeCustomerID, e.Type, e.Comment,
+		promptTokensPerMinute, completionTokensPerMinute,
+		requestsPerMinute, e.Comment,
 	)
 }
 
 // Slice returns the entry as a slice of strings.
 func (e LicenseEntry) Slice() []string {
-	stripeCustomerID := ""
-	if e.StripeCustomerID != nil {
-		stripeCustomerID = *e.StripeCustomerID
+	var promptTokensPerMinute, completionTokensPerMinute, requestsPerMinute string
+	if e.PromptTokensPerMinute != nil {
+		promptTokensPerMinute = strconv.FormatInt(*e.PromptTokensPerMinute, 10)
+	}
+	if e.CompletionTokensPerMinute != nil {
+		completionTokensPerMinute = strconv.FormatInt(*e.CompletionTokensPerMinute, 10)
+	}
+	if e.RequestsPerMinute != nil {
+		requestsPerMinute = strconv.FormatInt(*e.RequestsPerMinute, 10)
 	}
 	return []string{
-		e.LicenseKey, e.Name, e.OrganizationName, strconv.FormatUint(uint64(e.OrganizationID), 10),
+		e.LicenseKey, e.Name, strconv.FormatUint(uint64(e.OrganizationID), 10),
 		e.IssueDate.Format("02.01.2006"), e.ExpirationDate.Format("02.01.2006"),
-		strconv.FormatInt(e.UsageLimit, 10), strconv.FormatInt(e.PromptTokensPerMinute, 10),
-		strconv.FormatInt(e.CompletionTokensPerMinute, 10), strconv.FormatInt(e.RequestsPerMinute, 10),
-		stripeCustomerID, e.Type, e.Comment,
+		promptTokensPerMinute,
+		completionTokensPerMinute, requestsPerMinute,
+		e.Comment,
 	}
 }
 
@@ -200,14 +200,10 @@ func (e LicenseEntry) Slice() []string {
 type UpdateLicenseEntry struct {
 	LicenseKey                string     `json:"license_key" gorm:"column:license_key;primaryKey"`
 	Name                      *string    `json:"name,omitempty" gorm:"column:name"`
-	Organization              *string    `json:"organization,omitempty" gorm:"column:organization"`
 	ExpirationDate            *time.Time `json:"expiration_date,omitempty" gorm:"column:expiration_date"`
-	UsageLimit                *int64     `json:"usage_limit,omitempty" gorm:"column:usage_limit"`
 	PromptTokensPerMinute     *int64     `json:"prompt_tokens_per_minute,omitempty" gorm:"column:prompt_tokens_per_minute"`
 	CompletionTokensPerMinute *int64     `json:"completion_tokens_per_minute,omitempty" gorm:"column:completion_tokens_per_minute"`
 	RequestsPerMinute         *int64     `json:"requests_per_minute,omitempty" gorm:"column:requests_per_minute"`
-	StripeCustomerID          *string    `json:"stripe_customer_id,omitempty" gorm:"column:stripe_customer_id"`
-	Type                      *string    `json:"type,omitempty" gorm:"column:type"`
 	Comment                   *string    `json:"comment,omitempty" gorm:"column:comment"`
 	OrganizationID            *uint      `json:"organization_id,omitempty" gorm:"column:organization_id"`
 }

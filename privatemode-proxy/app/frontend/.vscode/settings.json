@@ -1,5 +1,10 @@
 {
-    "eslint.validate": ["json", "javascript", "svelte", "typescript"],
+    "eslint.validate": [
+        "json",
+        "javascript",
+        "svelte",
+        "typescript"
+    ],
     "[typescript]": {
         "editor.defaultFormatter": "dbaeumer.vscode-eslint"
     },
