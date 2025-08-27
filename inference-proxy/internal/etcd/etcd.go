@@ -182,7 +182,7 @@ func (e *Etcd) close() {
 func getEndpointsFromHosts(hosts []string) []string {
 	var endpoints []string
 	for _, host := range hosts {
-		endpoints = append(endpoints, net.JoinHostPort(host, constants.EtcdClientPort))
+		endpoints = append(endpoints, net.JoinHostPort(host, constants.EtcdClientPort()))
 	}
 	return endpoints
 }

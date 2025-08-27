@@ -7,8 +7,6 @@ if [[ -z ${DISK_SIZE_GB} ]] || [[ -z ${MODEL_SOURCE} ]] || [[ -z ${COMMIT_HASH} 
   exit 1
 fi
 
-# Get number of ready nodes in the cluster. Relevant for scheduling replicas of Longhorn disks
-num_nodes=$(kubectl get nodes --no-headers | awk '$2 == "Ready" {print $1}' | wc -l)
 script_dir="$(dirname "$(readlink -f "$0")")"
 
 # Generate a 6 character random lower-case string to use as the snapshot and pvc name
@@ -85,7 +83,7 @@ done
 
 set -x
 
-sed -e "s|NUM_NODES|${num_nodes}|g" \
+sed \
   -e "s|VERITY_HASH|${verity_hash}|g" \
   -e "s|DISK_SIZE_GB|${DISK_SIZE_GB}|g" \
   -e "s|MODEL_SOURCE|${MODEL_SOURCE}|g" \

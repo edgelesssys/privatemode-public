@@ -97,7 +97,9 @@ const defaults:ChatSettings = {
   profileName: '',
   profileDescription: '',
   continuousChat: 'fifo',
-  summaryThreshold: 3000,
+  // 5k tokens below the actual model limit to give some buffer so we don't run
+  // into an API error in the app.
+  summaryThreshold: 65000,
   summarySize: 1000,
   summaryExtend: 0,
   summaryTemperature: 0.1,
@@ -293,7 +295,8 @@ const summarySettings: ChatSetting[] = [
         options: [
           { value: '', text: 'OFF - Chat errors when token buffer full' },
           { value: 'fifo', text: 'FIFO - First message in is first out' },
-          { value: 'summary', text: 'Summary - Summarize past messages' }
+          { value: 'summary', text: 'Summary - Summarize past messages' },
+          { value: 'warn-only', text: 'Warn Only - Warn when out of token space' }
         ],
         afterChange: (chatId, setting) => true // refresh settings
       },

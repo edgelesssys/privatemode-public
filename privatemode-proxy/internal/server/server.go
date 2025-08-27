@@ -23,20 +23,35 @@ import (
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
+	"github.com/edgelesssys/continuum/internal/gpl/ocspheader"
 	"github.com/edgelesssys/continuum/internal/gpl/openai"
 	"github.com/edgelesssys/continuum/internal/gpl/process"
+	"github.com/edgelesssys/continuum/internal/gpl/secretmanager"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
 
 // Server implements the HTTP server for the API gateway.
 type Server struct {
-	apiKey           *string
-	defaultCacheSalt string // if no salt is set, a random salt will be used
-	forwarder        apiForwarder
-	sm               secretManager
-	log              *slog.Logger
-	isApp            bool
+	apiKey                       *string
+	defaultCacheSalt             string // if no salt is set, a random salt will be used
+	forwarder                    apiForwarder
+	sm                           secretManager
+	log                          *slog.Logger
+	isApp                        bool
+	nvidiaOCSPAllowUnknown       bool
+	nvidiaOCSPRevokedGracePeriod time.Duration
+}
+
+// Opts are the options for creating a new [Server].
+type Opts struct {
+	APIEndpoint                  string
+	APIKey                       *string
+	ProtocolScheme               forwarder.ProtocolScheme
+	PromptCacheSalt              string
+	IsApp                        bool
+	NvidiaOCSPAllowUnknown       bool
+	NvidiaOCSPRevokedGracePeriod time.Duration
 }
 
 type apiForwarder interface {
@@ -48,20 +63,19 @@ type apiForwarder interface {
 }
 
 // New sets up a new Server.
-func New(
-	client *http.Client, apiEndpoint string, protocolScheme forwarder.ProtocolScheme, sm secretManager,
-	log *slog.Logger, apiKey *string, promptCacheSalt string, isApp bool,
-) *Server {
+func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Server {
 	log.Info("version", slog.String("version", constants.Version()))
-	fwd := forwarder.NewWithClient(client, apiEndpoint, protocolScheme, log)
+	fwd := forwarder.NewWithClient(client, opts.APIEndpoint, opts.ProtocolScheme, log)
 
 	return &Server{
-		apiKey:           apiKey,
-		defaultCacheSalt: promptCacheSalt,
-		forwarder:        fwd,
-		sm:               sm,
-		log:              log,
-		isApp:            isApp,
+		apiKey:                       opts.APIKey,
+		defaultCacheSalt:             opts.PromptCacheSalt,
+		forwarder:                    fwd,
+		sm:                           sm,
+		log:                          log,
+		isApp:                        opts.IsApp,
+		nvidiaOCSPAllowUnknown:       opts.NvidiaOCSPAllowUnknown,
+		nvidiaOCSPRevokedGracePeriod: opts.NvidiaOCSPRevokedGracePeriod,
 	}
 }
 
@@ -234,11 +248,15 @@ func (s *Server) inferenceHandler(
 	requestMutator func(*RenewableRequestCipher) forwarder.RequestMutator, responseMutator func(*RenewableRequestCipher) forwarder.ResponseMutator,
 ) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		s.setRequestHeaders(r)
+		s.setStaticRequestHeaders(r)
 
-		rc, err := NewRenewableRequestCipher(s.sm, r)
+		rc, secret, err := NewRenewableRequestCipher(s.sm, r)
 		if err != nil {
 			forwarder.HTTPError(w, r, http.StatusInternalServerError, "creating request cipher: %s", err)
+			return
+		}
+		if err := s.setDynamicHeaders(r, *secret); err != nil {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "setting dynamic headers: %s", err)
 			return
 		}
 
@@ -250,8 +268,14 @@ func (s *Server) inferenceHandler(
 			}
 
 			// Force a new rc for the next attempt
-			if err := rc.ResetSecret(r); err != nil {
+			secret, err := rc.ResetSecret(r)
+			if err != nil {
 				s.log.Error("resetting request cipher", "error", err)
+				return false, 0
+			}
+
+			if err := s.setDynamicHeaders(r, *secret); err != nil {
+				forwarder.HTTPError(w, r, http.StatusInternalServerError, "setting dynamic headers: %s", err)
 				return false, 0
 			}
 
@@ -330,7 +354,7 @@ func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) noEncryptionHandler(w http.ResponseWriter, r *http.Request) {
-	s.setRequestHeaders(r)
+	s.setStaticRequestHeaders(r)
 
 	s.forwarder.ForwardWithRetry(
 		w, r,
@@ -349,12 +373,13 @@ func (s *Server) getClientHeader() string {
 	return constants.PrivatemodeClientProxy
 }
 
-func (s *Server) setRequestHeaders(r *http.Request) {
+// setStaticRequestHeaders sets static headers for the request. These are the header values
+// that are guaranteed to be immutable over a request's lifetime.
+func (s *Server) setStaticRequestHeaders(r *http.Request) {
 	if s.apiKey != nil {
 		r.Header.Set("Authorization", fmt.Sprintf("%s %s", auth.Bearer, *s.apiKey))
 	}
-	requestID := "proxy_" + uuid.New().String()
-	r.Header.Set(constants.RequestIDHeader, requestID)
+	r.Header.Set(constants.RequestIDHeader, "proxy_"+uuid.New().String())
 	r.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
 	r.Header.Set(constants.PrivatemodeOSHeader, runtime.GOOS)
 	r.Header.Set(constants.PrivatemodeArchitectureHeader, runtime.GOARCH)
@@ -368,4 +393,54 @@ func allowWails(resp http.Header, req http.Header) error {
 		resp.Set("Access-Control-Allow-Origin", origin)
 	}
 	return nil
+}
+
+// setDynamicHeaders sets the dynamic headers for the request.
+func (s *Server) setDynamicHeaders(r *http.Request, secret secretmanager.Secret) error {
+	ocspAllowedStatuses := []ocspheader.AllowStatus{ocspheader.AllowStatusGood}
+	if s.nvidiaOCSPRevokedGracePeriod > 0 {
+		// In theory, we could always add the `revoked` status, since it will render
+		// ineffective if the grace period is 0, but it might look strange to the user
+		// to find a `revoked` status in the policy header, so we only add it if the
+		// grace period is set.
+		ocspAllowedStatuses = append(ocspAllowedStatuses, ocspheader.AllowStatusRevoked)
+	}
+	if s.nvidiaOCSPAllowUnknown {
+		ocspAllowedStatuses = append(ocspAllowedStatuses, ocspheader.AllowStatusUnknown)
+	}
+
+	if len(secret.Data) < 32 {
+		return fmt.Errorf("secret data too short: got %d bytes, need at least 32", len(secret.Data))
+	}
+	ocspPolicyHeader, ocspMACHeader, err := getOcspHeaders(
+		ocspAllowedStatuses, time.Now().Add(-s.nvidiaOCSPRevokedGracePeriod),
+		[32]byte(secret.Data[:32]),
+	)
+	if err != nil {
+		return fmt.Errorf("generating OCSP headers: %w", err)
+	}
+
+	r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyHeader, ocspPolicyHeader)
+	r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyMACHeader, ocspMACHeader)
+	r.Header.Set(constants.PrivatemodeSecretIDHeader, secret.ID)
+	return nil
+}
+
+// getOcspHeaders generates the OCSP headers based on the allowed statuses and revocation time.
+// It returns the policy header and the MAC header.
+func getOcspHeaders(allowedStatuses []ocspheader.AllowStatus, revocNbf time.Time, secret [32]byte) (
+	ocspPolicyHeader string, ocspMACHeader string, err error,
+) {
+	header := ocspheader.NewHeader(allowedStatuses, revocNbf)
+	policyHeader, err := header.Marshal()
+	if err != nil {
+		return "", "", fmt.Errorf("marshaling OCSP header: %w", err)
+	}
+
+	policyMACHeader, err := header.MarshalMACHeader(secret)
+	if err != nil {
+		return "", "", fmt.Errorf("marshaling OCSP MAC header: %w", err)
+	}
+
+	return policyHeader, policyMACHeader, nil
 }

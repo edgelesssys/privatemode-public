@@ -9,6 +9,18 @@ This is the source code of the Privatemode UI. It's a modified version of [ChatG
 If you want to iterate on changes with hot reloading, you can run a dev server for the frontend:
 
 ```bash
+mkdir -p wailsjs/go/main
+
+echo "export function GetConfiguredAPIKey () { return '' }
+" > wailsjs/go/main/ConfigurationService.js
+
+echo "
+export function OnSmokeTestCompleted(arg1, arg2) {}
+export function SmokeTestingActivated() { return false }
+" > wailsjs/go/main/SmokeTestService.js
+```
+
+```bash
 nix develop
 npm i
 npm run dev

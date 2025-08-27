@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
@@ -19,17 +20,18 @@ import (
 )
 
 var (
-	logLevel              string
-	apiKeyStr             string
-	workspace             string
-	secretEndpoint        string
-	apiEndpoint           string
-	port                  string
-	manifestPath          string
-	acceptedOCSPStatus    []string
-	tlsCertPath           string
-	tlsKeyPath            string
-	insecureAPIConnection bool
+	logLevel                     string
+	apiKeyStr                    string
+	workspace                    string
+	secretEndpoint               string
+	apiEndpoint                  string
+	port                         string
+	manifestPath                 string
+	nvidiaOCSPAllowUnknown       bool
+	nvidiaOCSPRevokedGracePeriod int
+	tlsCertPath                  string
+	tlsKeyPath                   string
+	insecureAPIConnection        bool
 
 	// sharedPromptCache is used to share the cache between users.
 	// When true, all users of the proxy will share the same cache.
@@ -55,20 +57,32 @@ func New() *cobra.Command {
 
 	cmd.Flags().StringVarP(&logLevel, logging.Flag, logging.FlagShorthand, logging.DefaultFlagValue, logging.FlagInfo)
 
-	cmd.Flags().StringVar(&apiKeyStr, "apiKey", "", "The API key for the Privatemode API. If no key is set, the proxy will not authenticate with the API.")
+	cmd.Flags().StringVar(&apiKeyStr, "apiKey", "",
+		"The API key for the Privatemode API. If no key is set, the proxy will not authenticate with the API.")
 	cmd.Flags().StringVar(&secretEndpoint, "ssEndpoint", constants.SecretServiceEndpoint, "The endpoint of the secret service.")
 	cmd.Flags().StringVar(&apiEndpoint, "apiEndpoint", constants.APIEndpoint, "The endpoint for the Privatemode API")
-	cmd.Flags().StringVar(&port, "port", "8080", "The port on which the proxy listens for incoming API requests.")
-	cmd.Flags().StringVar(&workspace, "workspace", ".", fmt.Sprintf("The path into which the binary writes files. This includes the manifest log data in the '%s' subdirectory.", constants.ManifestDir))
-	cmd.Flags().StringVar(&manifestPath, "manifestPath", "", "The path for the manifest file. If not provided, the manifest will be read from the remote source.")
-	cmd.Flags().StringSliceVar(&acceptedOCSPStatus, "acceptedOCSPStatus", []string{"GOOD"},
-		"The OCSP status codes that the proxy accepts. If the OCSP status is not in this list, the request will be rejected. Can be a list of GOOD, UNKNOWN, REVOKED.")
-	must(cmd.Flags().MarkHidden("acceptedOCSPStatus"))
+	cmd.Flags().StringVar(&port, "port", "8080",
+		"The port on which the proxy listens for incoming API requests.")
+	cmd.Flags().StringVar(&workspace, "workspace", ".",
+		fmt.Sprintf("The path into which the binary writes files. This includes the manifest log data in the '%s' subdirectory.", constants.ManifestDir))
+	cmd.Flags().StringVar(&manifestPath, "manifestPath", "",
+		"The path for the manifest file. If not provided, the manifest will be read from the remote source.")
+	cmd.Flags().BoolVar(&nvidiaOCSPAllowUnknown, "nvidiaOCSPAllowUnknown", false,
+		"Whether it should be tolerated if the NVIDIA OCSP service cannot be reached.")
+	must(cmd.Flags().MarkHidden("nvidiaOCSPAllowUnknown"))
+	cmd.Flags().IntVar(&nvidiaOCSPRevokedGracePeriod, "nvidiaOCSPRevokedGracePeriod", 0,
+		"The grace period (in hours) for which to accept NVIDIA attestation certificates that are revoked according to the OCSP service. "+
+			"Supplying a value of 0 disables the grace period, meaning that revoked certificates are rejected immediately.")
+	must(cmd.Flags().MarkHidden("nvidiaOCSPRevokedGracePeriod"))
 	// prompt caching
-	cmd.Flags().BoolVar(&sharedPromptCache, "sharedPromptCache", false, "If set, caching of prompts between all users of the proxy is enabled. This reduces response times for long conversations or common documents.")
-	cmd.Flags().StringVar(&promptCacheSalt, "promptCacheSalt", "", "The salt used to isolate prompt caches. If empty (default), the same random salt is used for all requests, enabling sharing the cache between all users of the same proxy. Requires 'sharedPromptCache' to be enabled!")
+	cmd.Flags().BoolVar(&sharedPromptCache, "sharedPromptCache", false,
+		"If set, caching of prompts between all users of the proxy is enabled. This reduces response times for long conversations or common documents.")
+	cmd.Flags().StringVar(&promptCacheSalt, "promptCacheSalt", "",
+		"The salt used to isolate prompt caches. If empty (default), the same random salt is used for all requests, "+
+			"enabling sharing the cache between all users of the same proxy. Requires 'sharedPromptCache' to be enabled!")
 
-	cmd.Flags().BoolVar(&insecureAPIConnection, "insecureAPIConnection", false, "If set, the server will accept self-signed certificates from the API endpoint. Only intended for testing.")
+	cmd.Flags().BoolVar(&insecureAPIConnection, "insecureAPIConnection", false,
+		"If set, the server will accept self-signed certificates from the API endpoint. Only intended for testing.")
 	must(cmd.Flags().MarkHidden("insecureAPIConnection"))
 
 	// TLS
@@ -122,6 +136,10 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 		log.Warn("No API key provided. The proxy will not authenticate with the API.")
 	}
 
+	if !nvidiaOCSPAllowUnknown && (nvidiaOCSPRevokedGracePeriod > 0) {
+		return errors.New("unknown OCSP statuses are disallowed, but revoked statuses are allowed. This is likely to be an erroneous configuration")
+	}
+
 	log.Info("Starting proxy")
 	flags := setup.Flags{
 		Workspace:      workspace,
@@ -131,18 +149,19 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 			CoordinatorEndpoint: coordinatorEndpoint,
 			CDNBaseURL:          cdnBaseURL,
 		},
-		InsecureAPIConnection: insecureAPIConnection,
-		APIEndpoint:           apiEndpoint,
-		APIKey:                apiKey,
-		PromptCacheSalt:       cacheSalt,
-		AcceptedOCSPStatus:    acceptedOCSPStatus,
+		InsecureAPIConnection:        insecureAPIConnection,
+		APIEndpoint:                  apiEndpoint,
+		APIKey:                       apiKey,
+		PromptCacheSalt:              cacheSalt,
+		NvidiaOCSPAllowUnknown:       nvidiaOCSPAllowUnknown,
+		NvidiaOCSPRevokedGracePeriod: time.Duration(nvidiaOCSPRevokedGracePeriod) * time.Hour,
 	}
 	manager, err := setup.SecretManager(cmd.Context(), flags, log)
 	if err != nil {
 		return fmt.Errorf("setting up secret manager configuration: %w", err)
 	}
 	const isApp = false
-	server := setup.NewServer(flags, manager, log, isApp)
+
 	lis, err := net.Listen("tcp", net.JoinHostPort("", port))
 	if err != nil {
 		return fmt.Errorf("listening on port %q: %w", port, err)
@@ -166,7 +185,9 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err = server.Serve(cmd.Context(), lis, tlsConfig)
+		err = setup.
+			NewServer(flags, isApp, manager, log).
+			Serve(cmd.Context(), lis, tlsConfig)
 	}()
 
 	wg.Wait()

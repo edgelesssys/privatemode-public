@@ -2,6 +2,7 @@ package licensedb
 
 import (
 	"database/sql"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -90,7 +91,7 @@ func setupTestDB(t *testing.T) *LicenseDB {
 	})
 	require.NoError(err)
 
-	ldb, err := NewFromSQLDatabase(DialectSQLite, db)
+	ldb, err := NewFromSQLDatabase(DialectSQLite, db, slog.Default())
 	require.NoError(err)
 	require.NoError(ldb.AutoMigrate(t.Context()))
 

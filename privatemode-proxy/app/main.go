@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
@@ -56,8 +57,9 @@ func main() {
 			InsecureAPIConnection: false,
 			// In the app we always want prompt caching and use a random salt that lives as long as the app.
 			// This may be overridden in the config file to enable cache sharing between users.
-			PromptCacheSalt:    cacheSalt,
-			AcceptedOCSPStatus: []string{"GOOD"}, // TODO(msanft): make this configurable
+			PromptCacheSalt:              cacheSalt,
+			NvidiaOCSPAllowUnknown:       true,           // TODO(msanft): make this configurable
+			NvidiaOCSPRevokedGracePeriod: 24 * time.Hour, // TODO(msanft): make this configurable
 		},
 		runtimeConfig: jsonConfig{}, //nolint:exhaustruct
 	}, log)

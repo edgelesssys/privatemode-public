@@ -1,6 +1,8 @@
 {
   lib,
+  bash,
   buildContinuumGoModule,
+  buildEnv,
   coreutils,
   cryptsetup,
   dockerTools,
@@ -54,8 +56,13 @@ rec {
     tag = lib.continuumVersion;
     maxLayers = 8;
 
-    contents = builtins.attrValues {
-      inherit bin;
+    contents = buildEnv {
+      name = "image-root";
+      paths = [
+        bin
+        bash
+        util-linux
+      ];
     };
 
     config = {

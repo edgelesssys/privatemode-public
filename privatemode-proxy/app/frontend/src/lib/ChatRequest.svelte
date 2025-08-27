@@ -554,6 +554,9 @@ export class ChatRequest {
             didSummary: true
           },
           overrides)
+        } else if (reductionMode === 'warn-only') {
+          addError(chatId, 'Your chat exceeds the context window size of the current model. Please continue in a new chat.')
+          return continueRequest()
         } else {
           /***************
            * Unknown mode.

@@ -354,6 +354,11 @@
         streaming: chatSettings.stream,
         fillMessage,
         onMessageChange: (messages) => {
+          // Hide loading bubble when we get first token from streaming
+          if (chatRequest.updating && messages.length > 0 && messages[0]?.content) {
+            chatRequest.updating = false
+            chatRequest.updatingMessage = ''
+          }
           if (doScroll) scrollToBottom(true)
           didScroll = !!messages[0]?.content
         }

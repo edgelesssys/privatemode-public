@@ -28,9 +28,9 @@ func OpenAIEchoHandler(secrets map[string][]byte, log *slog.Logger) http.Handler
 
 func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		requestMutator, responseMutator := getConnectionMutators(r, secrets, log)
+		requestMutator, responseMutator := getConnectionMutators(secrets, log)
 		if err := requestMutator(r); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "Forwarding request: %s", err.Error())
 			return
 		}
 
@@ -54,7 +54,7 @@ func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.Resp
 		lastMsgContent := request.Messages[len(request.Messages)-1].Content
 		var responseMsg string
 		if lastMsgContent != nil {
-			responseMsg = fmt.Sprintf("Echo: %s", *lastMsgContent)
+			responseMsg = fmt.Sprintf("Echo: %s", lastMsgContent)
 		} else {
 			responseMsg = "Echo: nil"
 		}
@@ -64,7 +64,7 @@ func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.Resp
 				Index: 0,
 				Message: openai.Message{
 					Role:      "assistant",
-					Content:   &responseMsg,
+					Content:   responseMsg,
 					ToolCalls: make([]any, len(request.Tools)),
 				},
 				FinishReason: "stop",
@@ -167,22 +167,14 @@ func GetEncryptionFunctions(secrets map[string][]byte) (encryptFunc forwarder.Mu
 	return encrypt, decrypt
 }
 
-func getConnectionMutators(r *http.Request, secrets map[string][]byte, log *slog.Logger) (requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator) {
+func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator) {
 	encrypt, decrypt := GetEncryptionFunctions(secrets)
 
-	clientVersion := r.Header.Get(constants.PrivatemodeVersionHeader)
-	if clientVersion == "v1.15.0" {
-		// certain old version for testing CacheSaltInjector
-		requestMutator = forwarder.RequestMutatorChain(
-			forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainCompletionsRequestFields, log),
-			openai.CacheSaltInjector(openai.RandomPromptCacheSalt, log),
-		)
-	} else {
-		requestMutator = forwarder.RequestMutatorChain(
-			forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainCompletionsRequestFields, log),
-			openai.CacheSaltValidator(log),
-		)
-	}
+	requestMutator = forwarder.RequestMutatorChain(
+		forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainCompletionsRequestFields, log),
+		openai.CacheSaltValidator(log),
+		openai.SecureImageURLValidator(log),
+	)
 
 	responseMutator = forwarder.WithFullJSONResponseMutation(encrypt, openai.PlainCompletionsResponseFields, false)
 	return

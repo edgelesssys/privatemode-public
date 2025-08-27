@@ -11,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"log/slog"
+	"net"
 	"path/filepath"
 	"testing"
 	"time"
@@ -42,6 +43,20 @@ func TestEtcd(t *testing.T) {
 	caCrt := filepath.Join(tmpDir, "pki", "ca.crt")
 	require.NoError(fs.MkdirAll(filepath.Join(tmpDir, "pki"), 0o700))
 	createEtcdCertificates(require, serverCrt, serverKey, caCrt, fs)
+
+	freeClientPortListener, err := net.Listen("tcp", "0.0.0.0:")
+	require.NoError(err)
+	freePeerPortListener, err := net.Listen("tcp", "0.0.0.0:")
+	require.NoError(err)
+
+	_, freeClientPort, err := net.SplitHostPort(freeClientPortListener.Addr().String())
+	require.NoError(err)
+	freeClientPortListener.Close()
+	t.Setenv("CONTINUUM_ETCD_CLIENT_PORT", freeClientPort)
+	_, freePeerPort, err := net.SplitHostPort(freePeerPortListener.Addr().String())
+	require.NoError(err)
+	freePeerPortListener.Close()
+	t.Setenv("CONTINUUM_ETCD_PEER_PORT", freePeerPort)
 
 	etcdServer, done, err := New(t.Context(), Bootstrap,
 		"test-namespace", serverCrt, serverKey, caCrt, fs, log)

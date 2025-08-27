@@ -10,6 +10,7 @@ lerna-debug.log*
 testfiles
 
 node_modules/
+/wailsjs/
 *.local
 package.json.md5
 

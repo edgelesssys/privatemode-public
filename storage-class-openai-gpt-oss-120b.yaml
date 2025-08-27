@@ -1,0 +1,26 @@
+allowVolumeExpansion: false
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"allowVolumeExpansion":false,"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"annotations":{"privatemode.edgeless.systems/commit_hash":"4c0fa49a43c232dc2a1cae033ae1fb7961cf8220","privatemode.edgeless.systems/disk_size_gb":"67","privatemode.edgeless.systems/excluded_files":"original,metal","privatemode.edgeless.systems/model_source":"https://huggingface.co/openai/gpt-oss-120b","privatemode.edgeless.systems/root_hash":"b02861dbe09cabdbce128b77bea9a14c6a40525fbc326d5d79a19790dfc8b250"},"name":"openai-gpt-oss-120b"},"parameters":{"backingImage":"verity-disk-prlyrl","backingImageChecksum":"34ff94e29b533674faa8c2c126002086c555a325e2273e57d3ca00b54ee4094b1285b24fb440496f45949fcf88c78f86c63f669b13a33527855f83197bce89c1","dataEngine":"v1","dataLocality":"strict-local","numberOfReplicas":"1","staleReplicaTimeout":"2880"},"provisioner":"driver.longhorn.io","reclaimPolicy":"Delete","volumeBindingMode":"WaitForFirstConsumer"}
+    privatemode.edgeless.systems/commit_hash: 4c0fa49a43c232dc2a1cae033ae1fb7961cf8220
+    privatemode.edgeless.systems/disk_size_gb: "67"
+    privatemode.edgeless.systems/excluded_files: original,metal
+    privatemode.edgeless.systems/model_source: https://huggingface.co/openai/gpt-oss-120b
+    privatemode.edgeless.systems/root_hash: b02861dbe09cabdbce128b77bea9a14c6a40525fbc326d5d79a19790dfc8b250
+  creationTimestamp: "2025-08-25T08:47:19Z"
+  name: openai-gpt-oss-120b
+  resourceVersion: "4947444759"
+  uid: d3974aa3-4b14-4fea-a5ae-afba25717163
+parameters:
+  backingImage: verity-disk-prlyrl
+  backingImageChecksum: 34ff94e29b533674faa8c2c126002086c555a325e2273e57d3ca00b54ee4094b1285b24fb440496f45949fcf88c78f86c63f669b13a33527855f83197bce89c1
+  dataEngine: v1
+  dataLocality: strict-local
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer

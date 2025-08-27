@@ -16,6 +16,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
 
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -226,9 +228,9 @@ type Choice struct {
 
 // Message is a message in an OpenAI chat completion call.
 type Message struct {
-	Role      string  `json:"role"`
-	Content   *string `json:"content"`
-	ToolCalls []any   `json:"tool_calls,omitempty"`
+	Role      string `json:"role"`
+	Content   any    `json:"content"`
+	ToolCalls []any  `json:"tool_calls,omitempty"`
 }
 
 // Usage contains the token usage of an OpenAI chat completion call.
@@ -291,4 +293,53 @@ func CacheSaltValidator(log *slog.Logger) forwarder.RequestMutator {
 	}
 
 	return forwarder.WithFullRequestMutation(validateSalt, log)
+}
+
+// SecureImageURLValidator creates a [forwarder.RequestMutator] that
+// ensures no non-HTTPS image URLs are used in the request.
+func SecureImageURLValidator(log *slog.Logger) forwarder.RequestMutator {
+	validateImageURLs := func(httpBody string) (mutatedRequest string, err error) {
+		// Skip empty body, e.g., for OPTIONS requests
+		if len(httpBody) == 0 {
+			return httpBody, nil
+		}
+
+		messages := gjson.Get(httpBody, "messages")
+		if !messages.Exists() {
+			// If we don't have the 'messages' field, we're in the legacy completions endpoint,
+			// which doesn't support image URLs at all.
+			return httpBody, nil
+		}
+
+		var retErr error
+		messages.ForEach(func(_, message gjson.Result) bool {
+			content := message.Get("content")
+			if !content.IsArray() {
+				return true
+			}
+			content.ForEach(func(_, part gjson.Result) bool {
+				if part.Get("type").String() == "input_image" {
+					imageURL, err := url.Parse(part.Get("image_url").String())
+					if err != nil {
+						retErr = fmt.Errorf("parsing image URL: %w", err)
+						return false
+					}
+
+					if !strings.EqualFold(imageURL.Scheme, "https") && !strings.EqualFold(imageURL.Scheme, "data") {
+						retErr = fmt.Errorf("non-HTTPS and non-data image URL %q is insecure", imageURL.String())
+						return false
+					}
+				}
+				return true
+			})
+			return retErr == nil // If we didn't find a non-HTTPS URL yet (or ran into another error), keep iterating
+		})
+		if retErr != nil {
+			return "", fmt.Errorf("validating image URLs: %w", retErr)
+		}
+
+		return httpBody, nil
+	}
+
+	return forwarder.WithFullRequestMutation(validateImageURLs, log)
 }

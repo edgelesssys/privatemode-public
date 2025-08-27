@@ -144,7 +144,7 @@ func (a *App) initialize(ctx context.Context) error {
 	}
 
 	const isApp = true
-	a.server = setup.NewServer(a.config.Flags, manager, a.log, isApp)
+	a.server = setup.NewServer(a.config.Flags, isApp, manager, a.log)
 	close(a.initialized) // Signal that initialization is complete
 	return nil
 }

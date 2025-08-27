@@ -24,8 +24,9 @@ type Adapter struct {
 	forwarder     mutatingForwarder
 	workloadTasks []string
 
-	saltValidator forwarder.RequestMutator
-	saltInjector  forwarder.RequestMutator
+	saltValidator           forwarder.RequestMutator
+	saltInjector            forwarder.RequestMutator
+	secureImageURLValidator forwarder.RequestMutator
 
 	log *slog.Logger
 }
@@ -37,12 +38,13 @@ func New(workloadTasks []string, cipher *cipher.Cipher, forwarder mutatingForwar
 	}
 
 	return &Adapter{
-		cipher:        cipher,
-		forwarder:     forwarder,
-		workloadTasks: workloadTasks,
-		saltInjector:  openai.CacheSaltInjector(openai.RandomPromptCacheSalt, log),
-		saltValidator: openai.CacheSaltValidator(log),
-		log:           log,
+		cipher:                  cipher,
+		forwarder:               forwarder,
+		workloadTasks:           workloadTasks,
+		saltInjector:            openai.CacheSaltInjector(openai.RandomPromptCacheSalt, log),
+		saltValidator:           openai.CacheSaltValidator(log),
+		secureImageURLValidator: openai.SecureImageURLValidator(log),
+		log:                     log,
 	}, nil
 }
 
@@ -206,6 +208,7 @@ func (t *Adapter) forwardChatCompletionsRequest() func(http.ResponseWriter, *htt
 			forwarder.RequestMutatorChain(
 				forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, t.log),
 				saltMutator,
+				t.secureImageURLValidator,
 			),
 			forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainCompletionsResponseFields, false),
 			forwarder.NoHeaderMutation,

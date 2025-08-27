@@ -20,6 +20,7 @@ import (
 
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
+	"github.com/edgelesssys/continuum/internal/gpl/ocspheader"
 	"github.com/edgelesssys/continuum/internal/gpl/openai"
 	"github.com/edgelesssys/continuum/internal/gpl/openai/stub"
 	"github.com/edgelesssys/continuum/internal/gpl/secretmanager"
@@ -37,6 +38,7 @@ func TestPromptEncryption(t *testing.T) {
 	testCases := map[string]struct {
 		clientVersion    string
 		proxyAPIKey      *string
+		prompt           any
 		requestCacheSalt string
 		proxyCacheSalt   string
 		expectStatusCode int
@@ -47,19 +49,23 @@ func TestPromptEncryption(t *testing.T) {
 	}{
 		"with privatemode-proxy API key": {
 			proxyAPIKey:      &apiKey,
+			prompt:           "Hello",
 			expectStatusCode: http.StatusOK,
 		},
 		"without any API key": {
 			expectStatusCode: http.StatusUnauthorized,
+			prompt:           "Hello",
 			expectedBody:     makeErrorMsg("no auth found: expected Authorization header with 'Bearer <auth>'"),
 		},
 		"with wrong API key": {
 			expectStatusCode: http.StatusUnauthorized,
+			prompt:           "Hello",
 			expectedBody:     makeErrorMsg("invalid API key: invalid API key"),
 			proxyAPIKey:      toPtr("wrongkey"),
 		},
 		"without privatemode-proxy API key but request contains Auth header": {
 			expectStatusCode: http.StatusOK,
+			prompt:           "Hello",
 			requestMutator: func(req *http.Request) {
 				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", testAPIKey))
 			},
@@ -67,42 +73,37 @@ func TestPromptEncryption(t *testing.T) {
 		"without cache salt key": {
 			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
+			prompt:           "Hello",
 		},
 		"with valid request cache salt": {
 			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
+			prompt:           "Hello",
 			requestCacheSalt: "r1234567890123456789012345678912",
 		},
 		"with invalid request cache salt": {
 			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusInternalServerError, // TODO(dr75): fix http status codes in forwarders
+			prompt:           "Hello",
 			requestCacheSalt: "too short",
 		},
 		"with custom proxy cache salt": {
 			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
+			prompt:           "Hello",
 			proxyCacheSalt:   "p1234567890123456789012345678912",
 		},
 		"with custom proxy and request cache salt": {
 			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
+			prompt:           "Hello",
 			proxyCacheSalt:   "p1234567890123456789012345678912",
 			requestCacheSalt: "r1234567890123456789012345678912",
-		},
-		"compat: with cache salt key old client": {
-			proxyAPIKey:      &apiKey,
-			expectStatusCode: http.StatusOK,
-			clientVersion:    "v1.15.0",
-		},
-		"compat: too short cache salt key old client": {
-			proxyAPIKey:      &apiKey,
-			expectStatusCode: http.StatusInternalServerError, // TODO(dr75): fix http status codes in forwarders
-			clientVersion:    "v1.15.0",
-			requestCacheSalt: "too short",
 		},
 		"ACAO header is set for wails origin": {
 			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
+			prompt:           "Hello",
 			requestMutator: func(req *http.Request) {
 				req.Header.Set("Origin", "wails://wails.localhost")
 			},
@@ -113,6 +114,7 @@ func TestPromptEncryption(t *testing.T) {
 		"ACAO header is unset for unknown origin": {
 			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
+			prompt:           "Hello",
 			requestMutator: func(req *http.Request) {
 				req.Header.Set("Origin", "http://localhost")
 			},
@@ -123,6 +125,7 @@ func TestPromptEncryption(t *testing.T) {
 		"with app client": {
 			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
+			prompt:           "Hello",
 			isApp:            true,
 		},
 	}
@@ -170,8 +173,7 @@ func TestPromptEncryption(t *testing.T) {
 			sut := newTestServer(tc.proxyAPIKey, secret, stubAuthOpenAIServer.Listener.Addr().String(), tc.proxyCacheSalt, tc.isApp)
 
 			// Act
-			prompt := "Hello"
-			req := prepareRequest(t.Context(), require, &prompt, nil, tc.requestCacheSalt)
+			req := prepareRequest(t.Context(), require, &tc.prompt, nil, tc.requestCacheSalt)
 			if tc.requestMutator != nil {
 				tc.requestMutator(req)
 			}
@@ -185,7 +187,7 @@ func TestPromptEncryption(t *testing.T) {
 				var res openai.ChatResponse
 				require.NoError(json.NewDecoder(resp.Body).Decode(&res))
 				require.Len(res.Choices, 1)
-				assert.Equal("Echo: Hello", *res.Choices[0].Message.Content)
+				assert.Equal(fmt.Sprintf("Echo: %v", tc.prompt), res.Choices[0].Message.Content)
 
 				// cache salt should never be empty
 				cacheSaltHeader := resp.Header().Get("Request-Cache-Salt")
@@ -262,12 +264,14 @@ func TestInvalidSecret(t *testing.T) {
 	defer stubAuthOpenAIServer.Close()
 
 	sut := Server{
-		apiKey:           &apiKey,
-		defaultCacheSalt: "",
-		sm:               &stubSecretManager{secrets: []secretmanager.Secret{secretInvalid, secretValid}},
-		forwarder:        forwarder.New("tcp", stubAuthOpenAIServer.Listener.Addr().String(), slog.Default()),
-		log:              slog.Default(),
-		isApp:            false,
+		apiKey:                       &apiKey,
+		defaultCacheSalt:             "",
+		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secretInvalid, secretValid}},
+		forwarder:                    forwarder.New("tcp", stubAuthOpenAIServer.Listener.Addr().String(), slog.Default()),
+		log:                          slog.Default(),
+		isApp:                        false,
+		nvidiaOCSPAllowUnknown:       true,
+		nvidiaOCSPRevokedGracePeriod: 24 * time.Hour,
 	}
 
 	prompt := "Hello"
@@ -281,7 +285,7 @@ func TestInvalidSecret(t *testing.T) {
 	var res openai.ChatResponse
 	require.NoError(json.NewDecoder(resp.Body).Decode(&res))
 	require.Len(res.Choices, 1)
-	assert.Equal("Echo: Hello", *res.Choices[0].Message.Content)
+	assert.Equal("Echo: Hello", res.Choices[0].Message.Content)
 
 	// the test runs with automatically generated cache salt, so the header is set
 	// but no shard key is generated as caching is disabled
@@ -383,7 +387,7 @@ func TestTools(t *testing.T) {
 
 			// "Echo: <prompt>"
 			msgContent := res.Choices[0].Message.Content
-			assert.Equal(tc.expectedContent, *msgContent)
+			assert.Equal(tc.expectedContent, msgContent)
 
 			// Check the tool calls
 			toolCalls := res.Choices[0].Message.ToolCalls
@@ -580,15 +584,91 @@ func TestShardKeyGeneration(t *testing.T) {
 	}
 }
 
+func TestGetOCSPHeaders(t *testing.T) {
+	testCases := map[string]struct {
+		OCSPAllowedStatuses []ocspheader.AllowStatus
+		revocNbf            time.Time
+		secret              [32]byte
+		wantErr             bool
+	}{
+		"ok": {
+			OCSPAllowedStatuses: []ocspheader.AllowStatus{
+				ocspheader.AllowStatusGood, ocspheader.AllowStatusRevoked,
+			},
+			revocNbf: time.Now().Add(24 * time.Hour),
+			secret:   [32]byte{0x42},
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+
+			policyHeader, macHeader, err := getOcspHeaders(tc.OCSPAllowedStatuses, tc.revocNbf, tc.secret)
+			if tc.wantErr {
+				require.Error(err)
+			} else {
+				require.NoError(err)
+				assert.NotEmpty(policyHeader)
+				assert.NotEmpty(macHeader)
+			}
+		})
+	}
+}
+
+func TestSetDynamicHeaders(t *testing.T) {
+	testCases := map[string]struct {
+		secret  secretmanager.Secret
+		wantErr bool
+	}{
+		"ok": {
+			secret: secretmanager.Secret{
+				ID:   "123",
+				Data: bytes.Repeat([]byte{0x42}, 32),
+			},
+		},
+		"too short secret": {
+			secret: secretmanager.Secret{
+				ID:   "123",
+				Data: bytes.Repeat([]byte{0x42}, 8),
+			},
+			wantErr: true,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+
+			server := newTestServer(nil, tc.secret, "", "", false)
+
+			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			err := server.setDynamicHeaders(req, tc.secret)
+			if tc.wantErr {
+				require.Error(err)
+			} else {
+				require.NoError(err)
+				assert.Equal(req.Header.Get(constants.PrivatemodeSecretIDHeader), tc.secret.ID)
+				assert.NotEmpty(req.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyHeader))
+				assert.NotEmpty(req.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyMACHeader))
+			}
+		})
+	}
+}
+
 // newTestServer returns a stub server for testing.
 func newTestServer(apiKey *string, secret secretmanager.Secret, openAIServerAddr string, defaultCacheSalt string, isApp bool) *Server {
 	return &Server{
-		apiKey:           apiKey,
-		defaultCacheSalt: defaultCacheSalt,
-		sm:               &stubSecretManager{secrets: []secretmanager.Secret{secret}},
-		forwarder:        forwarder.New("tcp", openAIServerAddr, slog.Default()),
-		log:              slog.Default(),
-		isApp:            isApp,
+		apiKey:                       apiKey,
+		defaultCacheSalt:             defaultCacheSalt,
+		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secret}},
+		forwarder:                    forwarder.New("tcp", openAIServerAddr, slog.Default()),
+		log:                          slog.Default(),
+		isApp:                        isApp,
+		nvidiaOCSPAllowUnknown:       true,
+		nvidiaOCSPRevokedGracePeriod: time.Hour * 24,
 	}
 }
 
@@ -627,7 +707,7 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 	}))
 }
 
-func prepareRequest(ctx context.Context, require *require.Assertions, prompt *string, tools []any, cacheSalt string) *http.Request {
+func prepareRequest(ctx context.Context, require *require.Assertions, content any, tools []any, cacheSalt string) *http.Request {
 	baseURL := "http://192.0.2.1:8080" // doesn't matter
 	url := fmt.Sprintf("%s/v1/chat/completions", baseURL)
 
@@ -638,7 +718,7 @@ func prepareRequest(ctx context.Context, require *require.Assertions, prompt *st
 		Messages: []openai.Message{
 			{
 				Role:    "user",
-				Content: prompt,
+				Content: content,
 			},
 		},
 		Tools:     tools,

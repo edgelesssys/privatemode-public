@@ -53,10 +53,10 @@ const (
 
 	// EtcdInferenceSecretPrefix is the prefix for inference secrets stored in etcd.
 	EtcdInferenceSecretPrefix = "inference-secrets/"
-	// EtcdClientPort is the port on which the etcd server listens for client connections.
-	EtcdClientPort = "2379"
-	// EtcdPeerPort is the port on which the etcd server listens for peer connections.
-	EtcdPeerPort = "2380"
+	// etcdClientPort is the port on which the etcd server listens for client connections.
+	etcdClientPort = "2379"
+	// etcdPeerPort is the port on which the etcd server listens for peer connections.
+	etcdPeerPort = "2380"
 	// ManifestDir is the directory where the manifest log is stored.
 	ManifestDir = "manifests"
 
@@ -86,6 +86,10 @@ const (
 	PrivatemodeNvidiaOCSPPolicyHeader = "Privatemode-NVIDIA-OCSP-Policy"
 	// PrivatemodeNvidiaOCSPPolicyMACHeader is the header used to verify the integrity of the Privatemode-NVIDIA-OCSP-Policy header.
 	PrivatemodeNvidiaOCSPPolicyMACHeader = "Privatemode-NVIDIA-OCSP-Policy-MAC"
+	// PrivatemodeSecretIDHeader is the header used to pass the inference secret ID to the inference proxy from the client.
+	// Even though this information is already available in the request body if used, this serves as an additional hint for the proxy
+	// to facilitate OCSP checks, which rely on the inference secret ID.
+	PrivatemodeSecretIDHeader = "Privatemode-Secret-ID"
 
 	// SecretServiceEndpoint is the endpoint of the secret service.
 	SecretServiceEndpoint = "secret.privatemode.ai:443"
@@ -128,3 +132,21 @@ func ContinuumBaseDir() string {
 
 // EtcdBasePath is the base path for etcd related files.
 func EtcdBasePath() string { return filepath.Join(ContinuumBaseDir(), "etcd") }
+
+// EtcdClientPort is the port on which the etcd server listens for client connections.
+// Returns the value of the CONTINUUM_ETCD_CLIENT_PORT env variable or [etcdClientPort] if not set.
+func EtcdClientPort() string {
+	if port := os.Getenv("CONTINUUM_ETCD_CLIENT_PORT"); port != "" {
+		return port
+	}
+	return etcdClientPort
+}
+
+// EtcdPeerPort is the port on which the etcd server listens for peer connections.
+// Returns the value of the CONTINUUM_ETCD_PEER_PORT env variable or [etcdPeerPort] if not set.
+func EtcdPeerPort() string {
+	if port := os.Getenv("CONTINUUM_ETCD_PEER_PORT"); port != "" {
+		return port
+	}
+	return etcdPeerPort
+}

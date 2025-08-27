@@ -61,19 +61,19 @@ func baseEtcdConfig(knownPeers map[string]etcdPeer, k8sNamespace, hostname, serv
 	}
 	cfg.InitialCluster = initialCluster
 
-	listenClientURL, err := url.Parse(fmt.Sprintf("https://%s", net.JoinHostPort("0.0.0.0", constants.EtcdClientPort)))
+	listenClientURL, err := url.Parse(fmt.Sprintf("https://%s", net.JoinHostPort("0.0.0.0", constants.EtcdClientPort())))
 	if err != nil {
 		return nil, err
 	}
-	advertiseClientURL, err := url.Parse(fmt.Sprintf("https://%s.%s", hostname, net.JoinHostPort(serviceName, constants.EtcdClientPort)))
+	advertiseClientURL, err := url.Parse(fmt.Sprintf("https://%s.%s", hostname, net.JoinHostPort(serviceName, constants.EtcdClientPort())))
 	if err != nil {
 		return nil, err
 	}
-	listenPeerURL, err := url.Parse(fmt.Sprintf("https://%s", net.JoinHostPort("0.0.0.0", constants.EtcdPeerPort)))
+	listenPeerURL, err := url.Parse(fmt.Sprintf("https://%s", net.JoinHostPort("0.0.0.0", constants.EtcdPeerPort())))
 	if err != nil {
 		return nil, err
 	}
-	advertisePeerURL, err := url.Parse(fmt.Sprintf("https://%s.%s", hostname, net.JoinHostPort(serviceName, constants.EtcdPeerPort)))
+	advertisePeerURL, err := url.Parse(fmt.Sprintf("https://%s.%s", hostname, net.JoinHostPort(serviceName, constants.EtcdPeerPort())))
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func initialCluster(knownPeers map[string]etcdPeer, k8sNamespace, podName string
 		knownPeers[fmt.Sprintf("secret-service-%d", i)] = etcdPeer{
 			url: fmt.Sprintf(
 				"https://secret-service-%d.%s",
-				i, net.JoinHostPort(headlessServiceName, constants.EtcdPeerPort)),
+				i, net.JoinHostPort(headlessServiceName, constants.EtcdPeerPort())),
 			id: 0, // Unknown ID
 		}
 	}

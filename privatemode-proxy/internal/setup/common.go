@@ -28,14 +28,15 @@ const (
 // Flags are flags that are common to all setups.
 type Flags struct {
 	ContrastFlags
-	Workspace             string
-	ManifestPath          string
-	SecretEndpoint        string
-	InsecureAPIConnection bool
-	APIEndpoint           string
-	APIKey                *string
-	PromptCacheSalt       string
-	AcceptedOCSPStatus    []string
+	Workspace                    string
+	ManifestPath                 string
+	SecretEndpoint               string
+	InsecureAPIConnection        bool
+	APIEndpoint                  string
+	APIKey                       *string
+	PromptCacheSalt              string
+	NvidiaOCSPAllowUnknown       bool
+	NvidiaOCSPRevokedGracePeriod time.Duration
 }
 
 // ContrastFlags holds the configuration for the Contrast deployment.
@@ -45,7 +46,7 @@ type ContrastFlags struct {
 }
 
 // NewServer creates a new server instance.
-func NewServer(flags Flags, manager *secretmanager.SecretManager, log *slog.Logger, isApp bool) *server.Server {
+func NewServer(flags Flags, isApp bool, manager *secretmanager.SecretManager, log *slog.Logger) *server.Server {
 	client := http.DefaultClient
 	if flags.InsecureAPIConnection {
 		client = &http.Client{
@@ -56,7 +57,17 @@ func NewServer(flags Flags, manager *secretmanager.SecretManager, log *slog.Logg
 		}
 	}
 
-	return server.New(client, flags.APIEndpoint, forwarder.SchemeHTTPS, manager, log, flags.APIKey, flags.PromptCacheSalt, isApp)
+	opts := server.Opts{
+		APIEndpoint:                  flags.APIEndpoint,
+		APIKey:                       flags.APIKey,
+		ProtocolScheme:               forwarder.SchemeHTTPS,
+		PromptCacheSalt:              flags.PromptCacheSalt,
+		IsApp:                        isApp,
+		NvidiaOCSPAllowUnknown:       flags.NvidiaOCSPAllowUnknown,
+		NvidiaOCSPRevokedGracePeriod: flags.NvidiaOCSPRevokedGracePeriod,
+	}
+
+	return server.New(client, manager, opts, log)
 }
 
 func fetchBodyFromURL(ctx context.Context, sourceURL string) ([]byte, error) {

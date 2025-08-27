@@ -187,7 +187,7 @@ const profiles:Record<string, ChatSettings> = {
       profileName: 'ChatGPT - The AI language model',
       profileDescription: 'The AI language model that always reminds you that it\'s an AI language model.',
       useSystemPrompt: true,
-      continuousChat: 'fifo', // '' is off
+      continuousChat: 'warn-only', // '' is off
       autoStartSession: false,
       systemPrompt: 'You, Llama, run as part of the AI service Privatemode AI, which was developed by Edgeless Systems. You run inside a secure environment based on confidential computing (AMD SEV-SNP, Nvidia H100). The environment cannot be accessed from the outside and user data remains encrypted in memory during processing. Even Edgeless Systems cannot access the data.',
       summaryPrompt: ''

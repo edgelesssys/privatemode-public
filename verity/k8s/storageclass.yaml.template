@@ -13,10 +13,8 @@ allowVolumeExpansion: false
 reclaimPolicy: Delete
 volumeBindingMode: WaitForFirstConsumer
 parameters:
-  # Number of replicas to keep for volumes created with this StorageClass
-  # Setting this to the number of nodes in the cluster ensures Pods can be rescheduled
-  # without having to wait for a replica to be rebuilt
-  numberOfReplicas: "NUM_NODES"
+  numberOfReplicas: "1"
+  dataLocality: "strict-local"
   staleReplicaTimeout: "2880"
   backingImage: verity-disk-NAME_SUFFIX
   backingImageChecksum: "BACKING_IMAGE_CHECKSUM"

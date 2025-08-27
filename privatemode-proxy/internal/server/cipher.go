@@ -24,39 +24,39 @@ type secretManager interface {
 }
 
 // NewRenewableRequestCipher creates a new RenewableRequestCipher with the given secretManager.
-func NewRenewableRequestCipher(sm secretManager, r *http.Request) (*RenewableRequestCipher, error) {
+func NewRenewableRequestCipher(sm secretManager, r *http.Request) (*RenewableRequestCipher, *secretmanager.Secret, error) {
 	c := &RenewableRequestCipher{sm: sm, rc: nil}
-	err := c.init(r)
+	secret, err := c.init(r)
 	if err != nil {
-		return nil, fmt.Errorf("initializing renewable request cipher: %w", err)
+		return nil, nil, fmt.Errorf("initializing renewable request cipher: %w", err)
 	}
-	return c, nil
+	return c, secret, nil
 }
 
 // ResetSecret clears the cached RequestCipher, forcing re-initialization on next use.
-func (c *RenewableRequestCipher) ResetSecret(r *http.Request) error {
+func (c *RenewableRequestCipher) ResetSecret(r *http.Request) (*secretmanager.Secret, error) {
 	c.rc = nil
 	err := c.sm.ForceUpdate(r.Context())
 	if err != nil {
-		return fmt.Errorf("forcing secret update: %w", err)
+		return nil, fmt.Errorf("forcing secret update: %w", err)
 	}
 
 	return c.init(r)
 }
 
-func (c *RenewableRequestCipher) init(r *http.Request) error {
+func (c *RenewableRequestCipher) init(r *http.Request) (*secretmanager.Secret, error) {
 	secret, err := c.sm.LatestSecret(r.Context())
 	if err != nil {
-		return fmt.Errorf("get latest secret: %w", err)
+		return nil, fmt.Errorf("get latest secret: %w", err)
 	}
 
 	rc, err := crypto.NewRequestCipher(secret.Data, secret.ID)
 	if err != nil {
-		return fmt.Errorf("creating request cipher: %w", err)
+		return nil, fmt.Errorf("creating request cipher: %w", err)
 	}
 
 	c.rc = rc
-	return nil
+	return &secret, nil
 }
 
 // Encrypt encrypts the given plaintext using the wrapped RequestCipher.

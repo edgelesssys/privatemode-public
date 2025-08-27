@@ -117,7 +117,7 @@ func memberAdd(ctx context.Context, cli *clientv3.Client, k8sNamespace, hostname
 	defer cancel()
 	_, err = cli.MemberAdd(ctxAdd, []string{
 		// Peer URL of the new member (us)
-		fmt.Sprintf("https://%s.%s", hostname, net.JoinHostPort(headlessServiceName, constants.EtcdPeerPort)),
+		fmt.Sprintf("https://%s.%s", hostname, net.JoinHostPort(headlessServiceName, constants.EtcdPeerPort())),
 	})
 	if err != nil {
 		return fmt.Errorf("adding member to etcd cluster: %w", err)
@@ -202,7 +202,7 @@ func newClient(k8sNamespace, serverCrt, serverKey, caCrt string) (*clientv3.Clie
 		Endpoints: []string{
 			// Endpoint of the existing cluster. We use the non-headless service name here,
 			// so that we just get to any node in the existing etcd cluster.
-			fmt.Sprintf("https://%s", net.JoinHostPort(internalServiceName, constants.EtcdClientPort)),
+			fmt.Sprintf("https://%s", net.JoinHostPort(internalServiceName, constants.EtcdClientPort())),
 		},
 		TLS: &tls.Config{
 			Certificates: []tls.Certificate{keyPair},
