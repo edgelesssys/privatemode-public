@@ -22,7 +22,7 @@
 
   export const autoGrowInput = (el: HTMLTextAreaElement, force?: boolean) => {
     const anyEl = el as any // Oh how I hate typescript.  All the markup of Java with no real payoff..
-    if (force || !anyEl.__didAutoGrow) el.style.height = '38px' // don't use "auto" here.  Firefox will over-size.
+    if (force || !anyEl.__didAutoGrow) el.style.height = '27px' // don't use "auto" here.  Firefox will over-size.
     el.style.height = el.scrollHeight + 'px'
     setTimeout(() => {
       if (el.scrollHeight > el.getBoundingClientRect().height + 5) {

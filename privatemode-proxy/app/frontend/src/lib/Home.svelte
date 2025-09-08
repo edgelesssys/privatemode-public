@@ -5,10 +5,12 @@
   import { afterUpdate, onMount } from 'svelte'
   import { set as setOpenAI } from './providers/openai/util.svelte'
   import { hasActiveModels } from './Models.svelte'
+  import { getProfiles } from './Profiles.svelte'
   import { isNativeApp } from './Util.svelte'
   import { SmokeTest } from './SmokeTest'
+  import { faCheck } from '@fortawesome/free-solid-svg-icons'
+  import Fa from 'svelte-fa'
 
-  // @ts-expect-error wails-generated file
   import { GetConfiguredAPIKey } from '../../wailsjs/go/main/ConfigurationService'
 
   $: apiKey = $apiKeyStorage
@@ -56,6 +58,11 @@
     }
     setOpenAI({ apiKey: val })
     hasModels = hasActiveModels()
+
+    // Force model update after api key change
+    if (apiKey) {
+      await getProfiles(true)
+    }
   }
 </script>
 
@@ -85,6 +92,8 @@
             aria-label="Privatemode access key"
             placeholder="Your access key"
             autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
             class="input"
             class:is-danger={!hasModels}
             class:is-warning={!apiKey}
@@ -93,7 +102,15 @@
           />
         </p>
         <p class="control">
-          <button class="button is-info" type="submit">Save</button>
+          <button class="button is-info" type="submit">
+            Save
+
+            {#if apiKey}
+              <span class="position-absolute top-0 start-0 h-100 w-100 button is-info z-2 animation-fade-out">
+                <Fa icon={faCheck} />
+              </span>
+            {/if}
+          </button>
         </p>
       </form>
     </div>

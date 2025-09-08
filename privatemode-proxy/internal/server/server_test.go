@@ -554,13 +554,7 @@ func TestShardKeyGeneration(t *testing.T) {
 			assert := assert.New(t)
 			content := string(bytes.Repeat([]byte("a"), tc.contentLength))
 
-			start := time.Now()
 			shardKey, err := server.generateShardKey(cacheSalt, content)
-			duration := time.Since(start)
-
-			// 1 Mio tokens take about 7.5ms on a Mac M2. In CI it takes 28ms.
-			// Check for 50ms. That is, 100k tokens are below 5ms, which is an acceptable delay for such large context.
-			assert.Less(duration.Nanoseconds(), int64(50_000_000), "shard key generation took too long: %s", duration)
 
 			if tc.expectError {
 				require.Error(err)
@@ -582,6 +576,24 @@ func TestShardKeyGeneration(t *testing.T) {
 			}
 		})
 	}
+}
+
+func BenchmarkShardKeyGeneration_1M(b *testing.B) {
+	server := &Server{log: slog.Default()}
+	cacheSalt := "test-salt"
+	// 1M tokens -> contentLength: 1_000_000 * 4 (see unit test)
+	content := string(bytes.Repeat([]byte("a"), 1_000_000*4))
+
+	start := time.Now()
+	for b.Loop() {
+		if _, err := server.generateShardKey(cacheSalt, content); err != nil {
+			b.Fatalf("unexpected error: %v", err)
+		}
+	}
+	avg := time.Since(start) / time.Duration(b.N)
+
+	// 1 Mio tokens take about 2.5ms on a Mac M2 and ~20ms in CI; enforce <50ms per op.
+	assert.Less(b, avg, 50*time.Millisecond, "shard key generation too slow")
 }
 
 func TestGetOCSPHeaders(t *testing.T) {

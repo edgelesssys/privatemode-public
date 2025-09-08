@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ import (
 
 var (
 	logLevel                     string
+	logFormat                    string
 	apiKeyStr                    string
 	workspace                    string
 	secretEndpoint               string
@@ -47,15 +49,21 @@ var (
 // New returns the root command of the privatemode-proxy.
 func New() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:          "privatemode-proxy",
-		Short:        "The proxy verifies a third-party Privatemode deployment and handles prompt encryption and API authentication on behalf of its users.",
-		Args:         cobra.NoArgs,
-		Version:      constants.Version(),
+		Use:     "privatemode-proxy",
+		Short:   "The proxy verifies a third-party Privatemode deployment and handles prompt encryption and API authentication on behalf of its users.",
+		Args:    cobra.NoArgs,
+		Version: constants.Version(),
+		PreRunE: func(_ *cobra.Command, _ []string) error {
+			return logging.ValidateLogFormat(logFormat)
+		},
 		RunE:         runProxy,
 		SilenceUsage: true,
 	}
 
 	cmd.Flags().StringVarP(&logLevel, logging.Flag, logging.FlagShorthand, logging.DefaultFlagValue, logging.FlagInfo)
+	must(logging.RegisterFlagCompletionFunc(cmd))
+	cmd.Flags().StringVar(&logFormat, logging.FormatFlag, logging.DefaultFormatFlagValue, logging.FormatFlagInfo)
+	must(logging.RegisterFormatFlagCompletionFunc(cmd))
 
 	cmd.Flags().StringVar(&apiKeyStr, "apiKey", "",
 		"The API key for the Privatemode API. If no key is set, the proxy will not authenticate with the API.")
@@ -117,7 +125,13 @@ func getPromptCacheSalt() (string, error) {
 }
 
 func runProxy(cmd *cobra.Command, _ []string) error {
-	log := logging.NewLogger(logLevel)
+	var log *slog.Logger
+	if logFormat == logging.FormatFlagValueText {
+		log = logging.NewCLILogger(logLevel, cmd.OutOrStderr())
+	} else {
+		log = logging.NewLogger(logLevel)
+	}
+
 	log.Info("Privatemode encryption proxy", "version", constants.Version())
 
 	if (tlsCertPath == "") != (tlsKeyPath == "") {

@@ -12,6 +12,7 @@ type Organization struct {
 	gorm.Model
 	ClerkOrgID       string `json:"clerk_org_id" gorm:"uniqueIndex;size:255"`
 	StripeCustomerID string `json:"stripe_customer_id" gorm:"unique;size:255"`
+	OrganizationSlug string `json:"organization_slug" gorm:"column:organization_slug;size:256"`
 	RoleID           uint   `json:"role_id" gorm:"not null"` // Foreign key to [Roles] table
 	Role             Role   `json:"role"`
 }
@@ -41,6 +42,16 @@ func (l *LicenseDB) UpdateOrgRole(ctx context.Context, orgID uint, roleID uint) 
 	result := l.db.WithContext(ctx).Model(&org).Where("id = ?", orgID).Update("role_id", roleID)
 	if result.Error != nil {
 		return fmt.Errorf("updating org role: %w", result.Error)
+	}
+	return nil
+}
+
+// UpdateOrgSlug updates the slug of an [Organization] in the database.
+func (l *LicenseDB) UpdateOrgSlug(ctx context.Context, clerkOrgID, orgSlug string) error {
+	var org Organization
+	result := l.db.WithContext(ctx).Model(&org).Where("clerk_org_id = ?", clerkOrgID).Update("organization_slug", orgSlug)
+	if result.Error != nil {
+		return fmt.Errorf("updating org slug: %w", result.Error)
 	}
 	return nil
 }

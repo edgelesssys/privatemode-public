@@ -31,6 +31,7 @@ rec {
   image = dockerTools.buildLayeredImage {
     name = "inference-proxy";
     tag = lib.continuumVersion;
+    compressor = "zstd";
 
     contents = buildEnv {
       name = "image-root";

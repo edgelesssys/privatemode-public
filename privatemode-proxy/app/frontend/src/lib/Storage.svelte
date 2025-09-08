@@ -18,6 +18,8 @@
   const defaultModelFromEnv = import.meta.env.VITE_DEFAULT_MODEL || 'latest'
   export const apiKeyStorage = persisted('apiKey', apiKeyFromEnv as string)
   export const defaultModelStorage = persisted('defaultModel', defaultModelFromEnv as string)
+  export const preferredModelStorage = persisted('preferredModel', '' as string)
+  export const preferredReasoningStorage = persisted('preferredReasoning', {} as Record<string, string>)
   export let checkStateChange = writable(0) // Trigger for Chat
   export let showSetChatSettings = writable(false) //
   export let submitExitingPromptsNow = writable(false) // for them to go now.  Will not submit anything in the input
@@ -59,11 +61,20 @@
 
   export const addChat = async (profile:ChatSettings|undefined = undefined): Promise<number> => {
     const chats = get(chatsStorage)
+    const originalProfile = profile
 
     // Find the max chatId
     const chatId = newChatID()
 
-    profile = JSON.parse(JSON.stringify(profile || await getProfile(''))) as ChatSettings
+    // Use default profile
+    profile = profile || JSON.parse(JSON.stringify(await getProfile(''))) as ChatSettings
+
+    // If no specific profile was provided, override with user's preferred model
+    const preferredModelId = get(preferredModelStorage)
+    if (!originalProfile && preferredModelId) {
+      profile.model = preferredModelId
+    }
+
     const nameMap = chats.reduce((a: Record<string, Chat>, chat) => { a[chat.name] = chat; return a }, {} as Record<string, Chat>)
 
     // Add a new chat

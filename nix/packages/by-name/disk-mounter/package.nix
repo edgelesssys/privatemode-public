@@ -55,6 +55,7 @@ rec {
     name = "disk-mounter";
     tag = lib.continuumVersion;
     maxLayers = 8;
+    compressor = "zstd";
 
     contents = buildEnv {
       name = "image-root";

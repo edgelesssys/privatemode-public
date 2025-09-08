@@ -22,6 +22,9 @@
   const isUser = message.role === 'user'
   const isAssistant = message.role === 'assistant'
   const isImage = message.role === 'image'
+
+  // change to true to style reasoning output
+  const reasoningOutput = false
   
   // Check if this is a file message using the parseFileMessage function
   const fileMessageInfo = parseFileMessage(message)
@@ -207,13 +210,26 @@
             </div>
           {/if}
         {:else}
-          {#key refreshCounter}
-            <SvelteMarkdown
-              source={displayMessage}
-              options={markdownOptions}
-              renderers={{ code: Code, html: Code }}
-            />
-          {/key}
+          {#if reasoningOutput && isAssistant}
+            <div class="reasoning-output is-streaming">
+              {#key refreshCounter}
+                <SvelteMarkdown
+                  source={displayMessage}
+                  options={markdownOptions}
+                  renderers={{ code: Code, html: Code }}
+                />
+              {/key}
+            </div>
+          {:else}
+            {#key refreshCounter}
+              <SvelteMarkdown
+                source={displayMessage}
+                options={markdownOptions}
+                renderers={{ code: Code, html: Code }}
+              />
+            {/key}
+          {/if}
+          
         {/if}
         
         {#if imageUrl}
@@ -360,5 +376,29 @@
 
   .continue-button:hover {
     animation: none;
+  }
+
+  .reasoning-output{
+   color: #7A49F6;
+   font-weight: 700; 
+   line-height: 1.3;
+   
+  }
+
+  .reasoning-output.is-streaming {
+    color: transparent;
+    background-image: linear-gradient(90deg,rgba(122, 73, 246, 1) 66%, rgba(122, 73, 246, 0.44) 70%, rgba(122, 73, 246, 1) 75%);
+    background-size: 200% 100%;
+    animation: reasoning-highlight 3s ease-in-out infinite;
+    background-clip: text;
+  }
+
+  @keyframes reasoning-highlight {
+    0% {
+      background-position: 200% 100%;
+    }
+    100% {
+      background-position: 0 100%
+    }
   }
 </style>

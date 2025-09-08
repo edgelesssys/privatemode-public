@@ -86,7 +86,8 @@ const gptDefaults = {
   presence_penalty: 0,
   frequency_penalty: 0,
   logit_bias: null,
-  user: undefined
+  user: undefined,
+  reasoning_effort: undefined
 }
 
 // Core set of defaults
@@ -97,9 +98,9 @@ const defaults:ChatSettings = {
   profileName: '',
   profileDescription: '',
   continuousChat: 'fifo',
-  // 5k tokens below the actual model limit to give some buffer so we don't run
+  // 8k tokens below the actual model limit to give some buffer so we don't run
   // into an API error in the app.
-  summaryThreshold: 65000,
+  summaryThreshold: 120000,
   summarySize: 1000,
   summaryExtend: 0,
   summaryTemperature: 0.1,
@@ -131,7 +132,12 @@ const defaults:ChatSettings = {
   holdSocket: true,
   // useResponseAlteration: false,
   // responseAlterations: [],
-  isDirty: false
+  isDirty: false,
+  modelConfig: {
+        id: '',
+        displayName: '',
+        displaySubtitle: ''
+  }
 }
 
 export const globalDefaults: GlobalSettings = {
@@ -528,6 +534,22 @@ const chatSettingsList: ChatSetting[] = [
         step: 0.2,
         type: 'number',
         hide: hideModelSetting
+      },
+      {
+        key: 'reasoning_effort',
+        name: 'Reasoning Effort',
+        title: 'Controls the amount of reasoning effort for reasoning models. Higher values may provide more thorough reasoning but take longer.',
+        type: 'select',
+        options: [
+          { value: 'low', text: 'Low' },
+          { value: 'medium', text: 'Medium' },
+          { value: 'high', text: 'High' }
+        ],
+        hide: (chatId, setting) => {
+          // Only show for models that support reasoning
+          const modelConfig = getChatSettings(chatId).modelConfig
+          return !modelConfig?.reasoningOptions
+        }
       },
       {
         key: 'repetitionPenalty',

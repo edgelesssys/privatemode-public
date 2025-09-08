@@ -54,6 +54,7 @@ rec {
     name = "attestation-agent";
     tag = lib.continuumVersion;
     maxLayers = 8;
+    compressor = "zstd";
 
     contents = builtins.attrValues {
       inherit (dockerTools) caCertificates binSh;

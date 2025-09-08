@@ -5,6 +5,7 @@
 package logging
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"log/slog"
@@ -12,12 +13,15 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/spf13/cobra"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const (
 	// Flag is the flag name for setting the logging level.
 	Flag = "log-level"
+	// FormatFlag is the flag name for setting the logging format.
+	FormatFlag = "log-format"
 	// FlagShorthand is the shorthand flag name for setting the logging level.
 	FlagShorthand = "l"
 	// DefaultFlagValue is the default value for the log level flag.
@@ -25,9 +29,41 @@ const (
 	// DefaultFlagValueCLI is the default value for the log level flag for CLIs.
 	// CLIs should use a higher default log level to avoid too much output by default.
 	DefaultFlagValueCLI = "warn"
+	// DefaultFormatFlagValue is the default value for the log format flag.
+	DefaultFormatFlagValue = FormatFlagValueText
+	// FormatFlagValueJSON is the format flag value for JSON logging.
+	FormatFlagValueJSON = "json"
+	// FormatFlagValueText is the format flag value for standard text logging.
+	FormatFlagValueText = "text"
 	// FlagInfo is the info string for the log level flag.
 	FlagInfo = "set logging level (debug, info, warn, error, or a number)"
+	// FormatFlagInfo is the info string for the log format flag.
+	FormatFlagInfo = "set logging format (json or text)"
 )
+
+// RegisterFlagCompletionFunc registers a completion function for the log level flag.
+func RegisterFlagCompletionFunc(cmd *cobra.Command) error {
+	return cmd.RegisterFlagCompletionFunc(Flag, func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return []string{"debug", "info", "warn", "error"}, cobra.ShellCompDirectiveNoFileComp
+	})
+}
+
+// RegisterFormatFlagCompletionFunc registers a completion function for the format flag.
+func RegisterFormatFlagCompletionFunc(cmd *cobra.Command) error {
+	return cmd.RegisterFlagCompletionFunc(FormatFlag, func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return []string{FormatFlagValueJSON, FormatFlagValueText}, cobra.ShellCompDirectiveNoFileComp
+	})
+}
+
+// ValidateLogFormat validates the log format.
+func ValidateLogFormat(logFormat string) error {
+	switch strings.ToLower(logFormat) {
+	case FormatFlagValueJSON, FormatFlagValueText:
+		return nil
+	default:
+		return fmt.Errorf("invalid log format %q: --%s must be one of %q", logFormat, FormatFlag, []string{FormatFlagValueJSON, FormatFlagValueText})
+	}
+}
 
 // NewLogger returns a new [*slog.Logger] at the given log level.
 // The logger writes to [os.Stderr] and uses the JSON format.

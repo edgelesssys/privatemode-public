@@ -5,11 +5,15 @@
   import { uploadPdfToUnstructured, createFileMessage, formatUploadError } from './FileUploadService.svelte'
   import type { UploadStatus } from './FileUploadService.svelte'
   import { addErrorToast } from './stores/ToastStore.svelte'
+  import { TestChatController } from './SmokeTest'
   
   // Used to disable the component after one file has been uploaded
   export let disabled = false
   export let acceptedFileTypes = 'application/pdf, text/plain, application/vnd.openxmlformats-officedocument.wordprocessingml.document, text/markdown'
-  
+  export let tooltip = 'Attach file'
+
+  TestChatController.uploadFile = handleFileSelect
+
   let fileInput: HTMLInputElement
   let uploadStatus: UploadStatus = {
     isUploading: false,
@@ -148,6 +152,10 @@
     height: 2.25em;
     width: 2.25em;
   }
+
+  .upload-button:disabled {
+    cursor: not-allowed;
+  }
 </style>
 
 <!-- File input element -->
@@ -167,6 +175,7 @@
     disabled={disabled}
     on:click={handleButtonClick}
     aria-label="Attach file"
+    title={tooltip}
   >
     <span>
       <Fa icon={faPaperclip} />

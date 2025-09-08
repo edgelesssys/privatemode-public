@@ -33,6 +33,7 @@ rec {
   image = dockerTools.buildLayeredImage {
     name = "secret-service";
     tag = lib.continuumVersion;
+    compressor = "zstd";
 
     contents = buildEnv {
       name = "image-root";

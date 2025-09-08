@@ -1,10 +1,11 @@
 <script context="module" lang="ts">
   import { apiKeyStorage, getApiBase } from './Storage.svelte'
-  import { get } from 'svelte/store'
   import type { ModelDetail, Model, SelectOption, Chat } from './Types.svelte'
   import { mergeProfileFields } from './Profiles.svelte'
   import { getChatSettingObjectByKey } from './Settings.svelte'
   import { valueOf } from './Util.svelte'
+  import { getEndpointModels } from './ApiUtil.svelte'
+  import { get } from 'svelte/store'
   import { chatModels as openAiModels, imageModels as openAiImageModels, fetchRemoteModels, fallbackModelDetail } from './providers/openai/models.svelte'
 
 export const supportedChatModels : Record<string, ModelDetail> = {
@@ -153,6 +154,50 @@ export const getTokens = (model: Model, value: string): number[] => {
 
 export const countTokens = (model: Model, value: string): number => {
     return getTokens(model, value).length
+}
+
+
+type ResponseModels = {
+  object?: string;
+  data: {
+    id: string;
+  }[];
+}
+
+let availableModels: Record<string, boolean> | undefined
+
+export const loadModels = async (): Promise<Record<string, boolean>> => {
+    try {
+      const apiKey = get(apiKeyStorage)
+      console.log('Fetching available models with key:', apiKey)
+      const url = getApiBase() + getEndpointModels()
+      const result = (await (        
+        await fetch(url, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          }
+        })
+      ).json()) as ResponseModels
+  
+      availableModels = result.data.reduce((a, v) => {
+        a[v.id] = true
+        return a
+      }, {} as Record<string, boolean>)
+  
+      return availableModels
+    } catch (e) {
+      console.error('Failed to fetch available models:', e)
+      return {}
+    }
+}
+
+export const getActiveModels = async(forceUpdate:boolean = false): Promise<Record<string, boolean>> => {
+    if (!availableModels || forceUpdate) {
+        await loadModels()
+    }
+    return availableModels || {}
 }
 
 export const hasActiveModels = (): boolean => {

@@ -187,7 +187,7 @@ func (e UsageEntry) Slice() []string {
 
 // GetUsageByMonth retrieves token usage data grouped by month for the specified time period.
 // It supports grouping by API key (license key) or model name.
-func (l *LicenseDB) GetUsageByMonth(ctx context.Context, orgID uint, yearMonth string, groupBy UsageGroupBy, apiEndpoint string) ([]DailyUsage, error) {
+func (l *LicenseDB) GetUsageByMonth(ctx context.Context, orgID uint, yearMonth string, groupBy UsageGroupBy, apiEndpoints []string) ([]DailyUsage, error) {
 	startDate, err := time.Parse("2006-01", yearMonth)
 	if err != nil {
 		return nil, fmt.Errorf("invalid month format (expected YYYY-MM): %w", err)
@@ -203,17 +203,17 @@ func (l *LicenseDB) GetUsageByMonth(ctx context.Context, orgID uint, yearMonth s
 			SUM(prompt_tokens) as prompt_tokens,
 			SUM(cached_prompt_tokens) as cached_prompt_tokens,
 			SUM(completion_tokens) as completion_tokens,
-			SUM(prompt_tokens + completion_tokens) as total_tokens,
+			SUM(prompt_tokens + completion_tokens + cached_prompt_tokens) as total_tokens,
 			SUM(file_size_mb) as file_size_mb
 		FROM %[3]s
 		WHERE timestamp BETWEEN ? AND ?
 		AND organization_id = ?
-		AND api_endpoint = ?
+		AND api_endpoint IN (?)
 		GROUP BY %[1]s, %[2]s
 	`, string(groupBy), dayFunc, TokenUsageTable)
 
 	var aggregates []DailyUsage
-	result := l.db.WithContext(ctx).Raw(query, startDate, endDate, orgID, apiEndpoint).Scan(&aggregates)
+	result := l.db.WithContext(ctx).Raw(query, startDate, endDate, orgID, apiEndpoints).Scan(&aggregates)
 	if result.Error != nil {
 		return nil, fmt.Errorf("querying aggregated usage for month %s: %w", yearMonth, result.Error)
 	}

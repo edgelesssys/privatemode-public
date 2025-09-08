@@ -5,6 +5,7 @@ package licensedb
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"strconv"
 	"testing"
@@ -17,10 +18,10 @@ import (
 )
 
 const (
-	testLicenseKey           = "test-license-key"
+	testLicenseKey           = "11111111-2222-3333-4444-555555555555"
 	testModelName            = "llama3.3"
 	testAPIEndpoint          = "/v1/chat/completions"
-	testOrgID                = "integration-test-org"
+	testOrgID                = uint(3)
 	expectedPromptTokens     = 1000
 	expectedCompletionTokens = 2000
 )
@@ -34,7 +35,7 @@ func TestGetUsageByMonthWithMySQL(t *testing.T) {
 	databaseName := "continuum-license-testing"
 	sqlConnectionString := "constellation-license-server:europe-west1:production-license-db"
 
-	licenseDB, err := New(ctx, userName, databaseName, sqlConnectionString)
+	licenseDB, err := New(ctx, userName, databaseName, sqlConnectionString, slog.Default())
 	require.NoError(t, err)
 
 	addFakeTokenUsage(t, licenseDB)
@@ -43,14 +44,14 @@ func TestGetUsageByMonthWithMySQL(t *testing.T) {
 
 	// Test 1: Query by API key
 	t.Run("QueryByAPIKey", func(t *testing.T) {
-		dailyUsageAPIKey, err := licenseDB.GetUsageByMonth(ctx, testOrgID, yearMonth, GroupByAPIKey)
+		dailyUsageAPIKey, err := licenseDB.GetUsageByMonth(ctx, testOrgID, yearMonth, GroupByAPIKey, []string{testAPIEndpoint})
 		require.NoError(t, err)
 		verifyUsageGroup(t, dailyUsageAPIKey, "license_key", testLicenseKey, testDays)
 	})
 
 	// Test 2: Query by model name
 	t.Run("QueryByModelName", func(t *testing.T) {
-		dailyUsageModel, err := licenseDB.GetUsageByMonth(ctx, testOrgID, yearMonth, GroupByModel)
+		dailyUsageModel, err := licenseDB.GetUsageByMonth(ctx, testOrgID, yearMonth, GroupByModel, []string{testModelName})
 		require.NoError(t, err)
 		verifyUsageGroup(t, dailyUsageModel, "model_name", testModelName, testDays)
 	})
@@ -98,15 +99,12 @@ func addFakeTokenUsage(t *testing.T, db *LicenseDB) {
 		timestamp := time.Date(year, time.Month(month), day, 12, 0, 0, 0, time.UTC)
 		entry := UsageEntry{
 			LicenseKey:       testLicenseKey,
+			OrganizationID:   func(i uint) *uint { return &i }(testOrgID),
 			ModelName:        testModelName,
 			APIEndpoint:      testAPIEndpoint,
 			Timestamp:        timestamp,
 			PromptTokens:     int64(expectedPromptTokens),
 			CompletionTokens: int64(expectedCompletionTokens),
-		}
-		if testOrgID != "" {
-			clerkOrgID := testOrgID // Create a new variable for the pointer
-			entry.ClerkOrgID = &clerkOrgID
 		}
 		entries = append(entries, entry)
 	}

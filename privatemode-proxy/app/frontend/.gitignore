@@ -9,6 +9,7 @@ lerna-debug.log*
 
 testfiles
 
+/.env
 node_modules/
 /wailsjs/
 *.local

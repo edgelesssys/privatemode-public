@@ -2,7 +2,7 @@
   import type { Message } from './Types.svelte'
   import { v4 as uuidv4 } from 'uuid'
   import { get } from 'svelte/store'
-  import { apiKeyStorage } from './Storage.svelte'
+  import { apiKeyStorage, getApiBase } from './Storage.svelte'
 
   export interface UploadStatus {
     isUploading: boolean
@@ -17,7 +17,7 @@
   }
 
   export const FILE_MESSAGE_PREFIX = '[FILE]'
-  export const MAX_FILE_WORD_LIMIT = 30000 // 40k tokens * 0.75
+  export const MAX_FILE_WORD_LIMIT = 60000 // Approximately 120 pages
   
 
   function isBelowMaxTokenLimit (wordCount: number): boolean {
@@ -53,8 +53,8 @@
     const isLocalTest = import.meta.env.VITE_TEST_UNSTRUCTURED_API_BASE !== undefined
     apiUrl = isLocalTest
       ? `${import.meta.env.VITE_TEST_UNSTRUCTURED_API_BASE}/general/v0/general`
-      : `${import.meta.env.VITE_API_BASE}/unstructured/general/v0/general`
-  
+      : `${getApiBase()}/unstructured/general/v0/general`
+
     // Create form data for the upload
     const formData = new FormData()
     formData.append('files', file)

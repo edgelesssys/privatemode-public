@@ -153,7 +153,7 @@ func TestGetUsageByMonth(t *testing.T) {
 		require.NoError(err)
 	}
 
-	dailyUsage, err := sut.GetUsageByMonth(ctx, orgID, yearMonth, groupBy, "/v1/chat/completions")
+	dailyUsage, err := sut.GetUsageByMonth(ctx, orgID, yearMonth, groupBy, []string{"/v1/chat/completions"})
 	require.NoError(err)
 
 	// Create a map to organize the results by license key and day
@@ -178,14 +178,14 @@ func TestGetUsageByMonth(t *testing.T) {
 	assert.Equal(100, day1Data.PromptTokens)
 	assert.Equal(50, day1Data.CachedPromptTokens)
 	assert.Equal(200, day1Data.CompletionTokens)
-	assert.Equal(300, day1Data.TotalTokens)
+	assert.Equal(350, day1Data.TotalTokens)
 
 	day2Data, hasDay2 := license1Data[2] // Day 2
 	require.True(hasDay2, "Missing data for license1 on day 2")
 	assert.Equal(150, day2Data.PromptTokens)
 	assert.Equal(25, day2Data.CachedPromptTokens)
 	assert.Equal(250, day2Data.CompletionTokens)
-	assert.Equal(400, day2Data.TotalTokens)
+	assert.Equal(425, day2Data.TotalTokens)
 
 	// Verify license2 data
 	day1DataL2, hasDay1L2 := license2Data[1] // Day 1
@@ -200,10 +200,10 @@ func TestGetUsageByMonth(t *testing.T) {
 	assert.Equal(90, day3DataL2.PromptTokens)
 	assert.Equal(90, day3DataL2.CachedPromptTokens)
 	assert.Equal(110, day3DataL2.CompletionTokens)
-	assert.Equal(200, day3DataL2.TotalTokens)
+	assert.Equal(290, day3DataL2.TotalTokens)
 
 	// Test embedding
-	embedUsage, err := sut.GetUsageByMonth(ctx, orgID, yearMonth, groupBy, "/v1/embeddings")
+	embedUsage, err := sut.GetUsageByMonth(ctx, orgID, yearMonth, groupBy, []string{"/v1/embeddings"})
 	require.NoError(err)
 	assert.Len(embedUsage, 1)
 	assert.Equal(500, embedUsage[0].PromptTokens)

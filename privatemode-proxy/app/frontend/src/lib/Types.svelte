@@ -57,7 +57,20 @@ export type Request = {
     frequency_penalty?: number;
     logit_bias?: Record<string, number> | null;
     user?: string;
+    reasoning_effort?: string;
   };
+
+export type ReasoningOption = {
+  value: string;
+  displayName: string;
+}
+
+export type ModelConfig = {
+  id: string;
+  displayName: string;
+  displaySubtitle: string;
+  reasoningOptions?: ReasoningOption[];
+}
 
 export type ChatSettings = {
     profile: string,
@@ -98,6 +111,8 @@ export type ChatSettings = {
     repetitionPenalty: number;
     holdSocket: boolean;
     isDirty?: boolean;
+    modelConfig: ModelConfig;
+    reasoning_effort?: string; // For reasoning models like GPT-OSS
     [key: string]: any; // Allow additional properties
   } & Request;
 

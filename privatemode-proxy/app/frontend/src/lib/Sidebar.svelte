@@ -44,8 +44,6 @@
   TestChatController.newChat = async () => {
     if (newChatButton && !newChatButton.disabled) {
       newChatButton.click()
-      // works also with 10ms, so 100 should be safe
-      await new Promise(resolve => setTimeout(resolve, 100))
     } else {
       throw new Error('New chat button is not available or disabled')
     }

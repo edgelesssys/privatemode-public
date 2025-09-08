@@ -31,6 +31,7 @@ in
 pkgs.dockerTools.buildImage {
   name = "verity-disk-generator";
   tag = lib.continuumVersion;
+  compressor = "zstd";
 
   copyToRoot = pkgs.buildEnv {
     name = "image-root";

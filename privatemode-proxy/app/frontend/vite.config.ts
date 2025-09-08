@@ -41,6 +41,14 @@ export default defineConfig(({ command, mode, ssrBuild }) => {
   } else {
     return {
       plugins,
+      css: {
+        preprocessorOptions: {
+          scss: {
+            silenceDeprecations: ['mixed-decls', 'import', 'legacy-js-api'],
+            quietDeps: true
+          }
+        }
+      },
       server: {
         host: '127.0.0.1' // Force Vite to use IPv4 for availability in Docker
       }

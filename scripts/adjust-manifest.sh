@@ -9,8 +9,8 @@ manifest=$1
 # set TCB versions
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.BootloaderVersion=10' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.TEEVersion=0' "$manifest"
-yq eval -i '.ReferenceValues.snp[].MinimumTCB.SNPVersion=23' "$manifest"
-yq eval -i '.ReferenceValues.snp[].MinimumTCB.MicrocodeVersion=84' "$manifest"
+yq eval -i '.ReferenceValues.snp[].MinimumTCB.SNPVersion=27' "$manifest"
+yq eval -i '.ReferenceValues.snp[].MinimumTCB.MicrocodeVersion=88' "$manifest"
 
 # configure GuestPolicy and PlatformInfo
 yq eval -i '.ReferenceValues.snp[].GuestPolicy={ "SMT":true, "MigrateMA":false, "Debug":false, "CXLAllowed":false }' "$manifest"

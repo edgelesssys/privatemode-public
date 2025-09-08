@@ -378,7 +378,6 @@ select option.is-default {
 	border: none;
 	border-radius: 50px;
 	padding: 9px 110px 9px 20px;
-	height: 45px;
 	color: #4d4d4d;
 	font-weight: 450;
 }
@@ -864,11 +863,9 @@ aside.menu.main-menu .menu-expanse {
 	textarea {
 		// max-height: calc(100vh - (var(--chatContentPaddingBottom) + var(--runningTotalLineHeight) * var(--running-totals))) !important;
 		max-height: 188px;
-		min-height: 45px !important;
 		font-family: inherit;
-		font-size: 13.5px;
+		font-size: 13.5px;;
 		line-height: 27px;
-		border-radius: 20px !important;
 		scrollbar-width: thin;
 		scrollbar-color: rgba(208, 208, 208, 1) white;
 		
@@ -1260,14 +1257,12 @@ aside.menu.main-menu .menu-expanse {
 .control.mic .button {
 	border: none;
 	padding: 0 10px;
-	height: 45px;
 	border: none;
 }
 .control.send .button {
 	background: none;
 	color: #000000;
 	padding: 0 10px;
-	height: 45px;
 	border: none;
 	width: auto !important;
 }
@@ -1439,5 +1434,21 @@ aside.menu.main-menu .menu-expanse {
   .update-banner {
     width: 100% !important;
     margin-left: 0 !important;
+  }
+}
+
+// fade-out animation
+.animation-fade-out {
+	--animation-delay: 2s;
+	--animation-duration: 0.15s;
+  animation: fadeOut var(--animation-duration) var(--animation-delay) forwards;
+}
+
+@keyframes fadeOut {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
   }
 }
