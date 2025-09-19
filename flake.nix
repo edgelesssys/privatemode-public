@@ -3,13 +3,11 @@
     nixpkgs = {
       url = "github:NixOS/nixpkgs/nixos-unstable";
     };
-    flake-utils = {
-      url = "github:numtide/flake-utils";
-    };
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
   nixConfig = {
@@ -32,11 +30,7 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          config = {
-            allowUnfree = true;
-            permittedInsecurePackages = [ "libsoup-2.74.3" ];
-          };
-
+          config.allowUnfree = true;
           overlays = [
             (_final: prev: (import ./nix/packages { inherit (prev) lib callPackage; }))
             (_final: prev: { lib = prev.lib // (import ./nix/lib { inherit (prev) lib callPackage; }); })
@@ -56,10 +50,7 @@
 
         devShells = {
           default = pkgs.callPackage ./nix/devShells/devshell.nix { };
-
           ci = pkgs.callPackage ./nix/devShells/ci-shell.nix { };
-
-          ci-remote-builder = pkgs.callPackage ./nix/devShells/ci-remote-builder-shell.nix { };
         };
 
         formatter = treefmtEval.config.build.wrapper;

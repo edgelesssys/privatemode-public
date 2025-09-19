@@ -22,8 +22,8 @@ import (
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
 	"github.com/edgelesssys/continuum/internal/gpl/ocspheader"
 	"github.com/edgelesssys/continuum/internal/gpl/openai"
-	"github.com/edgelesssys/continuum/internal/gpl/openai/stub"
 	"github.com/edgelesssys/continuum/internal/gpl/secretmanager"
+	"github.com/edgelesssys/continuum/privatemode-proxy/internal/server/stub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

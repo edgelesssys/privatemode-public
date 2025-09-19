@@ -13,7 +13,7 @@ yq eval -i '.ReferenceValues.snp[].MinimumTCB.SNPVersion=27' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.MicrocodeVersion=88' "$manifest"
 
 # configure GuestPolicy and PlatformInfo
-yq eval -i '.ReferenceValues.snp[].GuestPolicy={ "SMT":true, "MigrateMA":false, "Debug":false, "CXLAllowed":false }' "$manifest"
+yq eval -i '.ReferenceValues.snp[].GuestPolicy={ "SMT":true, "MigrateMA":false, "Debug":false, "CXLAllowed":false, "PageSwapDisable":true }' "$manifest"
 yq eval -i '.ReferenceValues.snp[].PlatformInfo={ "SMTEnabled":false, "ECCEnabled":true, "AliasCheckComplete":true }' "$manifest"
 
 # add required SAN for secret-service mesh cert.

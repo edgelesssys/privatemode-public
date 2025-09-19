@@ -247,8 +247,27 @@ type PromptTokensDetails struct {
 	CachedTokens int `json:"cached_tokens,omitzero"`
 }
 
-// CacheSaltInjector creates a forwarder.RequestMutator that injects a CacheSalt if it is not set.
-func CacheSaltInjector(cacheSaltGenerator func() (string, error), log *slog.Logger) forwarder.RequestMutator {
+// CacheSaltGenerator returns a cache salt for the vLLM prompt cache.
+type CacheSaltGenerator func() (string, error)
+
+// DefaultRequestMutators is the default set of [forwarder.RequestMutator]s used by the vLLM adapter.
+type DefaultRequestMutators struct {
+	CacheSaltInjector       forwarder.RequestMutator // CacheSaltInjector ensures a vLLM prompt cache salt is set.
+	CacheSaltValidator      forwarder.RequestMutator // CacheSaltValidator validates the vLLM prompt cache set.
+	SecureImageURLValidator forwarder.RequestMutator // SecureImageURLValidator ensures no non-HTTPS image URLs are used in the request.
+}
+
+// GetDefaultRequestMutators returns the default set of [forwarder.RequestMutator]s used by the vLLM adapter.
+func GetDefaultRequestMutators(cacheSaltGenerator CacheSaltGenerator, log *slog.Logger) DefaultRequestMutators {
+	return DefaultRequestMutators{
+		CacheSaltInjector:       CacheSaltInjector(cacheSaltGenerator, log),
+		CacheSaltValidator:      CacheSaltValidator(log),
+		SecureImageURLValidator: SecureImageURLValidator(log),
+	}
+}
+
+// CacheSaltInjector creates a [forwarder.RequestMutator] that injects a cache salt if it is not set.
+func CacheSaltInjector(cacheSaltGenerator CacheSaltGenerator, log *slog.Logger) forwarder.RequestMutator {
 	injectSalt := func(httpBody string) (mutatedRequest string, err error) {
 		// Skip empty body, e.g., for OPTIONS requests
 		if len(httpBody) == 0 {
@@ -275,7 +294,7 @@ func CacheSaltInjector(cacheSaltGenerator func() (string, error), log *slog.Logg
 	return forwarder.WithFullRequestMutation(injectSalt, log)
 }
 
-// CacheSaltValidator creates a forwarder.RequestMutator that ensures a non-empty CacheSalt.
+// CacheSaltValidator creates a [forwarder.RequestMutator] that ensures a non-empty cache salt.
 func CacheSaltValidator(log *slog.Logger) forwarder.RequestMutator {
 	validateSalt := func(httpBody string) (mutatedRequest string, err error) {
 		// Skip empty body, e.g., for OPTIONS requests

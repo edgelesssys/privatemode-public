@@ -5,6 +5,7 @@ metadata:
   annotations:
     kubectl.kubernetes.io/last-applied-configuration: |
       {"allowVolumeExpansion":false,"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"annotations":{"privatemode.edgeless.systems/commit_hash":"c28643ed0902d6cefd8f49068fec9623d153e54e","privatemode.edgeless.systems/disk_size_gb":"18","privatemode.edgeless.systems/excluded_files":"","privatemode.edgeless.systems/model_source":"https://huggingface.co/stelterlab/Qwen3-Coder-30B-A3B-Instruct-AWQ","privatemode.edgeless.systems/root_hash":"0605976b547cc008c4d202cbd97129715dc47ce526810c5334cf5620694d9d14"},"name":"stelterlab-qwen3-coder-30b-a3b-instruct-awq"},"parameters":{"backingImage":"verity-disk-nspygx","backingImageChecksum":"bfc0a821d9b547b4c68c8425cf78b057f357128500d39e6bc2354fcae2a56db0d1ba586adf0e58659764683764a4764fc6fc4abc214a68cd0e1492b282801a06","dataEngine":"v1","dataLocality":"strict-local","numberOfReplicas":"1","staleReplicaTimeout":"2880"},"provisioner":"driver.longhorn.io","reclaimPolicy":"Delete","volumeBindingMode":"WaitForFirstConsumer"}
+    privatemode.edgeless.systems/build_version: v1.26.0
     privatemode.edgeless.systems/commit_hash: c28643ed0902d6cefd8f49068fec9623d153e54e
     privatemode.edgeless.systems/disk_size_gb: "18"
     privatemode.edgeless.systems/excluded_files: ""
@@ -12,7 +13,7 @@ metadata:
     privatemode.edgeless.systems/root_hash: 0605976b547cc008c4d202cbd97129715dc47ce526810c5334cf5620694d9d14
   creationTimestamp: "2025-08-28T06:19:04Z"
   name: stelterlab-qwen3-coder-30b-a3b-instruct-awq
-  resourceVersion: "4995255762"
+  resourceVersion: "5318422428"
   uid: 7aba8a21-098f-42eb-ace5-6e334826fbdc
 parameters:
   backingImage: verity-disk-nspygx

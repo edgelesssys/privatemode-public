@@ -30,32 +30,32 @@ func (s AllowStatus) String() string {
 
 // Header is the structured representation of the Privatemode-OCSP-Allow-Status header.
 type Header struct {
-	allowedStatuses []AllowStatus
-	revocNbf        time.Time
+	AllowedStatuses []AllowStatus
+	RevokedNbf      time.Time
 }
 
 // NewHeader builds the Privatemode-OCSP-Allow-Status header from the given allowed status codes,
 // grace period, and revocation time.
 func NewHeader(allowedStatuses []AllowStatus, revocNbf time.Time) *Header {
 	return &Header{
-		allowedStatuses: allowedStatuses,
-		revocNbf:        revocNbf,
+		AllowedStatuses: allowedStatuses,
+		RevokedNbf:      revocNbf,
 	}
 }
 
 // Marshal converts the Header into a string representation suitable for the Privatemode-OCSP-Allow-Status header.
 func (h *Header) Marshal() (string, error) {
-	if len(h.allowedStatuses) < 1 {
+	if len(h.AllowedStatuses) < 1 {
 		return "", fmt.Errorf("at least one allowed OCSP status must be specified")
 	}
 
-	statusStrings := make([]string, len(h.allowedStatuses))
-	for i, status := range h.allowedStatuses {
+	statusStrings := make([]string, len(h.AllowedStatuses))
+	for i, status := range h.AllowedStatuses {
 		statusStrings[i] = status.String()
 	}
 	allowedStatuses := strings.Join(statusStrings, ",")
 
-	unixTimeStr := fmt.Sprintf("%d", h.revocNbf.Unix())
+	unixTimeStr := fmt.Sprintf("%d", h.RevokedNbf.Unix())
 
 	return strings.Join([]string{
 		fmt.Sprintf("rules=%s", allowedStatuses),

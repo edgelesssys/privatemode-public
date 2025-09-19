@@ -23,6 +23,15 @@ func New(secrets *secrets.Secrets) *Cipher {
 	}
 }
 
+// Secret returns the secret for the given ID.
+func (c *Cipher) Secret(ctx context.Context, id string) ([]byte, error) {
+	secret, ok := c.inferenceSecrets.Get(ctx, id)
+	if !ok {
+		return nil, fmt.Errorf("%s %q", constants.ErrorNoSecretForID, id)
+	}
+	return secret, nil
+}
+
 // encryptResponse encrypts a message.
 // The message is encrypted using the secret associated with the given id.
 // The function returns the encrypted message in the format 'id:nonce:iv:cipher'.
@@ -55,9 +64,18 @@ func (*Cipher) getNonce(ciphertext string) ([]byte, error) {
 	return crypto.GetNonceFromCipher(ciphertext)
 }
 
+// ResponseCipher is the interface for encrypting and decrypting a request-response exchange.
+type ResponseCipher interface {
+	// DecryptRequest decrypts data sent by a client.
+	DecryptRequest(ctx context.Context) func(encryptedData string) (res string, err error)
+	// EncryptResponse encrypts data to send back to a client.
+	// It may only be called after first decrypting data using [ResponseCipher.DecryptRequest].
+	EncryptResponse(ctx context.Context) func(plainData string) (string, error)
+}
+
 // ResponseCipher handles encryption and decryption of one request-response exchange.
 // It acts as the server component for [crypto.RequestCipher].
-type ResponseCipher struct {
+type responseCipher struct {
 	cipher cipher
 
 	id        string
@@ -67,8 +85,8 @@ type ResponseCipher struct {
 }
 
 // NewResponseCipher creates a new [ResponseCipher].
-func (c *Cipher) NewResponseCipher() *ResponseCipher {
-	return &ResponseCipher{
+func (c *Cipher) NewResponseCipher() ResponseCipher {
+	return &responseCipher{
 		cipher:    c,
 		id:        "",
 		nonce:     nil,
@@ -78,7 +96,7 @@ func (c *Cipher) NewResponseCipher() *ResponseCipher {
 }
 
 // DecryptRequest decrypts data sent by a client.
-func (c *ResponseCipher) DecryptRequest(ctx context.Context) func(encryptedData string) (res string, err error) {
+func (c *responseCipher) DecryptRequest(ctx context.Context) func(encryptedData string) (res string, err error) {
 	return func(encryptedData string) (res string, err error) {
 		if c.encSeqNum != 0 {
 			return "", errors.New("can't decrypt another request after encrypting a response")
@@ -111,8 +129,8 @@ func (c *ResponseCipher) DecryptRequest(ctx context.Context) func(encryptedData 
 }
 
 // EncryptResponse encrypts data to send back to a client.
-// It may only be called after first decrypting data using [ResponseCipher.DecryptRequest].
-func (c *ResponseCipher) EncryptResponse(ctx context.Context) func(plainData string) (string, error) {
+// It may only be called after first decrypting data using [responseCipher.DecryptRequest].
+func (c *responseCipher) EncryptResponse(ctx context.Context) func(plainData string) (string, error) {
 	return func(plainData string) (string, error) {
 		if len(c.nonce) == 0 || c.decSeqNum == 0 || c.id == "" {
 			return "", errors.New("can't encrypt response without first decrypting a request")

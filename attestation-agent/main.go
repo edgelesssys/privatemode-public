@@ -11,12 +11,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/edgelesssys/continuum/attestation-agent/internal/attestation"
 	"github.com/edgelesssys/continuum/attestation-agent/internal/gpu"
 	"github.com/edgelesssys/continuum/attestation-agent/internal/ocsp"
 	"github.com/edgelesssys/continuum/attestation-agent/internal/rim"
 	"github.com/edgelesssys/continuum/internal/crypto"
+	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
 	"github.com/edgelesssys/continuum/internal/gpl/process"
 	"github.com/spf13/cobra"
@@ -29,9 +31,6 @@ var (
 	driverVersions []string
 	vbiosVersions  []string
 )
-
-// OCSPStatusFile is the file where the OCSP status of the GPU, VBIOS, and driver is stored.
-const OCSPStatusFile = "/run/continuum/ocsp-status.json"
 
 func main() {
 	cmd := &cobra.Command{
@@ -64,27 +63,18 @@ func run(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to verify GPUs: %w", err)
 	}
 
-	log.Info("Writing OCSP status to file", "file", OCSPStatusFile)
-	if err := os.MkdirAll("/run/continuum", 0o644); err != nil {
+	log.Info("Writing OCSP status to file", "file", constants.OCSPStatusFile)
+	if err := os.MkdirAll(filepath.Dir(constants.OCSPStatusFile()), 0o644); err != nil {
 		return fmt.Errorf("creating directory for OCSP status file: %w", err)
 	}
 	statusBytes, err := json.Marshal(ocspStatus)
 	if err != nil {
 		return fmt.Errorf("marshalling OCSP status: %w", err)
 	}
-	if err := os.WriteFile(OCSPStatusFile, statusBytes, 0o644); err != nil {
+	if err := os.WriteFile(constants.OCSPStatusFile(), statusBytes, 0o644); err != nil {
 		return fmt.Errorf("writing OCSP status file: %w", err)
 	}
-	log.Info("OCSP status written successfully", "file", OCSPStatusFile)
-
-	// TODO(msanft): Remove once the attestation verdict is delegated to the privatemode-proxy.
-	for _, status := range ocspStatus {
-		if status.GPU != internalOSCP.StatusGood ||
-			status.VBIOS != internalOSCP.StatusGood ||
-			status.Driver != internalOSCP.StatusGood {
-			return fmt.Errorf("GPU attestation failed: %s", status)
-		}
-	}
+	log.Info("OCSP status written successfully", "file", constants.OCSPStatusFile)
 
 	return nil
 }

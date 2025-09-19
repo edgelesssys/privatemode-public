@@ -83,13 +83,13 @@ func TestDecryptRequest(t *testing.T) {
 
 func TestResponseCipherDecryptRequest(t *testing.T) {
 	testCases := map[string]struct {
-		responseCipher   *ResponseCipher
+		responseCipher   *responseCipher
 		requestBody      string
 		expectedResponse string
 		wantErr          bool
 	}{
 		"decrypt message": {
-			responseCipher: &ResponseCipher{
+			responseCipher: &responseCipher{
 				cipher: &stubCipher{
 					decipherMsg: "plainText",
 				},
@@ -98,7 +98,7 @@ func TestResponseCipherDecryptRequest(t *testing.T) {
 			expectedResponse: "plainText",
 		},
 		"get nonce error": {
-			responseCipher: &ResponseCipher{
+			responseCipher: &responseCipher{
 				cipher: &stubCipher{
 					decipherMsg: "plainText",
 					getNonceErr: assert.AnError,
@@ -108,7 +108,7 @@ func TestResponseCipherDecryptRequest(t *testing.T) {
 			wantErr:     true,
 		},
 		"decryption error": {
-			responseCipher: &ResponseCipher{
+			responseCipher: &responseCipher{
 				cipher: &stubCipher{
 					decipherErr: assert.AnError,
 				},
@@ -117,7 +117,7 @@ func TestResponseCipherDecryptRequest(t *testing.T) {
 			wantErr:     true,
 		},
 		"decrypt after encrypting a response": {
-			responseCipher: &ResponseCipher{
+			responseCipher: &responseCipher{
 				cipher: &stubCipher{
 					decipherMsg: "plainText",
 				},
@@ -127,7 +127,7 @@ func TestResponseCipherDecryptRequest(t *testing.T) {
 			wantErr:     true,
 		},
 		"decrypt message with different ID": {
-			responseCipher: &ResponseCipher{
+			responseCipher: &responseCipher{
 				cipher: &stubCipher{
 					decipherMsg: "plainText",
 				},
@@ -158,13 +158,13 @@ func TestResponseCipherDecryptRequest(t *testing.T) {
 
 func TestResponseCipherEncryptResponse(t *testing.T) {
 	testCases := map[string]struct {
-		responseCipher   *ResponseCipher
+		responseCipher   *responseCipher
 		responseBody     string
 		expectedResponse string
 		wantErr          bool
 	}{
 		"encrypt message": {
-			responseCipher: &ResponseCipher{
+			responseCipher: &responseCipher{
 				cipher: &stubCipher{
 					cipherMsg: "encryptedText",
 				},
@@ -176,7 +176,7 @@ func TestResponseCipherEncryptResponse(t *testing.T) {
 			expectedResponse: "encryptedText",
 		},
 		"encrypt error": {
-			responseCipher: &ResponseCipher{
+			responseCipher: &responseCipher{
 				cipher: &stubCipher{
 					cipherErr: assert.AnError,
 				},
@@ -188,7 +188,7 @@ func TestResponseCipherEncryptResponse(t *testing.T) {
 			wantErr:      true,
 		},
 		"encrypt without ID set": {
-			responseCipher: &ResponseCipher{
+			responseCipher: &responseCipher{
 				cipher: &stubCipher{
 					cipherMsg: "encryptedText",
 				},
@@ -200,7 +200,7 @@ func TestResponseCipherEncryptResponse(t *testing.T) {
 			wantErr:      true,
 		},
 		"encrypt without first decrypting a message": {
-			responseCipher: &ResponseCipher{
+			responseCipher: &responseCipher{
 				cipher: &stubCipher{
 					cipherMsg: "encryptedText",
 				},
@@ -212,7 +212,7 @@ func TestResponseCipherEncryptResponse(t *testing.T) {
 			wantErr:      true,
 		},
 		"encrypt without nonce set": {
-			responseCipher: &ResponseCipher{
+			responseCipher: &responseCipher{
 				cipher: &stubCipher{
 					cipherMsg: "encryptedText",
 				},

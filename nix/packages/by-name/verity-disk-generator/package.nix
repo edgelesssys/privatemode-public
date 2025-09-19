@@ -3,9 +3,6 @@
   pkgs,
 }:
 let
-  util-linuxMinimal = pkgs.util-linux.override {
-    systemdSupport = false;
-  };
   verity_sh = pkgs.writeShellApplication {
     name = "verity.sh";
     bashOptions = [ ];

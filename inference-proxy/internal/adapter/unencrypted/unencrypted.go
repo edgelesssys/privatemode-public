@@ -31,7 +31,7 @@ func New(forwarder mutatingForwarder, log *slog.Logger) (*Adapter, error) {
 }
 
 // ServeMux returns a ServeMux that forwards requests without encryption.
-func (t *Adapter) ServeMux() *http.ServeMux {
+func (t *Adapter) ServeMux() http.Handler {
 	srv := http.NewServeMux()
 	srv.HandleFunc("/", t.forwardRequest)
 	return srv

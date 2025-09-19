@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +22,7 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	crypto "github.com/edgelesssys/continuum/internal/gpl/crypto"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
+	"github.com/edgelesssys/continuum/internal/gpl/ocsp"
 	"github.com/stretchr/testify/require"
 )
 
@@ -88,16 +93,24 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 	require := require.New(b)
 	fw := forwarder.New("tcp", workloadEndpoint, log)
 
-	secret := []byte("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+	secret := []byte(strings.Repeat("a", 32))
 	c := cipher.New(secrets.New(stubSecretGetter{}, map[string][]byte{"test": secret}))
-	plain := `[{"role": "system","content": "You are a helpful assistant."},{"role": "user","content": "Hello!"}]`
 	requestCipher, err := crypto.NewRequestCipher(secret, "test")
 	require.NoError(err)
-	m, err := requestCipher.Encrypt(plain)
-	require.NoError(err)
-	payload := fmt.Sprintf(`{"model": "model","messages": %s}`, m)
 
-	adapter, err := adapter.New(apiType, []string{"generate"}, c, fw, log)
+	cacheSalt, err := requestCipher.Encrypt(fmt.Sprintf("%q", strings.Repeat("a", 32)))
+	require.NoError(err)
+	m, err := requestCipher.Encrypt(`[{"role": "system","content": "You are a helpful assistant."},{"role": "user","content": "Hello!"}]`)
+	require.NoError(err)
+
+	payload := fmt.Sprintf(`{"model": "model", "messages": %s, "cache_salt": %s}`, m, cacheSalt)
+
+	ocspStatus, err := json.Marshal([]ocsp.StatusInfo{{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}})
+	require.NoError(err)
+	ocspFile := filepath.Join(b.TempDir(), "ocsp.json")
+	require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
+
+	adapter, err := adapter.New(apiType, []string{"generate"}, c, ocspFile, fw, log)
 	require.NoError(err)
 
 	server := New(adapter, log)

@@ -27,8 +27,8 @@ func TestHeader(t *testing.T) {
 
 		unmarshaledAllowedStatus, err := UnmarshalAndVerify(marshaled, marshaledMAC, secret)
 		require.NoError(err)
-		assert.Equal(unmarshaledAllowedStatus.allowedStatuses, allowedStatuses)
-		assert.Equal(unmarshaledAllowedStatus.revocNbf, header.revocNbf)
+		assert.Equal(unmarshaledAllowedStatus.AllowedStatuses, allowedStatuses)
+		assert.Equal(unmarshaledAllowedStatus.RevokedNbf, header.RevokedNbf)
 	})
 
 	t.Run("MarshalNoStatus", func(t *testing.T) {

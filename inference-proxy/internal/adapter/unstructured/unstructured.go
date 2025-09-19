@@ -32,7 +32,7 @@ func New(cipher *cipher.Cipher, forwarder mutatingForwarder, log *slog.Logger) (
 }
 
 // ServeMux returns a ServeMux that forwards requests with encryption.
-func (t *Adapter) ServeMux() *http.ServeMux {
+func (t *Adapter) ServeMux() http.Handler {
 	srv := http.NewServeMux()
 	srv.HandleFunc("/", t.forwardRequest)
 	srv.HandleFunc("/healthcheck", t.forwardHealthcheckRequest)

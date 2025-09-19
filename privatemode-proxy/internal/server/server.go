@@ -233,10 +233,7 @@ func (s *Server) shardKeyInjector() forwarder.RequestMutator {
 				return fmt.Errorf("generating shard key: %w", err)
 			}
 
-			// TODO(dr75): For now don't use the full shard key as the load balancing
-			// implementation is still missing and using the full key now would destroy
-			// cache-awareness.
-			r.Header.Set(constants.PrivatemodeShardKeyHeader, shardKey[:constants.CacheSaltHashLength])
+			r.Header.Set(constants.PrivatemodeShardKeyHeader, shardKey)
 		}
 		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 

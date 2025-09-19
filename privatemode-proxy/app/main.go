@@ -59,7 +59,7 @@ func main() {
 			// This may be overridden in the config file to enable cache sharing between users.
 			PromptCacheSalt:              cacheSalt,
 			NvidiaOCSPAllowUnknown:       true,           // TODO(msanft): make this configurable
-			NvidiaOCSPRevokedGracePeriod: 24 * time.Hour, // TODO(msanft): make this configurable
+			NvidiaOCSPRevokedGracePeriod: 48 * time.Hour, // TODO(msanft): make this configurable
 		},
 		runtimeConfig: jsonConfig{}, //nolint:exhaustruct
 	}, log)

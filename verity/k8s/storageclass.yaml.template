@@ -8,6 +8,7 @@ metadata:
     privatemode.edgeless.systems/disk_size_gb: "DISK_SIZE_GB"
     privatemode.edgeless.systems/commit_hash: "COMMIT_HASH"
     privatemode.edgeless.systems/excluded_files: "EXCLUDED_FILES"
+    privatemode.edgeless.systems/build_version: "BUILD_VERSION"
 provisioner: driver.longhorn.io
 allowVolumeExpansion: false
 reclaimPolicy: Delete

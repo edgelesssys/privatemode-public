@@ -1,0 +1,27 @@
+allowVolumeExpansion: false
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"allowVolumeExpansion":false,"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"annotations":{"privatemode.edgeless.systems/build_version":"v1.26.0","privatemode.edgeless.systems/commit_hash":"b5c939de8f754692c1647ca79fbf85e8c1e70f8a","privatemode.edgeless.systems/disk_size_gb":"67","privatemode.edgeless.systems/excluded_files":"original,metal","privatemode.edgeless.systems/model_source":"https://huggingface.co/openai/gpt-oss-120b","privatemode.edgeless.systems/root_hash":"682ea81fb02151c70b8c281159559b14b9bc4b0368ad4fbb50203f556ad3ddc3"},"name":"openai-gpt-oss-120b-reproducible"},"parameters":{"backingImage":"verity-disk-dobgaf","backingImageChecksum":"fb1f9a8242a93656ee49546c7e91f4808d7facf380f283090cc8ba2951647c1e7baa483adf5d47987028f07afa5d679cf96e97a909a2405fb6bb3ea29186e5f5","dataEngine":"v1","dataLocality":"strict-local","numberOfReplicas":"1","staleReplicaTimeout":"2880"},"provisioner":"driver.longhorn.io","reclaimPolicy":"Delete","volumeBindingMode":"WaitForFirstConsumer"}
+    privatemode.edgeless.systems/build_version: v1.26.0
+    privatemode.edgeless.systems/commit_hash: b5c939de8f754692c1647ca79fbf85e8c1e70f8a
+    privatemode.edgeless.systems/disk_size_gb: "67"
+    privatemode.edgeless.systems/excluded_files: original,metal
+    privatemode.edgeless.systems/model_source: https://huggingface.co/openai/gpt-oss-120b
+    privatemode.edgeless.systems/root_hash: 682ea81fb02151c70b8c281159559b14b9bc4b0368ad4fbb50203f556ad3ddc3
+  creationTimestamp: "2025-09-17T07:42:07Z"
+  name: openai-gpt-oss-120b-reproducible
+  resourceVersion: "5334739774"
+  uid: 549ec9a2-4388-4d09-9bd0-4e6516d0e62f
+parameters:
+  backingImage: verity-disk-dobgaf
+  backingImageChecksum: fb1f9a8242a93656ee49546c7e91f4808d7facf380f283090cc8ba2951647c1e7baa483adf5d47987028f07afa5d679cf96e97a909a2405fb6bb3ea29186e5f5
+  dataEngine: v1
+  dataLocality: strict-local
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer

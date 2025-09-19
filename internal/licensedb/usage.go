@@ -121,7 +121,7 @@ func (l *LicenseDB) InsertUsageEntries(ctx context.Context, entries []UsageEntry
 		result := tx.Create(&entry)
 		if result.Error != nil {
 			err = fmt.Errorf("inserting usage entry: %w", result.Error)
-			return
+			return err
 		}
 	}
 

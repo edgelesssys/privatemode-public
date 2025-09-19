@@ -2,54 +2,81 @@ package ocsp
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-func TestStatusFromString(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected Status
-		wantErr  bool
-	}{
-		{"GOOD", StatusGood, false},
-		{"REVOKED", StatusRevoked, false},
-		{"UNKNOWN", StatusUnknown, false},
-		{"invalid", "", true},
-	}
-
-	for _, test := range tests {
-		t.Run(test.input, func(t *testing.T) {
-			require := require.New(t)
-			assert := assert.New(t)
-			result, err := StatusFromString(test.input)
-			if test.wantErr {
-				require.Error(err)
-			} else {
-				require.NoError(err)
-				assert.Equal(test.expected, result)
-			}
-		})
-	}
-}
 
 func TestCombineStatuses(t *testing.T) {
 	tests := map[string]struct {
 		input    []Status
 		expected Status
 	}{
-		"all good":                           {[]Status{StatusGood, StatusGood}, StatusGood},
-		"revoked takes precedence":           {[]Status{StatusGood, StatusRevoked, StatusUnknown}, StatusRevoked},
+		"all good": {[]Status{StatusGood, StatusGood}, StatusGood},
+		"revoked takes precedence": {
+			[]Status{StatusGood, StatusRevoked(time.Time{}.Add(time.Hour)), StatusUnknown},
+			StatusRevoked(time.Time{}.Add(time.Hour)),
+		},
+		"oldest revoked status takes precedence": {
+			[]Status{StatusRevoked(time.Time{}.Add(5 * time.Hour)), StatusRevoked(time.Time{}.Add(1 * time.Hour)), StatusRevoked(time.Time{}.Add(3 * time.Hour))},
+			StatusRevoked(time.Time{}.Add(1 * time.Hour)),
+		},
 		"unknown takes precedence over good": {[]Status{StatusGood, StatusUnknown}, StatusUnknown},
 		"no statuses":                        {[]Status{}, StatusGood},
 	}
 
-	for _, test := range tests {
-		t.Run("", func(t *testing.T) {
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
-			result := CombineStatuses(test.input)
-			assert.Equal(test.expected, result)
+			result := CombineStatuses(tc.input)
+			assert.Equal(tc.expected, result)
+		})
+	}
+}
+
+func TestStatusAcceptedBy(t *testing.T) {
+	tests := map[string]struct {
+		status          Status
+		allowedStatuses []Status
+		expected        bool
+	}{
+		"good allowed": {
+			status:          StatusGood,
+			allowedStatuses: []Status{StatusGood, StatusUnknown},
+			expected:        true,
+		},
+		"unknown allowed": {
+			status:          StatusUnknown,
+			allowedStatuses: []Status{StatusGood, StatusUnknown},
+			expected:        true,
+		},
+		"revoked allowed": {
+			status:          StatusRevoked(time.Time{}.Add(time.Hour)),
+			allowedStatuses: []Status{StatusGood, StatusUnknown, StatusRevoked(time.Time{}.Add(time.Hour))},
+			expected:        true,
+		},
+		"unknown not allowed": {
+			status:          StatusUnknown,
+			allowedStatuses: []Status{StatusGood},
+			expected:        false,
+		},
+		"revoked not allowed": {
+			status:          StatusRevoked(time.Time{}.Add(time.Hour)),
+			allowedStatuses: []Status{StatusGood, StatusUnknown},
+			expected:        false,
+		},
+		"revoked not allowed by date": {
+			status:          StatusRevoked(time.Time{}.Add(time.Hour)),
+			allowedStatuses: []Status{StatusGood, StatusUnknown, StatusRevoked(time.Time{}.Add(2 * time.Hour))},
+			expected:        false,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+			result := tc.status.AcceptedBy(tc.allowedStatuses)
+			assert.Equal(tc.expected, result)
 		})
 	}
 }

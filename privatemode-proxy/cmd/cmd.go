@@ -75,13 +75,11 @@ func New() *cobra.Command {
 		fmt.Sprintf("The path into which the binary writes files. This includes the manifest log data in the '%s' subdirectory.", constants.ManifestDir))
 	cmd.Flags().StringVar(&manifestPath, "manifestPath", "",
 		"The path for the manifest file. If not provided, the manifest will be read from the remote source.")
-	cmd.Flags().BoolVar(&nvidiaOCSPAllowUnknown, "nvidiaOCSPAllowUnknown", false,
+	cmd.Flags().BoolVar(&nvidiaOCSPAllowUnknown, "nvidiaOCSPAllowUnknown", true,
 		"Whether it should be tolerated if the NVIDIA OCSP service cannot be reached.")
-	must(cmd.Flags().MarkHidden("nvidiaOCSPAllowUnknown"))
-	cmd.Flags().IntVar(&nvidiaOCSPRevokedGracePeriod, "nvidiaOCSPRevokedGracePeriod", 0,
+	cmd.Flags().IntVar(&nvidiaOCSPRevokedGracePeriod, "nvidiaOCSPRevokedGracePeriod", 48,
 		"The grace period (in hours) for which to accept NVIDIA attestation certificates that are revoked according to the OCSP service. "+
 			"Supplying a value of 0 disables the grace period, meaning that revoked certificates are rejected immediately.")
-	must(cmd.Flags().MarkHidden("nvidiaOCSPRevokedGracePeriod"))
 	// prompt caching
 	cmd.Flags().BoolVar(&sharedPromptCache, "sharedPromptCache", false,
 		"If set, caching of prompts between all users of the proxy is enabled. This reduces response times for long conversations or common documents.")

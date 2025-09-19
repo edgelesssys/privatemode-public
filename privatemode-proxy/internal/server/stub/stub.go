@@ -177,7 +177,7 @@ func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (request
 	)
 
 	responseMutator = forwarder.WithFullJSONResponseMutation(encrypt, openai.PlainCompletionsResponseFields, false)
-	return
+	return requestMutator, responseMutator
 }
 
 func openAIModelsHandler() func(w http.ResponseWriter, r *http.Request) {

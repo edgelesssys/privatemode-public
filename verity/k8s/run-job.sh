@@ -12,6 +12,7 @@ script_dir="$(dirname "$(readlink -f "$0")")"
 # Generate a 6 character random lower-case string to use as the snapshot and pvc name
 # shellcheck disable=SC2018 # we explicitly only want lower case a-z to conform to k8s naming rules
 pvc_name_suffix="$(head /dev/urandom | tr -dc 'a-z' | fold -w 6 | head -n 1)"
+job_name="job/verity-disk-generator-${pvc_name_suffix}"
 
 sed -e "s|MODEL_SOURCE|${MODEL_SOURCE}|g" \
   -e "s|COMMIT_HASH|${COMMIT_HASH}|g" \
@@ -29,10 +30,10 @@ set -x
 kubectl apply -f /tmp/pvc.yaml
 kubectl apply -f /tmp/job.yaml
 
-kubectl wait --for=condition=complete --timeout=-1s job/verity-disk-generator &
+kubectl wait --for=condition=complete --timeout=-1s "${job_name}" &
 completion_pid=$!
 
-kubectl wait --for=condition=failed --timeout=-1s job/verity-disk-generator &
+kubectl wait --for=condition=failed --timeout=-1s "${job_name}" &
 failure_pid=$!
 
 if wait -n "${completion_pid}" "${failure_pid}"; then
@@ -46,7 +47,7 @@ if wait -n "${completion_pid}" "${failure_pid}"; then
   fi
 fi
 
-verity_hash=$(kubectl logs job/verity-disk-generator | awk '/All done\./{found=1; next} found' | jq -r '.[0].roothash')
+verity_hash=$(kubectl logs "${job_name}" | awk '/All done\./{found=1; next} found' | jq -r '.[0].roothash')
 storage_class_name="$("${script_dir}/generate-storage-class-name.sh" "${MODEL_SOURCE}")"
 pv_name="$(kubectl get -f /tmp/pvc.yaml -o jsonpath='{.spec.volumeName}')"
 
@@ -83,6 +84,9 @@ done
 
 set -x
 
+current_version=$(just print-version)
+build_version=${current_version%%-pre*}
+
 sed \
   -e "s|VERITY_HASH|${verity_hash}|g" \
   -e "s|DISK_SIZE_GB|${DISK_SIZE_GB}|g" \
@@ -92,6 +96,7 @@ sed \
   -e "s|NAME_SUFFIX|${pvc_name_suffix}|g" \
   -e "s|BACKING_IMAGE_CHECKSUM|${backing_image_checksum}|g" \
   -e "s|STORAGE_CLASS_NAME|${storage_class_name}|g" \
+  -e "s|BUILD_VERSION|${build_version}|g" \
   "${script_dir}/storageclass.yaml.template" >/tmp/storageclass.yaml
 
 kubectl apply -f /tmp/storageclass.yaml

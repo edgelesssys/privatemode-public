@@ -12,7 +12,7 @@ base_url=https://github.com/edgelesssys/contrast/releases/download/$contrast_ver
 ./contrast -v | grep "contrast version $contrast_version" || wget --backups=1 "$base_url/contrast" && chmod +x contrast
 
 # generate and adjust manifest
-./contrast generate --disable-updates --reference-values metal-qemu-snp-gpu "$dir/deployment.yaml"
+./contrast generate --skip-image-store --disable-updates --reference-values metal-qemu-snp-gpu "$dir/deployment.yaml"
 SECRET_SERVICE_DOMAIN=$(yq eval 'select(.metadata.name == "secret-service") | .metadata.labels."app.kubernetes.io/instance"' "$dir/deployment.yaml").secret.privatemode.ai
 SECRET_SERVICE_K8S_INTERNAL_DOMAIN=secret-service-internal.$(yq 'select(.metadata.name == "secret-service") | .metadata.namespace' "$dir/deployment.yaml").svc.cluster.local
 SECRET_SERVICE_K8S_HEADLESS_DOMAIN="*.secret-service-headless.$(yq 'select(.metadata.name == "secret-service") | .metadata.namespace' "$dir/deployment.yaml").svc.cluster.local"

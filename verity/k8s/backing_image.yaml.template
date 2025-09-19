@@ -5,7 +5,7 @@ metadata:
   name: verity-disk-NAME_SUFFIX
   namespace: longhorn-system
 spec:
-  minNumberOfCopies: 2 # minimum number of copies required for Longhorn to consider the BackingImage healthy
+  minNumberOfCopies: 3 # minimum number of copies required for Longhorn to consider the BackingImage healthy
   sourceType: export-from-volume
   sourceParameters:
     volume-name: PVC_NAME

@@ -1,7 +1,7 @@
 kind: Job
 apiVersion: batch/v1
 metadata:
-  name: verity-disk-generator
+  name: verity-disk-generator-NAME_SUFFIX
 spec:
   completions: 1
   backoffLimit: 0
@@ -16,7 +16,7 @@ spec:
         - name: GIT_PAT
           valueFrom:
             secretKeyRef:
-              name: verity-disk-generator-git-creds
+              name: verity-disk-generator-git-creds-NAME_SUFFIX
               key: GIT_PAT
         - name: EXCLUDE_GIT_FILES
           value: EXCLUDED_MODEL_REPO_FILES # adjust as needed
@@ -58,7 +58,7 @@ spec:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: verity-disk-generator-git-creds
+  name: verity-disk-generator-git-creds-NAME_SUFFIX
 type: Opaque
 data:
   GIT_PAT: GIT_PAT_BASE64 # adjust as needed

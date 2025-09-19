@@ -152,7 +152,7 @@ func (c *Client) verifyCertificate(ctx context.Context, cert, issuer *x509.Certi
 		switch ocspResp.Status {
 		case ocsp.Revoked:
 			msg = "certificate is revoked"
-			status = internalOCSP.StatusRevoked
+			status = internalOCSP.StatusRevoked(ocspResp.RevokedAt)
 		case ocsp.Unknown:
 			msg = "certificate is unknown to the OCSP responder"
 			status = internalOCSP.StatusUnknown

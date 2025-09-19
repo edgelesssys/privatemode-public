@@ -37,10 +37,12 @@ func IsSupportedInferenceAPI(apiType string) bool {
 }
 
 // New creates a new InferenceAdapter for the given API type.
-func New(apiType string, workloadTasks []string, cipher *cipher.Cipher, forwarder mutatingForwarder, log *slog.Logger) (InferenceAdapter, error) {
+func New(
+	apiType string, workloadTasks []string, cipher *cipher.Cipher, ocspStatusFile string, forwarder mutatingForwarder, log *slog.Logger,
+) (InferenceAdapter, error) {
 	switch strings.ToLower(apiType) {
 	case InferenceAPIOpenAI:
-		return openai.New(workloadTasks, cipher, forwarder, log)
+		return openai.New(workloadTasks, cipher, ocspStatusFile, forwarder, log)
 	case InferenceAPIUnstructured:
 		return unstructured.New(cipher, forwarder, log)
 	case InferenceAPIUnencrypted:
@@ -52,7 +54,7 @@ func New(apiType string, workloadTasks []string, cipher *cipher.Cipher, forwarde
 
 // InferenceAdapter forwards requests to the inference API and handles encryption/decryption of sensitive parts.
 type InferenceAdapter interface {
-	ServeMux() *http.ServeMux
+	ServeMux() http.Handler
 }
 
 type mutatingForwarder interface {

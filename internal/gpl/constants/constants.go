@@ -133,6 +133,9 @@ func ContinuumBaseDir() string {
 // EtcdBasePath is the base path for etcd related files.
 func EtcdBasePath() string { return filepath.Join(ContinuumBaseDir(), "etcd") }
 
+// OCSPStatusFile is the file where the OCSP status of the GPU, VBIOS, and driver is stored.
+func OCSPStatusFile() string { return filepath.Join(ContinuumBaseDir(), "ocsp-status.json") }
+
 // EtcdClientPort is the port on which the etcd server listens for client connections.
 // Returns the value of the CONTINUUM_ETCD_CLIENT_PORT env variable or [etcdClientPort] if not set.
 func EtcdClientPort() string {

@@ -88,7 +88,7 @@ type Forwarder struct {
 	protocolScheme ProtocolScheme
 }
 
-// New sets up a new http forwarding proxy.
+// New sets up a new HTTP-forwarding proxy to the given network address.
 func New(network, address string, log *slog.Logger) *Forwarder {
 	host := address
 	if network == "unix" {
@@ -377,7 +377,14 @@ func (f *Forwarder) logMsg(logFn func(msg string, args ...any), msg string, err 
 		"clientOS", req.Header.Get(constants.PrivatemodeOSHeader),
 		"clientArch", req.Header.Get(constants.PrivatemodeArchitectureHeader),
 		"clientType", req.Header.Get(constants.PrivatemodeClientHeader),
-		"shardKey", req.Header.Get(constants.PrivatemodeShardKeyHeader),
+		// shardKey can be very long (cache salt hash + potentially large content hash); truncate for logs.
+		"shardKey", func() string {
+			sh := req.Header.Get(constants.PrivatemodeShardKeyHeader)
+			if len(sh) > constants.CacheSaltHashLength {
+				return sh[:constants.CacheSaltHashLength] + "..."
+			}
+			return sh
+		}(),
 		"contentLength", req.ContentLength,
 		"contentType", req.Header.Get("Content-Type"),
 	}

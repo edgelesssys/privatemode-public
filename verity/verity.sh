@@ -33,17 +33,33 @@ export TMPDIR
 mkdir -p "${TMPDIR}"
 tmp_repo=$(mktemp -d)
 
-GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 "${model_src}" "${tmp_repo}"
-pushd "${tmp_repo}" || exit 1
-git checkout "${commit}"
-git lfs pull
-find . -exec touch -d @0 {} +
-popd || exit 1
-
 excluded_files=()
 if [[ -n ${EXCLUDE_GIT_FILES} ]]; then
   readarray -t excluded_files <<<"$(echo "${EXCLUDE_GIT_FILES}" | tr ',' '\n')"
 fi
+
+GIT_LFS_SKIP_SMUDGE=1 git clone "${model_src}" "${tmp_repo}"
+pushd "${tmp_repo}" || exit 1
+git checkout "${commit}"
+
+# Configure git-lfs to exclude specific files if they follow patterns
+if [[ ${#excluded_files[@]} -gt 0 ]]; then
+  # Convert excluded files to git-lfs exclude patterns
+  exclude_patterns=()
+  for file in "${excluded_files[@]}"; do
+    exclude_patterns+=("${file}")
+  done
+  # Set git-lfs to exclude these patterns
+  git config lfs.fetchexclude "$(
+    IFS=','
+    echo "${exclude_patterns[*]}"
+  )"
+fi
+
+git lfs pull
+find . -exec touch -d @0 {} +
+popd || exit 1
+
 extra_exclude_directives=()
 for file in "${excluded_files[@]}"; do
   file_glob="${tmp_repo}/${file}"
@@ -57,12 +73,6 @@ done
 sed -e "s|@@SOURCE_REPO@@|${tmp_repo}|g" \
   -e "s|@@EXTRA_EXCLUDED_FILES@@|$(printf '%s' "${extra_exclude_directives[@]}")|g" \
   /repart/00-repart.conf.template >/repart/00-repart.conf
-
-ls /repart
-for file in /repart/*.conf; do
-  echo "Processing ${file}"
-  cat "${file}"
-done
 
 constant_uuid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 sgdisk --zap-all "${device}"
