@@ -216,7 +216,7 @@
                 <SvelteMarkdown
                   source={displayMessage}
                   options={markdownOptions}
-                  renderers={{ code: Code, html: Code }}
+                  renderers={{ code: Code }}
                 />
               {/key}
             </div>
@@ -225,7 +225,7 @@
               <SvelteMarkdown
                 source={displayMessage}
                 options={markdownOptions}
-                renderers={{ code: Code, html: Code }}
+                renderers={{ code: Code }}
               />
             {/key}
           {/if}
@@ -400,5 +400,18 @@
     100% {
       background-position: 0 100%
     }
+  }
+
+  .message-display :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .message-display :global(th),
+  .message-display :global(td) {
+    text-align: left;
+    padding: 8px;
+    word-wrap: break-word;
   }
 </style>

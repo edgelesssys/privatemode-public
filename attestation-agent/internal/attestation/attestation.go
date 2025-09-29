@@ -198,7 +198,7 @@ func (r *Report) VBIOSVersion() (string, error) {
 		vbios = vbios + tmp[i:i+2] + "."
 		idx = i + 2
 	}
-	vbios = vbios + tmp[idx:idx+2]
+	vbios += tmp[idx : idx+2]
 
 	return vbios, nil
 }

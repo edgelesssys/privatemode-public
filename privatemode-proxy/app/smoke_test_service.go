@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -26,7 +25,7 @@ func (s *SmokeTestService) SmokeTestingActivated() bool {
 
 // OnSmokeTestCompleted takes the smoke test result, writes it to disk, and ends the app.
 func (s *SmokeTestService) OnSmokeTestCompleted(passed bool, message string) {
-	testReportPath := filepath.Join("./app_smoke_test_report.json")
+	testReportPath := "app_smoke_test_report.json"
 	s.app.log.Info("Writing test report", "path", testReportPath)
 	if passed {
 		s.app.log.Info("Smoke test passed")

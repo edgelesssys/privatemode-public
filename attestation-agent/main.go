@@ -23,7 +23,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/gpl/process"
 	"github.com/spf13/cobra"
 
-	internalOSCP "github.com/edgelesssys/continuum/internal/gpl/ocsp"
+	internalOCSP "github.com/edgelesssys/continuum/internal/gpl/ocsp"
 )
 
 var (
@@ -33,6 +33,12 @@ var (
 )
 
 func main() {
+	if err := execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func execute() error {
 	cmd := &cobra.Command{
 		Use:          "attestation-agent",
 		Short:        "Attestation agent for verifying the workload and obtaining secret access",
@@ -50,9 +56,7 @@ func main() {
 
 	ctx, cancel := process.SignalContext(context.Background(), os.Interrupt)
 	defer cancel()
-	if err := cmd.ExecuteContext(ctx); err != nil {
-		os.Exit(1)
-	}
+	return cmd.ExecuteContext(ctx)
 }
 
 func run(cmd *cobra.Command, _ []string) error {
@@ -80,7 +84,7 @@ func run(cmd *cobra.Command, _ []string) error {
 }
 
 // verifyAndEnable verifies the GPUs and sets them to ready state.
-func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOSCP.StatusInfo, error) {
+func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOCSP.StatusInfo, error) {
 	// set up issuer
 	gpuClient, err := gpu.NewClient(log)
 	if err != nil {
@@ -96,7 +100,7 @@ func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOSCP.Stat
 	rimClient := rim.New("https://rim-cache/", log) // Use the local RIM cache
 	ocspClient := ocsp.New(log)
 
-	statusInfos := make([]internalOSCP.StatusInfo, len(gpuIssuers))
+	statusInfos := make([]internalOCSP.StatusInfo, len(gpuIssuers))
 
 	log.Info("Verifying GPUs", "amount", len(gpuIssuers))
 	for i, gpuIssuer := range gpuIssuers {
@@ -174,10 +178,10 @@ func generateNonce() ([32]byte, error) {
 
 func verifyRIMCertChain(ctx context.Context, softwareIdentity *rim.SoftwareIdentity,
 	mode ocsp.VerificationMode, ocspClient *ocsp.Client,
-) (internalOSCP.Status, error) {
+) (internalOCSP.Status, error) {
 	certChain, err := softwareIdentity.SigningCerts()
 	if err != nil {
-		return internalOSCP.StatusUnknown, fmt.Errorf("parsing RIM certificates: %w", err)
+		return internalOCSP.StatusUnknown, fmt.Errorf("parsing RIM certificates: %w", err)
 	}
 	ocspStatus, err := ocspClient.VerifyCertChain(ctx, certChain, mode)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
@@ -21,7 +22,14 @@ import (
 	"github.com/edgelesssys/continuum/internal/gpl/ocsp"
 	"github.com/edgelesssys/continuum/internal/gpl/ocspheader"
 	"github.com/edgelesssys/continuum/internal/gpl/openai"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
+
+var ocspStatusMetrics = promauto.NewGaugeVec(prometheus.GaugeOpts{ //nolint: exhaustruct
+	Name: "privatemode_nvidia_ocsp_status",
+	Help: "NVIDIA OCSP status of the attested components (0=good, 1=revoked, -1=unknown)",
+}, []string{"i", "component"})
 
 // Adapter implements an InferenceAdapter for OpenAI API.
 type Adapter struct {
@@ -53,6 +61,12 @@ func New(workloadTasks []string, cipher responseCipherCreator, ocspStatusFile st
 	var ocspStatus []ocsp.StatusInfo
 	if err := json.Unmarshal(ocspStatusJSON, &ocspStatus); err != nil {
 		return nil, fmt.Errorf("unmarshalling OCSP status JSON: %w", err)
+	}
+
+	for i, statusInfo := range ocspStatus {
+		addOCSPStatusMetric(i, "gpu", statusInfo.GPU)
+		addOCSPStatusMetric(i, "driver", statusInfo.Driver)
+		addOCSPStatusMetric(i, "vbios", statusInfo.VBIOS)
 	}
 
 	return &Adapter{
@@ -225,4 +239,17 @@ func (t *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 
 type mutatingForwarder interface {
 	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator)
+}
+
+func addOCSPStatusMetric(index int, component string, status ocsp.Status) {
+	var statusFloat float64
+	switch status.Value {
+	case ocsp.StatusGood.Value:
+		statusFloat = 0
+	case ocsp.StatusRevoked(time.Time{}).Value:
+		statusFloat = 1
+	case ocsp.StatusUnknown.Value:
+		statusFloat = -1
+	}
+	ocspStatusMetrics.WithLabelValues(fmt.Sprintf("gpu_index_%d", index), component).Set(statusFloat)
 }

@@ -4,6 +4,8 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/edgelesssys/continuum/disk-mounter/internal/mount"
@@ -27,12 +29,18 @@ func main() {
 	log := logging.NewLogger(*logLevel)
 	log.Info("Continuum disk-mounter", "version", constants.Version())
 
+	if err := run(*devicePath, *mountPath, *rootHash, log); err != nil {
+		log.Error("Error running disk-mounter", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run(devicePath, mountPath, rootHash string, log *slog.Logger) error {
 	ctx, cancel := process.SignalContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	if err := mount.VerityDisk(ctx, *devicePath, *mountPath, *rootHash, log); err != nil {
-		log.Error("Failed to mount verity disk", "error", err)
-		os.Exit(1)
+	if err := mount.VerityDisk(ctx, devicePath, mountPath, rootHash, log); err != nil {
+		return fmt.Errorf("mounting verity disk: %w", err)
 	}
 
 	log.Info("Successfully performed workload setup. Waiting for termination signal...")
@@ -40,10 +48,10 @@ func main() {
 	log.Info("Cleaning up device mounts")
 
 	// Use a new context since the parent context was cancelled
-	if err := mount.RemoveVerityDisk(context.Background(), *devicePath, *mountPath, log); err != nil {
-		log.Error("Failed to remove verity disk", "error", err)
-		os.Exit(1)
+	if err := mount.RemoveVerityDisk(context.Background(), devicePath, mountPath, log); err != nil {
+		return fmt.Errorf("removing verity disk: %w", err)
 	}
 
 	log.Info("Successfully removed verity disk. Shutting down")
+	return nil
 }

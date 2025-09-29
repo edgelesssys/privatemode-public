@@ -267,14 +267,13 @@ func (r *mutatingReader) Read(b []byte) (int, error) {
 	}
 	// Read one chunk of data from the original reader
 	// Data chunks are expected to be separated by newlines
-	var buf []byte
-	if r.scanner.Scan() {
-		buf = r.scanner.Bytes()
-	} else if r.scanner.Err() != nil {
-		return 0, r.scanner.Err()
-	} else {
+	if !r.scanner.Scan() {
+		if err := r.scanner.Err(); err != nil {
+			return 0, err
+		}
 		return 0, io.EOF
 	}
+	buf := r.scanner.Bytes()
 
 	// Skip empty chunks
 	if len(buf) == 0 {

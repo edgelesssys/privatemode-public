@@ -171,7 +171,7 @@ export const loadModels = async (): Promise<Record<string, boolean>> => {
       const apiKey = get(apiKeyStorage)
       console.log('Fetching available models with key:', apiKey)
       const url = getApiBase() + getEndpointModels()
-      const result = (await (        
+      const result = (await (
         await fetch(url, {
           method: 'GET',
           headers: {
@@ -193,9 +193,9 @@ export const loadModels = async (): Promise<Record<string, boolean>> => {
     }
 }
 
-export const getActiveModels = async(forceUpdate:boolean = false): Promise<Record<string, boolean>> => {
+export const getActiveModels = async (forceUpdate:boolean = false): Promise<Record<string, boolean>> => {
     if (!availableModels || forceUpdate) {
-        await loadModels()
+      await loadModels()
     }
     return availableModels || {}
 }

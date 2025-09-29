@@ -20,7 +20,7 @@ const (
 )
 
 // CreateSelfSignedCertificate creates a self-signed X.509 certificate and ecdsa private key.
-func CreateSelfSignedCertificate(commonName string, dnsNames []string, IPAddresses []net.IP) ([]byte, *ecdsa.PrivateKey, error) {
+func CreateSelfSignedCertificate(commonName string, dnsNames []string, ipAddresses []net.IP) ([]byte, *ecdsa.PrivateKey, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, err
@@ -37,7 +37,7 @@ func CreateSelfSignedCertificate(commonName string, dnsNames []string, IPAddress
 			CommonName: commonName,
 		},
 		DNSNames:    dnsNames,
-		IPAddresses: IPAddresses,
+		IPAddresses: ipAddresses,
 		NotBefore:   now.Add(-2 * time.Hour),
 		NotAfter:    now.Add(2 * time.Hour),
 	}

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,11 +21,14 @@ import (
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
+	"github.com/edgelesssys/continuum/internal/gpl/process"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/afero"
 )
 
 var (
 	listenPort      = flag.String("listen-port", constants.ProxyServerPort, "port the proxy server is listening on")
+	metricsPort     = flag.String("metrics-port", constants.MetricsServerPort, "port the metrics server is listening on")
 	workloadPort    = flag.String("workload-port", constants.WorkloadDefaultExposedPort, "port the workload is listening on")
 	adapterType     = flag.String("adapter-type", "openai", "type of adapter to use")
 	workloadAddress = flag.String("workload-address", "", "host name or IP the workload can be reached at over TCP")
@@ -42,19 +46,24 @@ func main() {
 	log := logging.NewLogger(*logLevel)
 	log.Info("Continuum inference proxy", "version", constants.Version())
 
-	if *workloadAddress == "" {
-		log.Error("flag --workload-address must be provided")
+	if err := run(log); err != nil {
+		log.Error("Error running inference-proxy", "error", err)
 		os.Exit(1)
+	}
+}
+
+func run(log *slog.Logger) error {
+	if *workloadAddress == "" {
+		return errors.New("flag --workload-address must be provided")
 	}
 
 	// Preliminary check if the adapter type is supported
 	if !adapter.IsSupportedInferenceAPI(*adapterType) {
-		log.Error("Unsupported adapter type", "adapterType", *adapterType)
-		os.Exit(1)
+		return fmt.Errorf("unsupported adapter type: %v", *adapterType)
 	}
 	log.Info("Starting inference proxy", "port", constants.ProxyServerPort, "workloadPort", *workloadPort, "adapterType", *adapterType, "workloadAddress", *workloadAddress)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := process.SignalContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	tasks := strings.Split(*workloadTask, ",")
@@ -65,8 +74,7 @@ func main() {
 		var err error
 		secrets, closeClient, err = setUpEtcdSync(ctx, *ssAddress, *etcdMemberCert, *etcdMemberKey, *etcdCA, log)
 		if err != nil {
-			log.Error("Failed to set up etcd sync", "error", err)
-			os.Exit(1)
+			return fmt.Errorf("setting up etcd sync: %w", err)
 		}
 		defer closeClient()
 	} else {
@@ -83,21 +91,28 @@ func main() {
 
 	adapter, err := adapter.New(*adapterType, tasks, cipher.New(secrets), *ocspStatusFile, forwarder, log)
 	if err != nil {
-		log.Error("Failed to create adapter", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("creating adapter: %w", err)
 	}
 	server := server.New(adapter, log)
+
+	go func() {
+		log.Info("Starting metrics server", "port", *metricsPort)
+		mux := http.NewServeMux()
+		mux.Handle(constants.MetricsEndpoint, promhttp.Handler())
+		if err := http.ListenAndServe(net.JoinHostPort("0.0.0.0", *metricsPort), mux); err != nil {
+			log.Error("Failed to start metrics server", "error", err)
+		}
+	}()
 
 	log.Info("Starting server")
 	listener, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", *listenPort))
 	if err != nil {
-		log.Error("Failed to listen", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("listening: %w", err)
 	}
 	if err := server.Serve(listener); err != nil {
-		log.Error("Failed to start server", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("serving: %w", err)
 	}
+	return nil
 }
 
 func setUpEtcdSync(ctx context.Context, address, etcdMemberCert, etcdMemberKey, etcdCA string, log *slog.Logger) (*secrets.Secrets, func(), error) {

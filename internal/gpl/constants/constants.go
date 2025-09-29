@@ -36,6 +36,8 @@ const (
 	CacheDirEnv = "CONTINUUM_CACHE_DIR"
 	// ProxyServerPort is the port on which the proxy server runs. It can be static, since it is run in a container.
 	ProxyServerPort = "8085"
+	// MetricsServerPort is the port on which our standalone metrics servers are exposed by default.
+	MetricsServerPort = "8185"
 	// AttestationServiceUserPort is the port on which the Attestation Service listens on for connections with users (Continuum CLI).
 	AttestationServiceUserPort = "3000"
 	// AttestationServiceHealthPort is the port on which the Attestation Service Health Server listens for health probes.
@@ -120,6 +122,9 @@ const (
 	ShardKeyThirdBoundaryBlocksPerChar = 32
 	// ShardKeyThirdBoundaryBlocks is the number of cache blocks after the second boundary.
 	ShardKeyThirdBoundaryBlocks = 1_000_000 / CacheBlockSizeTokens
+
+	// MetricsEndpoint is the endpoint where Prometheus metrics are exposed by default.
+	MetricsEndpoint = "/metrics"
 )
 
 // ContinuumBaseDir is the base directory for files created or used by Continuum.

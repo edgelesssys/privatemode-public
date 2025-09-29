@@ -2,11 +2,9 @@
   import { Highlight } from 'svelte-highlight'
   import flourite from 'flourite'
 
-  // Import both dark and light styles
-  import { github, githubDark } from 'svelte-highlight/styles/index'
-
-  // Style depends on system theme
-  const style = window.matchMedia('(prefers-color-scheme: dark)').matches ? githubDark : github
+  // Currently, the app supports only a light scheme.
+  import { github } from 'svelte-highlight/styles/index'
+  const style = github
 
   // Copy function for the code block
   import copy from 'copy-to-clipboard'
@@ -125,11 +123,16 @@
 	.button.is-light {
 		background-color: #f1f1f1;
 		color: #4d4d4d;
-
+		border-radius: 8px;
 	}
 
 	.code-block {
 		margin-top: 1rem;
 		margin-bottom: 1rem;
+	}
+
+	.code-block :global(pre) {
+		border-radius: 10px;
+		border: 1px solid #ddd;
 	}
 </style>

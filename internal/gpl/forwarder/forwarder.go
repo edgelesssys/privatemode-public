@@ -214,7 +214,11 @@ func (f *Forwarder) ForwardWithRetry(
 		w.WriteHeader(resp.StatusCode)
 
 		if resp.StatusCode >= 400 {
-			f.logError("Forwarded request returned an error status code", nil, req, "statusCode", resp.StatusCode)
+			logger := f.log.Warn
+			if resp.StatusCode >= 500 {
+				logger = f.log.Error
+			}
+			f.logMsg(logger, "Forwarded request returned an error status code", nil, req, "statusCode", resp.StatusCode)
 		}
 		if _, err := w.Write(responseBody); err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -358,8 +362,8 @@ func (f *Forwarder) logInfo(msg string, req *http.Request) {
 	f.logMsg(f.log.Info, msg, nil, req)
 }
 
-func (f *Forwarder) logError(msg string, err error, req *http.Request, extraArgs ...any) {
-	f.logMsg(f.log.Error, msg, err, req, extraArgs...)
+func (f *Forwarder) logError(msg string, err error, req *http.Request) {
+	f.logMsg(f.log.Error, msg, err, req)
 }
 
 func (f *Forwarder) logWarning(msg string, err error, req *http.Request) {

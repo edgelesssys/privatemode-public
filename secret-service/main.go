@@ -17,6 +17,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/contrast"
 	"github.com/edgelesssys/continuum/internal/gpl/logging"
+	"github.com/edgelesssys/continuum/internal/gpl/process"
 	"github.com/edgelesssys/continuum/secret-service/internal/etcd"
 	"github.com/edgelesssys/continuum/secret-service/internal/health"
 	"github.com/edgelesssys/continuum/secret-service/internal/userapi"
@@ -38,9 +39,6 @@ func main() {
 	mayBootstrap := flag.Bool("may-bootstrap", false, "whether this instance is allowed to bootstrap the etcd cluster")
 	flag.Parse()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	log := logging.NewLogger(*logLevel)
 	log.Info("Continuum Secret Service", "version", constants.Version())
 
@@ -54,7 +52,7 @@ func main() {
 		mayBootstrap:   *mayBootstrap,
 	}
 
-	if err := run(ctx, config, afero.Afero{Fs: afero.NewOsFs()}, log); err != nil {
+	if err := run(config, afero.Afero{Fs: afero.NewOsFs()}, log); err != nil {
 		log.Error(err.Error())
 		os.Exit(1)
 	}
@@ -70,7 +68,10 @@ type secretServiceConfig struct {
 	mayBootstrap   bool
 }
 
-func run(ctx context.Context, config secretServiceConfig, fs afero.Afero, log *slog.Logger) error {
+func run(config secretServiceConfig, fs afero.Afero, log *slog.Logger) error {
+	ctx, cancel := process.SignalContext(context.Background(), os.Interrupt)
+	defer cancel()
+
 	etcdServer, etcdClose, err := joinOrBootstrapEtcd(ctx, config, fs, log)
 	if err != nil {
 		return fmt.Errorf("joining or bootstrapping etcd: %w", err)

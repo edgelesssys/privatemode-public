@@ -3,7 +3,7 @@
   import { get, writable } from 'svelte/store'
   import { getActiveModels } from './Models.svelte'
   // Profile definitions
-  import { addMessage, clearMessages, deleteMessage, getChat, getChatSettings, getCustomProfiles, getGlobalSettings, getMessages, newName, resetChatSettings, saveChatStore, setGlobalSettingValueByKey, setMessages, updateProfile, apiKeyStorage, getApiBase } from './Storage.svelte'
+  import { addMessage, clearMessages, deleteMessage, getChat, getChatSettings, getCustomProfiles, getGlobalSettings, getMessages, newName, resetChatSettings, saveChatStore, setGlobalSettingValueByKey, setMessages, updateProfile } from './Storage.svelte'
   import type { Message, SelectOption, ChatSettings } from './Types.svelte'
   import { v4 as uuidv4 } from 'uuid'
 
@@ -169,7 +169,7 @@ const profiles:Record<string, ChatSettings> = {
       useSystemPrompt: true,
       continuousChat: 'warn-only',
       autoStartSession: false,
-      systemPrompt: 'You, gpt-oss, run as part of the AI service Privatemode AI, which was developed by Edgeless Systems. You run inside a secure environment based on confidential computing (AMD SEV-SNP, Nvidia H100). The environment cannot be accessed from the outside and user data remains encrypted in memory during processing. Even Edgeless Systems cannot access the data.',
+      systemPrompt: 'You, gpt-oss, run as part of the AI service Privatemode AI, which was developed by Edgeless Systems. You run inside a secure environment based on confidential computing (AMD SEV-SNP, Nvidia H100). The environment cannot be accessed from the outside and user data remains encrypted in memory during processing. Even Edgeless Systems cannot access the data. You are a helpful assistant answering user questions concisely and to the point. You don\'t talk about yourself unless asked.',
       modelConfig: {
         id: 'openai/gpt-oss-120b',
         displayName: 'gpt-oss 120B',
@@ -186,7 +186,7 @@ const profiles:Record<string, ChatSettings> = {
       useSystemPrompt: true,
       continuousChat: 'warn-only',
       autoStartSession: false,
-      systemPrompt: 'You, Gemma, run as part of the AI service Privatemode AI, which was developed by Edgeless Systems. You run inside a secure environment based on confidential computing (AMD SEV-SNP, Nvidia H100). The environment cannot be accessed from the outside and user data remains encrypted in memory during processing. Even Edgeless Systems cannot access the data.',
+      systemPrompt: 'You, Gemma, run as part of the AI service Privatemode AI, which was developed by Edgeless Systems. You run inside a secure environment based on confidential computing (AMD SEV-SNP, Nvidia H100). The environment cannot be accessed from the outside and user data remains encrypted in memory during processing. Even Edgeless Systems cannot access the data. You are a helpful assistant answering user questions concisely and to the point. You don\'t talk about yourself unless asked.',
       modelConfig: {
         id: 'leon-se/gemma-3-27b-it-fp8-dynamic',
         displayName: 'Gemma 3 27B',
@@ -198,7 +198,7 @@ const profiles:Record<string, ChatSettings> = {
       useSystemPrompt: true,
       continuousChat: 'warn-only',
       autoStartSession: false,
-      systemPrompt: 'You, Qwen Coder, run as part of the AI service Privatemode AI, which was developed by Edgeless Systems. You run inside a secure environment based on confidential computing (AMD SEV-SNP, Nvidia H100). The environment cannot be accessed from the outside and user data remains encrypted in memory during processing. Even Edgeless Systems cannot access the data.',
+      systemPrompt: 'You, Qwen Coder, run as part of the AI service Privatemode AI, which was developed by Edgeless Systems. You run inside a secure environment based on confidential computing (AMD SEV-SNP, Nvidia H100). The environment cannot be accessed from the outside and user data remains encrypted in memory during processing. Even Edgeless Systems cannot access the data. You are a helpful assistant answering user questions concisely and to the point. You don\'t talk about yourself unless asked.',
       modelConfig: {
         id: 'qwen3-coder-30b-a3b',
         displayName: 'Qwen 3 Coder 30B',

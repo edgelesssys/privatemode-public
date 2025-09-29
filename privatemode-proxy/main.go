@@ -13,11 +13,15 @@ import (
 )
 
 func main() {
+	if err := execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func execute() error {
 	ctx, cancel := process.SignalContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	cmd := cmd.New()
-	if err := cmd.ExecuteContext(ctx); err != nil {
-		os.Exit(1)
-	}
+	return cmd.ExecuteContext(ctx)
 }
