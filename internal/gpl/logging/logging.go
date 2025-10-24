@@ -7,7 +7,6 @@ package logging
 import (
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"os"
 	"strconv"
@@ -108,23 +107,6 @@ func LevelFromString(s string, fallback slog.Level) slog.Level {
 	}
 
 	return level
-}
-
-// NewLogWrapper wraps the given [*slog.Logger] in a [*log.Logger].
-// All messages written to the returned [*log.Logger] will be written to the error level of the given [*slog.Logger].
-func NewLogWrapper(slogger *slog.Logger) *log.Logger {
-	return log.New(loggerWrapper{slogger}, "", 0)
-}
-
-// loggerWrapper implements [io.Writer] by writing any data to the error level of the embedded slog logger.
-type loggerWrapper struct {
-	*slog.Logger
-}
-
-// Write implements the [io.Writer] interface by writing the given data to the error level of the embedded slog logger.
-func (l loggerWrapper) Write(p []byte) (n int, err error) {
-	l.Error(string(p))
-	return len(p), nil
 }
 
 // NewFileLogger returns a new [*slog.Logger] that writes to a file with rotation support.

@@ -170,7 +170,7 @@ func loadRuntimeConfig(workspace string, log *slog.Logger) (jsonConfig, error) {
 	_, err := os.Stat(configPath)
 	if os.IsNotExist(err) {
 		log.Info("No configuration file found", "path", configPath)
-		return jsonConfig{}, nil //nolint:exhaustruct
+		return jsonConfig{}, nil
 	}
 
 	data, err := os.ReadFile(configPath)

@@ -24,6 +24,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/gpl/process"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/afero"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -87,7 +88,7 @@ func run(log *slog.Logger) error {
 		log.Warn("Skipping etcd set up since the inference proxy is running an unencrypted API adapter")
 	}
 
-	forwarder := forwarder.New("tcp", net.JoinHostPort(*workloadAddress, *workloadPort), log)
+	forwarder := forwarder.New(&http.Client{}, net.JoinHostPort(*workloadAddress, *workloadPort), forwarder.SchemeHTTP, log)
 
 	adapter, err := adapter.New(*adapterType, tasks, cipher.New(secrets), *ocspStatusFile, forwarder, log)
 	if err != nil {
@@ -95,24 +96,42 @@ func run(log *slog.Logger) error {
 	}
 	server := server.New(adapter, log)
 
-	go func() {
+	wg, ctx := errgroup.WithContext(ctx)
+
+	wg.Go(func() error {
 		log.Info("Starting metrics server", "port", *metricsPort)
 		mux := http.NewServeMux()
 		mux.Handle(constants.MetricsEndpoint, promhttp.Handler())
-		if err := http.ListenAndServe(net.JoinHostPort("0.0.0.0", *metricsPort), mux); err != nil {
-			log.Error("Failed to start metrics server", "error", err)
-		}
-	}()
 
-	log.Info("Starting server")
-	listener, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", *listenPort))
-	if err != nil {
-		return fmt.Errorf("listening: %w", err)
-	}
-	if err := server.Serve(listener); err != nil {
-		return fmt.Errorf("serving: %w", err)
-	}
-	return nil
+		listener, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", *metricsPort))
+		if err != nil {
+			return fmt.Errorf("listening: %w", err)
+		}
+		metricsServer := &http.Server{
+			Addr:     listener.Addr().String(),
+			Handler:  mux,
+			ErrorLog: slog.NewLogLogger(log.With("component", "metricsServer").Handler(), slog.LevelError),
+		}
+
+		if err := process.HTTPServeContext(ctx, metricsServer, listener, log); err != nil {
+			return fmt.Errorf("serving metrics server: %w", err)
+		}
+		return nil
+	})
+
+	wg.Go(func() error {
+		log.Info("Starting server")
+		listener, err := net.Listen("tcp", net.JoinHostPort("0.0.0.0", *listenPort))
+		if err != nil {
+			return fmt.Errorf("listening: %w", err)
+		}
+		if err := server.Serve(ctx, listener); err != nil {
+			return fmt.Errorf("serving: %w", err)
+		}
+		return nil
+	})
+
+	return wg.Wait()
 }
 
 func setUpEtcdSync(ctx context.Context, address, etcdMemberCert, etcdMemberKey, etcdCA string, log *slog.Logger) (*secrets.Secrets, func(), error) {

@@ -15,7 +15,8 @@ let
       "go.mod"
       "go.sum"
       "secret-service"
-      "internal"
+      "internal/crypto"
+      "internal/gpl"
     ];
 
     ldflags = [

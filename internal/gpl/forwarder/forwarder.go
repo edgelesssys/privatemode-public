@@ -57,6 +57,23 @@ type APIError struct {
 	Code    string `json:"code"`
 }
 
+// Opts applies options to a [Forwarder.Forward] call.
+type Opts func(*opts)
+
+// WithRetryCallback applies the given RetryCallback to the forwarding call.
+func WithRetryCallback(cb RetryCallback) Opts {
+	return func(o *opts) {
+		o.retryCallback = cb
+	}
+}
+
+// WithHost forwards the request to the given host.
+func WithHost(host string) Opts {
+	return func(o *opts) {
+		o.host = host
+	}
+}
+
 // NoRequestMutation skips any mutation on the [*http.Request].
 func NoRequestMutation(*http.Request) error { return nil }
 
@@ -88,26 +105,8 @@ type Forwarder struct {
 	protocolScheme ProtocolScheme
 }
 
-// New sets up a new HTTP-forwarding proxy to the given network address.
-func New(network, address string, log *slog.Logger) *Forwarder {
-	host := address
-	if network == "unix" {
-		host = "unix"
-	}
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				dialer := net.Dialer{}
-				return dialer.DialContext(ctx, network, address)
-			},
-		},
-	}
-	return NewWithClient(client, host, SchemeHTTP, log)
-}
-
-// NewWithClient sets up a new forwarding proxy with a custom http client.
-func NewWithClient(client *http.Client, address string, scheme ProtocolScheme, log *slog.Logger) *Forwarder {
+// New sets up a new forwarding proxy with a custom http client.
+func New(client *http.Client, address string, scheme ProtocolScheme, log *slog.Logger) *Forwarder {
 	return &Forwarder{
 		client:         client,
 		log:            log,
@@ -122,18 +121,13 @@ func NewWithClient(client *http.Client, address string, scheme ProtocolScheme, l
 func (f *Forwarder) Forward(
 	w http.ResponseWriter, req *http.Request,
 	requestMutator RequestMutator, responseMutator ResponseMutator, responseHeaderMutator HeaderMutator,
+	opts ...Opts,
 ) {
-	f.ForwardWithRetry(w, req, requestMutator, responseMutator, responseHeaderMutator, NoRetry)
-}
+	options := defaultOpts(f)
+	for _, opt := range opts {
+		opt(options)
+	}
 
-// ForwardWithRetry mutates a request with the given mutator and forwards it to a different endpoint.
-// It also mutates the response with the given responseMutator and responseHeaderMutator before
-// writing it back to the client. Supports retry logic via the retryCallback parameter.
-func (f *Forwarder) ForwardWithRetry(
-	w http.ResponseWriter, req *http.Request,
-	requestMutator RequestMutator, responseMutator ResponseMutator, responseHeaderMutator HeaderMutator,
-	retryCallback RetryCallback,
-) {
 	f.logInfo("Forwarding request", req)
 
 	// Prepare request for forwarding to server
@@ -142,13 +136,17 @@ func (f *Forwarder) ForwardWithRetry(
 	updateForwardedHeader(req.Header, req.RemoteAddr)
 
 	// Not setting the host here leads to "no Host in request URL" errors.
-	req.URL.Host = f.host
+	req.URL.Host = options.host
 	// Not setting the scheme here leads to "http: no Host in request URL" errors.
 	req.URL.Scheme = string(f.protocolScheme)
 
-	resp, err := f.sendWithRetry(req, requestMutator, retryCallback)
+	resp, err := f.sendWithRetry(req, requestMutator, options.retryCallback)
 	if err != nil {
-		f.logError("Failed to forward request", err, req)
+		if errors.Is(err, context.Canceled) {
+			f.logWarning("Connection closed by client before request could be fully forwarded", err, req)
+		} else {
+			f.logError("Failed to forward request", err, req)
+		}
 		HTTPError(w, req, http.StatusInternalServerError, "forwarding request: %s", err)
 		return
 	}
@@ -424,5 +422,17 @@ func updateForwardedHeader(header http.Header, remoteAddr string) {
 			clientIP = strings.Join(prior, ", ") + ", " + clientIP
 		}
 		header.Set("X-Forwarded-For", clientIP)
+	}
+}
+
+type opts struct {
+	host          string
+	retryCallback RetryCallback
+}
+
+func defaultOpts(fw *Forwarder) *opts {
+	return &opts{
+		host:          fw.host,
+		retryCallback: NoRetry,
 	}
 }

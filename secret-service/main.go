@@ -144,7 +144,7 @@ func joinOrBootstrapEtcd(
 	if !errors.As(err, &joinErr) {
 		return nil, nil, fmt.Errorf("unexpected error while discovering etcd cluster: %w", err)
 	}
-	log.Info("etcd discovery failed, proceeding to bootstrap or wait for bootstrapper instance",
+	log.Info("Etcd discovery failed, proceeding to bootstrap or wait for bootstrapper instance",
 		"error", err)
 
 	if config.mayBootstrap {

@@ -22,7 +22,6 @@ import (
 	"github.com/edgelesssys/continuum/internal/gpl/auth"
 	"github.com/edgelesssys/continuum/internal/gpl/constants"
 	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
-	"github.com/edgelesssys/continuum/internal/gpl/logging"
 	"github.com/edgelesssys/continuum/internal/gpl/ocspheader"
 	"github.com/edgelesssys/continuum/internal/gpl/openai"
 	"github.com/edgelesssys/continuum/internal/gpl/process"
@@ -55,17 +54,17 @@ type Opts struct {
 }
 
 type apiForwarder interface {
-	ForwardWithRetry(
+	Forward(
 		w http.ResponseWriter, req *http.Request,
 		requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator,
-		headerMutator forwarder.HeaderMutator, retryCallback forwarder.RetryCallback,
+		headerMutator forwarder.HeaderMutator, opts ...forwarder.Opts,
 	)
 }
 
 // New sets up a new Server.
 func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Server {
-	log.Info("version", slog.String("version", constants.Version()))
-	fwd := forwarder.NewWithClient(client, opts.APIEndpoint, opts.ProtocolScheme, log)
+	log.Info("Version", slog.String("version", constants.Version()))
+	fwd := forwarder.New(client, opts.APIEndpoint, opts.ProtocolScheme, log)
 
 	return &Server{
 		apiKey:                       opts.APIKey,
@@ -86,7 +85,7 @@ func (s *Server) Serve(ctx context.Context, lis net.Listener, tlsConfig *tls.Con
 		Addr:      lis.Addr().String(),
 		Handler:   s.GetHandler(),
 		TLSConfig: tlsConfig,
-		ErrorLog:  logging.NewLogWrapper(s.log),
+		ErrorLog:  slog.NewLogLogger(s.log.Handler(), slog.LevelError),
 	}
 	return process.HTTPServeContext(ctx, server, lis, s.log)
 }
@@ -267,7 +266,7 @@ func (s *Server) inferenceHandler(
 			// Force a new rc for the next attempt
 			secret, err := rc.ResetSecret(r)
 			if err != nil {
-				s.log.Error("resetting request cipher", "error", err)
+				s.log.Error("Resetting request cipher", "error", err)
 				return false, 0
 			}
 
@@ -280,12 +279,12 @@ func (s *Server) inferenceHandler(
 			return true, 0
 		}
 
-		s.forwarder.ForwardWithRetry(
+		s.forwarder.Forward(
 			w, r,
 			requestMutator(rc),
 			responseMutator(rc),
-			allowWails,
-			retryCallback,
+			allowDesktopApp,
+			forwarder.WithRetryCallback(retryCallback),
 		)
 	}
 }
@@ -353,12 +352,11 @@ func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) noEncryptionHandler(w http.ResponseWriter, r *http.Request) {
 	s.setStaticRequestHeaders(r)
 
-	s.forwarder.ForwardWithRetry(
+	s.forwarder.Forward(
 		w, r,
 		forwarder.NoRequestMutation,
 		forwarder.NoResponseMutation{},
-		allowWails,
-		forwarder.NoRetry,
+		allowDesktopApp,
 	)
 }
 
@@ -383,10 +381,13 @@ func (s *Server) setStaticRequestHeaders(r *http.Request) {
 	r.Header.Set(constants.PrivatemodeClientHeader, s.getClientHeader())
 }
 
-// allowWails allows requests from wails (origin wails://wails.localhost)
-func allowWails(resp http.Header, req http.Header) error {
+// allowDesktopApp allows requests from the desktop apps (Wails or v2).
+func allowDesktopApp(resp http.Header, req http.Header) error {
 	origin := req.Get("Origin")
-	if strings.HasPrefix(origin, "wails://") {
+	// TODO(msanft): Adjust this once the Wails app is removed.
+	switch {
+	case strings.HasPrefix(origin, "wails://"), // Wails uses the wails:// scheme
+		strings.HasPrefix(origin, "app://"): // V2 app uses the app:// scheme
 		resp.Set("Access-Control-Allow-Origin", origin)
 	}
 	return nil

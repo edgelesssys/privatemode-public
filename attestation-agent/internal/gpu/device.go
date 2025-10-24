@@ -63,7 +63,7 @@ func (d *Device) handle() (nvml.Device, error) {
 
 	device, ret := nvml.DeviceGetHandleByUUID(d.ID())
 	if ret != nvml.SUCCESS {
-		return nvml.Device{}, fmt.Errorf("getting GPU handle: %s", nvml.ErrorString(ret))
+		return nil, fmt.Errorf("getting GPU handle: %s", nvml.ErrorString(ret))
 	}
 	d.cachedHandle = &device
 

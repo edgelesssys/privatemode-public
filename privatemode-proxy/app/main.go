@@ -61,10 +61,10 @@ func main() {
 			NvidiaOCSPAllowUnknown:       true,           // TODO(msanft): make this configurable
 			NvidiaOCSPRevokedGracePeriod: 48 * time.Hour, // TODO(msanft): make this configurable
 		},
-		runtimeConfig: jsonConfig{}, //nolint:exhaustruct
+		runtimeConfig: jsonConfig{},
 	}, log)
 
-	err = wails.Run(&options.App{ //nolint:exhaustruct
+	err = wails.Run(&options.App{
 		Title:  "Privatemode AI",
 		Width:  1024,
 		Height: 768,
@@ -75,7 +75,7 @@ func main() {
 		},
 		OnStartup:        app.OnStartup,
 		BackgroundColour: &options.RGBA{R: 27, G: 38, B: 54, A: 1},
-		Mac: &mac.Options{ //nolint:exhaustruct
+		Mac: &mac.Options{
 			About: &mac.AboutInfo{
 				Title:   "About Privatemode AI",
 				Message: fmt.Sprintf("Version %s\n© 2025 Edgeless Systems GmbH", constants.Version()),

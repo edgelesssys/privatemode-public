@@ -2,4 +2,4 @@ apiVersion: v2
 name: privatemode-proxy
 description: A Helm chart for the Privatemode Proxy.
 type: application
-version: 1.27.1-pre
+version: 1.28.1-pre

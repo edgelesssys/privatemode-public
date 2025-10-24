@@ -60,11 +60,7 @@ func TestForwardModelsRequest(t *testing.T) {
 					Object: "list",
 					Data: []openai.Model{
 						{
-							ID:     "latest",
-							Object: "model",
-						},
-						{
-							ID:     "llama3",
+							ID:     "llama-3.3-70b",
 							Object: "model",
 						},
 					},
@@ -77,12 +73,7 @@ func TestForwardModelsRequest(t *testing.T) {
 					Object: "list",
 					Data: []openai.Model{
 						{
-							ID:     "latest",
-							Object: "model",
-							Tasks:  []string{constants.WorkloadTaskGenerate},
-						},
-						{
-							ID:     "llama3",
+							ID:     "llama-3.3-70b",
 							Object: "model",
 							Tasks:  []string{constants.WorkloadTaskGenerate},
 						},
@@ -94,10 +85,10 @@ func TestForwardModelsRequest(t *testing.T) {
 		},
 		"retrieve model": {
 			workloadTasks: []string{constants.WorkloadTaskGenerate},
-			path:          "/v1/models/latest",
+			path:          "/v1/models/llama-3.3-70b",
 			serverResponse: func() string {
 				res, err := json.Marshal(openai.Model{
-					ID:     "latest",
+					ID:     "llama-3.3-70b",
 					Object: "model",
 				})
 				require.NoError(t, err)
@@ -105,7 +96,7 @@ func TestForwardModelsRequest(t *testing.T) {
 			}(),
 			wantResponse: func() string {
 				res, err := json.Marshal(openai.Model{
-					ID:     "latest",
+					ID:     "llama-3.3-70b",
 					Object: "model",
 					Tasks:  []string{constants.WorkloadTaskGenerate},
 				})
@@ -121,7 +112,7 @@ func TestForwardModelsRequest(t *testing.T) {
 					Object: "list",
 					Data: []openai.Model{
 						{
-							ID:     "latest",
+							ID:     "llama-3.3-70b",
 							Object: "model",
 						},
 						{
@@ -138,7 +129,7 @@ func TestForwardModelsRequest(t *testing.T) {
 					Object: "list",
 					Data: []openai.Model{
 						{
-							ID:     "latest",
+							ID:     "llama-3.3-70b",
 							Object: "model",
 							Tasks:  []string{constants.WorkloadTaskGenerate, "custom-task"},
 						},
@@ -155,10 +146,10 @@ func TestForwardModelsRequest(t *testing.T) {
 		},
 		"retrieve model with multiple tasks": {
 			workloadTasks: []string{constants.WorkloadTaskGenerate, constants.WorkloadTaskToolCalling},
-			path:          "/v1/models/latest",
+			path:          "/v1/models/llama-3.3-70b",
 			serverResponse: func() string {
 				res, err := json.Marshal(openai.Model{
-					ID:     "latest",
+					ID:     "llama-3.3-70b",
 					Object: "model",
 				})
 				require.NoError(t, err)
@@ -166,7 +157,7 @@ func TestForwardModelsRequest(t *testing.T) {
 			}(),
 			wantResponse: func() string {
 				res, err := json.Marshal(openai.Model{
-					ID:     "latest",
+					ID:     "llama-3.3-70b",
 					Object: "model",
 					Tasks:  []string{constants.WorkloadTaskGenerate, constants.WorkloadTaskToolCalling},
 				})
@@ -192,7 +183,7 @@ func TestForwardModelsRequest(t *testing.T) {
 			require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
 
 			log := slog.Default()
-			forwarder := forwarder.New("tcp", srv.Listener.Addr().String(), log)
+			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
 			adapter, err := New(tc.workloadTasks, nil, ocspFile, forwarder, log)
 			require.NoError(err)
 
@@ -327,7 +318,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 			require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
 
 			log := slog.Default()
-			forwarder := forwarder.New("tcp", srv.Listener.Addr().String(), log)
+			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, forwarder, log)
 			require.NoError(err)
 
@@ -552,7 +543,7 @@ func (c *stubCipher) EncryptResponse(context.Context) func(plainData string) (st
 
 type stubForwarder struct{}
 
-func (f *stubForwarder) Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator) {
+func (f *stubForwarder) Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator, ...forwarder.Opts) {
 }
 
 func stubRequestMutator(_ *http.Request) error { return nil }

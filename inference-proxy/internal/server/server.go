@@ -2,11 +2,16 @@
 package server
 
 import (
+	"context"
+	"crypto/tls"
+	"log"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
+	"github.com/edgelesssys/continuum/internal/gpl/process"
 )
 
 // Server implements the user facing HTTP REST server.
@@ -25,11 +30,40 @@ func New(adapter adapter.InferenceAdapter, log *slog.Logger) *Server {
 }
 
 // Serve starts the server.
-func (s *Server) Serve(listener net.Listener) error {
-	return http.ServeTLS(listener, s.adapter.ServeMux(), "/etc/tls/tls.crt", "/etc/tls/tls.key")
+func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
+	certs, err := tls.LoadX509KeyPair("/etc/tls/tls.crt", "/etc/tls/tls.key")
+	if err != nil {
+		return err
+	}
+	server := &http.Server{
+		Addr:    listener.Addr().String(),
+		Handler: s.adapter.ServeMux(),
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{certs},
+		},
+		ErrorLog: newHTTPLogger(s.log), // Prometheus tries to scrape metrics from this TLS endpoint, causing errors we want to ignore
+	}
+	return process.HTTPServeContext(ctx, server, listener, s.log)
 }
 
-// serveInsecure starts the server without TLS. Only used in testing.
-func (s *Server) serveInsecure(listener net.Listener) error {
-	return http.Serve(listener, s.adapter.ServeMux())
+type httpLogger struct {
+	infoLog  *log.Logger
+	errorLog *log.Logger
+}
+
+func newHTTPLogger(slogger *slog.Logger) *log.Logger {
+	return log.New(&httpLogger{
+		infoLog:  slog.NewLogLogger(slogger.With("component", "httpErrorLog").Handler(), slog.LevelInfo),
+		errorLog: slog.NewLogLogger(slogger.With("component", "httpErrorLog").Handler(), slog.LevelError),
+	}, "", 0)
+}
+
+func (h *httpLogger) Write(b []byte) (n int, err error) {
+	s := string(b)
+	if strings.HasPrefix(s, "http: TLS handshake error from") {
+		h.infoLog.Print(s)
+	} else {
+		h.errorLog.Print(s)
+	}
+	return len(b), nil
 }

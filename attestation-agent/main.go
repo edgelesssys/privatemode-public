@@ -67,7 +67,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to verify GPUs: %w", err)
 	}
 
-	log.Info("Writing OCSP status to file", "file", constants.OCSPStatusFile)
+	log.Info("Writing OCSP status to file", "file", constants.OCSPStatusFile())
 	if err := os.MkdirAll(filepath.Dir(constants.OCSPStatusFile()), 0o644); err != nil {
 		return fmt.Errorf("creating directory for OCSP status file: %w", err)
 	}
@@ -78,7 +78,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	if err := os.WriteFile(constants.OCSPStatusFile(), statusBytes, 0o644); err != nil {
 		return fmt.Errorf("writing OCSP status file: %w", err)
 	}
-	log.Info("OCSP status written successfully", "file", constants.OCSPStatusFile)
+	log.Info("OCSP status written successfully", "file", constants.OCSPStatusFile())
 
 	return nil
 }

@@ -22,8 +22,8 @@ func (d *Device) AttestationReport(nonce [32]byte) ([]byte, error) {
 		return nil, fmt.Errorf("getting GPU handle: %w", err)
 	}
 
-	report, ret := device.GetConfComputeGpuAttestationReport(nonce)
-	if ret != nvml.SUCCESS {
+	report := nvml.ConfComputeGpuAttestationReport{Nonce: nonce}
+	if ret := device.GetConfComputeGpuAttestationReport(&report); ret != nvml.SUCCESS {
 		return nil, fmt.Errorf("getting GPU attestation report: %s", nvml.ErrorString(ret))
 	}
 

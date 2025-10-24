@@ -111,6 +111,17 @@ func TestPromptEncryption(t *testing.T) {
 				"Access-Control-Allow-Origin": "wails://wails.localhost",
 			},
 		},
+		"ACAO header is set for app origin": {
+			proxyAPIKey:      &apiKey,
+			expectStatusCode: http.StatusOK,
+			prompt:           "Hello",
+			requestMutator: func(req *http.Request) {
+				req.Header.Set("Origin", "app://-")
+			},
+			expectedHeaders: map[string]string{
+				"Access-Control-Allow-Origin": "app://-",
+			},
+		},
 		"ACAO header is unset for unknown origin": {
 			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
@@ -267,7 +278,7 @@ func TestInvalidSecret(t *testing.T) {
 		apiKey:                       &apiKey,
 		defaultCacheSalt:             "",
 		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secretInvalid, secretValid}},
-		forwarder:                    forwarder.New("tcp", stubAuthOpenAIServer.Listener.Addr().String(), slog.Default()),
+		forwarder:                    forwarder.New(http.DefaultClient, stubAuthOpenAIServer.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default()),
 		log:                          slog.Default(),
 		isApp:                        false,
 		nvidiaOCSPAllowUnknown:       true,
@@ -676,7 +687,7 @@ func newTestServer(apiKey *string, secret secretmanager.Secret, openAIServerAddr
 		apiKey:                       apiKey,
 		defaultCacheSalt:             defaultCacheSalt,
 		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secret}},
-		forwarder:                    forwarder.New("tcp", openAIServerAddr, slog.Default()),
+		forwarder:                    forwarder.New(http.DefaultClient, openAIServerAddr, forwarder.SchemeHTTP, slog.Default()),
 		log:                          slog.Default(),
 		isApp:                        isApp,
 		nvidiaOCSPAllowUnknown:       true,

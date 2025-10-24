@@ -53,6 +53,8 @@ export const SmokeTest = {
     // test response within at most 5 seconds
     await new Promise(resolve => setTimeout(resolve, 5000))
     let response = await TestChatController.getLastMessageContent('assistant')
+    // Strip the dot at the end of response.
+    response = response.replace(/\.$/, '');
     if (response !== 'Smoke test completed') {
       throw new Error(`Unexpected response: ${response}`)
     }

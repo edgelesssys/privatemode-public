@@ -13,7 +13,7 @@ let
       "go.mod"
       "go.sum"
       "inference-proxy"
-      "internal"
+      "internal/gpl"
     ];
 
     ldflags = [

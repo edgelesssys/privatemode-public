@@ -59,7 +59,8 @@ func TestCCFeatures(t *testing.T) {
 	assert.Equal(nvml.SUCCESS, ret)
 	t.Log("Certs", certs)
 
-	report, ret := device.GetConfComputeGpuAttestationReport([32]byte{})
+	var report nvml.ConfComputeGpuAttestationReport
+	ret = device.GetConfComputeGpuAttestationReport(&report)
 	assert.Equal(nvml.SUCCESS, ret)
 	t.Log("Attestation Report", report)
 }

@@ -26,7 +26,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-var ocspStatusMetrics = promauto.NewGaugeVec(prometheus.GaugeOpts{ //nolint: exhaustruct
+var ocspStatusMetrics = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "privatemode_nvidia_ocsp_status",
 	Help: "NVIDIA OCSP status of the attested components (0=good, 1=revoked, -1=unknown)",
 }, []string{"i", "component"})
@@ -238,7 +238,7 @@ func (t *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 }
 
 type mutatingForwarder interface {
-	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator)
+	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator, ...forwarder.Opts)
 }
 
 func addOCSPStatusMetric(index int, component string, status ocsp.Status) {

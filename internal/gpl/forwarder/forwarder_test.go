@@ -33,7 +33,7 @@ func TestForwardStreaming(t *testing.T) {
 	}))
 	defer stubServer.Close()
 
-	forwarder := New("tcp", stubServer.Listener.Addr().String(), slog.Default())
+	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	resp := httptest.NewRecorder()
@@ -84,7 +84,7 @@ func TestForwardStreamingAborted(t *testing.T) {
 	}))
 	defer stubServer.Close()
 
-	forwarder := New("tcp", stubServer.Listener.Addr().String(), slog.Default())
+	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	// Wrap req.Context() in a cancelable context
@@ -141,7 +141,7 @@ func TestForwardNonStreaming(t *testing.T) {
 	}))
 	defer stubServer.Close()
 
-	forwarder := New("tcp", stubServer.Listener.Addr().String(), slog.Default())
+	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	resp := httptest.NewRecorder()
@@ -173,7 +173,7 @@ func TestForwardHeaderCopying(t *testing.T) {
 	}))
 	defer stubServer.Close()
 
-	forwarder := New("tcp", stubServer.Listener.Addr().String(), slog.Default())
+	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	resp := httptest.NewRecorder()
@@ -302,7 +302,7 @@ func TestForwardRetry(t *testing.T) {
 			}))
 			defer stubServer.Close()
 
-			forwarder := New("tcp", stubServer.Listener.Addr().String(), slog.Default())
+			forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
 			retryCallback := func(statusCode int, body []byte, attempt int) (bool, time.Duration) {
 				if !tc.shouldRetry {
@@ -323,13 +323,13 @@ func TestForwardRetry(t *testing.T) {
 			resp := httptest.NewRecorder()
 
 			startTime := time.Now()
-			forwarder.ForwardWithRetry(
+			forwarder.Forward(
 				resp,
 				req,
 				NoRequestMutation,
 				NoResponseMutation{},
 				NoHeaderMutation,
-				retryCallback,
+				WithRetryCallback(retryCallback),
 			)
 			elapsed := time.Since(startTime)
 

@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,7 +68,7 @@ func New() *cobra.Command {
 	must(logging.RegisterFormatFlagCompletionFunc(cmd))
 
 	cmd.Flags().StringVar(&apiKeyStr, "apiKey", "",
-		"The API key for the Privatemode API. If no key is set, the proxy will not authenticate with the API.")
+		"The API key for the Privatemode API. Accepts either a direct literal or a file path prefixed with '@'. If no key is set, the proxy will not authenticate with the API.")
 	cmd.Flags().StringVar(&secretEndpoint, "ssEndpoint", constants.SecretServiceEndpoint, "The endpoint of the secret service.")
 	cmd.Flags().StringVar(&apiEndpoint, "apiEndpoint", constants.APIEndpoint, "The endpoint for the Privatemode API")
 	cmd.Flags().StringVar(&port, "port", "8080",
@@ -143,7 +145,19 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 
 	var apiKey *string
 	if cmd.Flags().Changed("apiKey") {
-		apiKey = &apiKeyStr
+		if strings.HasPrefix(apiKeyStr, "@") {
+			// Trim '@' and read file contents
+			path := strings.TrimPrefix(apiKeyStr, "@")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("failed to read API key file %q: %w", path, err)
+			}
+			key := strings.TrimSpace(string(data))
+			apiKey = &key
+		} else {
+			// Direct literal
+			apiKey = &apiKeyStr
+		}
 	} else {
 		log.Warn("No API key provided. The proxy will not authenticate with the API.")
 	}

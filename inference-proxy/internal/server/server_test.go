@@ -50,7 +50,7 @@ func benchmarkServe(b *testing.B, apiType string) {
 	proxyLis, err := net.Listen("tcp", "")
 	require.NoError(err)
 	go func() {
-		if err := server.serveInsecure(proxyLis); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := http.Serve(proxyLis, server.adapter.ServeMux()); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			panic(err)
 		}
 	}()
@@ -91,7 +91,7 @@ func benchmarkServe(b *testing.B, apiType string) {
 
 func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]byte, *Server) {
 	require := require.New(b)
-	fw := forwarder.New("tcp", workloadEndpoint, log)
+	fw := forwarder.New(http.DefaultClient, workloadEndpoint, forwarder.SchemeHTTP, log)
 
 	secret := []byte(strings.Repeat("a", 32))
 	c := cipher.New(secrets.New(stubSecretGetter{}, map[string][]byte{"test": secret}))

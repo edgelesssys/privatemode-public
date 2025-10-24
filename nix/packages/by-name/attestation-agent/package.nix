@@ -15,7 +15,8 @@ let
     src = lib.continuumRepoRootSrc [
       "go.mod"
       "go.sum"
-      "internal"
+      "internal/crypto"
+      "internal/gpl"
       "attestation-agent"
     ];
 

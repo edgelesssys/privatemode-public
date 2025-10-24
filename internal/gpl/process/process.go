@@ -50,9 +50,7 @@ func HTTPServeContext(ctx context.Context, server *http.Server, listener net.Lis
 	var wg sync.WaitGroup
 	serveErr := make(chan error, 1)
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if server.TLSConfig == nil {
 			log.Info("Starting HTTP server without TLS", "endpoint", listener.Addr().String())
 			serveErr <- server.Serve(listener)
@@ -60,19 +58,17 @@ func HTTPServeContext(ctx context.Context, server *http.Server, listener net.Lis
 			log.Info("Starting HTTPS server", "endpoint", listener.Addr().String())
 			serveErr <- server.ServeTLS(listener, "", "")
 		}
-	}()
+	})
 
 	var err error
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		select {
 		case <-ctx.Done():
 			log.Info("Shutting down server")
 			err = server.Shutdown(ctx)
 		case err = <-serveErr:
 		}
-	}()
+	})
 
 	wg.Wait()
 	return err

@@ -51,7 +51,7 @@ func (s *Updater) UpdateSecrets(ctx context.Context, secrets map[string][]byte, 
 		if err := s.ssClient.SetSecrets(ctx, secrets, ttl); err == nil {
 			return nil
 		} else {
-			s.log.Error("set secrets", "error", err)
+			s.log.Error("Set secrets", "error", err)
 		}
 		if err := s.updateTLSConfig(ctx); err != nil {
 			return fmt.Errorf("refreshing deployment: %w", err)
