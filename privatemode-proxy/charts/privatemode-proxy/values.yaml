@@ -1,6 +1,6 @@
 replicaCount: 1
 image:
-  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.28.1-pre
+  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.29.1-pre
   pullPolicy: IfNotPresent
   restartPolicy: Always
 service:
@@ -45,3 +45,5 @@ config:
   tls:
     enabled: false
     secretName: 'privatemode-proxy-tls'
+  # Extra environment variables
+  extraEnv: []

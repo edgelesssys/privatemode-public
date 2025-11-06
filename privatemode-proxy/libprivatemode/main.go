@@ -6,6 +6,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -22,17 +23,52 @@ func PrivatemodeStartProxy() (int, string) {
 	log := logging.NewCLILogger("info", os.Stderr)
 	log.Info("Starting privatemode-proxy")
 
+	flags, err := flagsFromEnv(log)
+	if err != nil {
+		return -1, fmt.Sprintf("getting flags from env: %s", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:")
+	if err != nil {
+		return -1, fmt.Sprintf("setting up listener: %s", err)
+	}
+
+	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		return -1, "getting listener address: not a TCP address"
+	}
+
+	go func() {
+		log.Info("Connecting to secret-service")
+		manager, err := setup.SecretManager(context.Background(), *flags, log)
+		if err != nil {
+			log.Error("connecting to secret-service", "error", err)
+			return
+		}
+
+		server := setup.NewServer(*flags, true, manager, log)
+
+		if err := server.Serve(context.Background(), listener, nil); err != nil {
+			log.Error("running server", "error", err)
+			return
+		}
+	}()
+
+	return tcpAddr.Port, ""
+}
+
+func flagsFromEnv(log *slog.Logger) (*setup.Flags, error) {
 	cfgDir, err := os.UserConfigDir()
 	if err != nil {
-		return -1, fmt.Sprintf("getting user config dir: %s", err)
+		return nil, fmt.Errorf("getting user config dir: %w", err)
 	}
 
 	cacheSalt, err := openai.RandomPromptCacheSalt()
 	if err != nil {
-		return -1, fmt.Sprintf("generating random prompt cache salt: %s", err)
+		return nil, fmt.Errorf("generating random prompt cache salt: %w", err)
 	}
 
-	flags := setup.Flags{
+	flags := &setup.Flags{
 		Workspace:      filepath.Join(cfgDir, "EdgelessSystems", "privatemode"),
 		ManifestPath:   "",
 		APIKey:         nil, // the key is set in the UI. needs to be nil
@@ -50,33 +86,28 @@ func PrivatemodeStartProxy() (int, string) {
 		NvidiaOCSPRevokedGracePeriod: 48 * time.Hour, // TODO(msanft): make this configurable
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:")
-	if err != nil {
-		return -1, fmt.Sprintf("setting up listener: %s", err)
+	if apiEndpoint := os.Getenv("LIBPRIVATEMODE_API_ENDPOINT"); apiEndpoint != "" {
+		log.Info("LIBPRIVATEMODE_API_ENDPOINT is set, overriding default API endpoint", "endpoint", apiEndpoint)
+		flags.APIEndpoint = apiEndpoint
+		flags.InsecureAPIConnection = true
 	}
 
-	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
-	if !ok {
-		return -1, "getting listener address: not a TCP address"
+	if secretEndpoint := os.Getenv("LIBPRIVATEMODE_SECRET_ENDPOINT"); secretEndpoint != "" {
+		log.Info("LIBPRIVATEMODE_SECRET_ENDPOINT is set, overriding default secret endpoint", "endpoint", secretEndpoint)
+		flags.SecretEndpoint = secretEndpoint
 	}
 
-	go func() {
-		log.Info("Connecting to secret-service")
-		manager, err := setup.SecretManager(context.Background(), flags, log)
-		if err != nil {
-			log.Error("connecting to secret-service", "error", err)
-			return
-		}
+	if coordinatorEndpoint := os.Getenv("LIBPRIVATEMODE_COORDINATOR_ENDPOINT"); coordinatorEndpoint != "" {
+		log.Info("LIBPRIVATEMODE_COORDINATOR_ENDPOINT is set, overriding default coordinator endpoint", "endpoint", coordinatorEndpoint)
+		flags.CoordinatorEndpoint = coordinatorEndpoint
+	}
 
-		server := setup.NewServer(flags, true, manager, log)
+	if manifestPath := os.Getenv("LIBPRIVATEMODE_MANIFEST_PATH"); manifestPath != "" {
+		log.Info("LIBPRIVATEMODE_MANIFEST_PATH is set, overriding default manifest path", "path", manifestPath)
+		flags.ManifestPath = manifestPath
+	}
 
-		if err := server.Serve(context.Background(), listener, nil); err != nil {
-			log.Error("running server", "error", err)
-			return
-		}
-	}()
-
-	return tcpAddr.Port, ""
+	return flags, nil
 }
 
 func main() {}

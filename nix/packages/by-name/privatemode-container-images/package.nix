@@ -16,8 +16,9 @@
 
   # Optional inputs - these are not available in the OSS build.
   apigateway ? null,
-  gpu-injector ? null,
+  availability-test ? null,
   fake-workload ? null,
+  gpu-injector ? null,
   rim-cache ? null,
 }:
 let
@@ -58,6 +59,7 @@ let
     fake-workload.image
     rim-cache.image
     contrast.image
+    availability-test.image
   ];
 
   docker-images = linkFarmFromDrvs "privatemode-docker-images" (

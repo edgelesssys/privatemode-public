@@ -25,7 +25,7 @@ spec:
               protocol: TCP
           args:
             {{- if .Values.config.apiKey.enabled }}
-            - "--apiKey=$(privatemode_API_KEY)"
+            - "--apiKey=@/etc/apiKey/apiKey"
             {{- end}}
             {{- if .Values.config.ssEndpoint.enabled }}
             - "--ssEndpoint={{ .Values.config.ssEndpoint.ssEndpoint }}"
@@ -48,12 +48,8 @@ spec:
             - "--tlsKeyPath=/etc/tls/tls.key"
             {{- end }}
           env:
-            {{- if .Values.config.apiKey.enabled }}
-            - name: privatemode_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.config.apiKey.apiKeySecretName }}
-                  key: apiKey
+            {{- with .Values.config.extraEnv }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           volumeMounts:
             {{- if .Values.config.workspace.enabled }}
@@ -69,6 +65,11 @@ spec:
             {{- if .Values.config.tls.enabled }}
             - name: tls-certs
               mountPath: /etc/tls
+              readOnly: true
+            {{- end }}
+            {{- if .Values.config.apiKey.enabled }}
+            - name: apikey
+              mountPath: /etc/apiKey
               readOnly: true
             {{- end }}
           resources:
@@ -88,6 +89,11 @@ spec:
         - name: tls-certs
           secret:
             secretName: {{ .Values.config.tls.secretName }}
+        {{- end }}
+        {{- if .Values.config.apiKey.enabled }}
+        - name: apikey
+          secret:
+            secretName: {{ .Values.config.apiKey.apiKeySecretName }}
         {{- end }}
       nodeSelector:
         {{- toYaml .Values.nodeSelector | nindent 8 }}
