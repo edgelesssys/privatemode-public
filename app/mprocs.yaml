@@ -1,0 +1,12 @@
+# Dev processes for iterating on the desktop app.
+procs:
+  sveltekit:
+    shell: "npm run dev"
+    cwd: "app/frontend/"
+    stop: "SIGINT"
+  electron:
+    shell: |
+      [[ "$(uname -s)" == "Linux" ]] && ELECTRON_OVERRIDE_DIST_PATH=$(dirname $(which electron)) npm run start
+      [[ "$(uname -s)" == "Darwin" ]] && ELECTRON_OVERRIDE_DIST_PATH=$(dirname $(dirname $(which electron)))/Applications npm run start
+    cwd: "app/backend/"
+    stop: "SIGKILL"

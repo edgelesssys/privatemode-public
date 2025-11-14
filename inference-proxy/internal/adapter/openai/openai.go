@@ -17,11 +17,11 @@ import (
 	"time"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
-	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
-	"github.com/edgelesssys/continuum/internal/gpl/ocsp"
-	"github.com/edgelesssys/continuum/internal/gpl/ocspheader"
-	"github.com/edgelesssys/continuum/internal/gpl/openai"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/ocsp"
+	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
+	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )

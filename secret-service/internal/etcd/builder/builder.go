@@ -12,7 +12,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"go.etcd.io/etcd/api/v3/authpb"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"

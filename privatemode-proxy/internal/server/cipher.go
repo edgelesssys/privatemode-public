@@ -1,5 +1,5 @@
 // Copyright (c) Edgeless Systems GmbH
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MIT
 
 package server
 
@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/edgelesssys/continuum/internal/gpl/crypto"
-	"github.com/edgelesssys/continuum/internal/gpl/secretmanager"
+	"github.com/edgelesssys/continuum/internal/oss/crypto"
+	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 )
 
 // RenewableRequestCipher wraps a RequestCipher and that can be renewed when needed.

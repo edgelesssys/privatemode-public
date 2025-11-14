@@ -1,5 +1,5 @@
 // Copyright (c) Edgeless Systems GmbH
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MIT
 
 // Package tlsconfig contains logic for updating the TLS config for the Contrast client.
 package tlsconfig
@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/edgelesssys/continuum/internal/gpl/contrast"
+	"github.com/edgelesssys/continuum/internal/oss/contrast"
 	contrastsdk "github.com/edgelesssys/contrast/sdk"
 )
 

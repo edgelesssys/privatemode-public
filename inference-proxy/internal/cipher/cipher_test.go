@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
-	crypto "github.com/edgelesssys/continuum/internal/gpl/crypto"
+	crypto "github.com/edgelesssys/continuum/internal/oss/crypto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -16,7 +16,7 @@ let
       "go.mod"
       "go.sum"
       "internal/crypto"
-      "internal/gpl"
+      "internal/oss"
       "attestation-agent"
     ];
 
@@ -31,7 +31,7 @@ let
 
     ldflags = [
       "-extldflags=-Wl,-z,lazy"
-      "-X 'github.com/edgelesssys/continuum/internal/gpl/constants.version=${lib.continuumVersion}'"
+      "-X 'github.com/edgelesssys/continuum/internal/oss/constants.version=${lib.continuumVersion}'"
     ];
 
     tags = [ "gpu" ];

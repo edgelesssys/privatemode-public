@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"

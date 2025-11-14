@@ -14,7 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	internalOCSP "github.com/edgelesssys/continuum/internal/gpl/ocsp"
+	internalOCSP "github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"golang.org/x/crypto/ocsp"
 )
 

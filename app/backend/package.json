@@ -1,0 +1,62 @@
+{
+  "name": "privatemode",
+  "productName": "Privatemode",
+  "version": "1.0.0",
+  "description": "Desktop App for Privatemode.",
+  "main": ".vite/build/main.js",
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "publish": "electron-forge publish",
+    "lint": "eslint --ext .ts,.tsx .",
+    "install": "node-gyp rebuild",
+    "build:addon": "node-gyp rebuild",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:api": "playwright test chat-api.spec.ts"
+  },
+  "keywords": [],
+  "author": {
+    "name": "Edgeless Systems GmbH",
+    "email": "contact@edgeless.systems"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "config": {
+    "libprivatemode": "../../build-libprivatemode"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "7.10.2",
+    "@electron-forge/maker-deb": "7.10.2",
+    "@electron-forge/maker-dmg": "7.10.2",
+    "@electron-forge/maker-msix": "7.10.2",
+    "@electron-forge/maker-rpm": "7.10.2",
+    "@electron-forge/plugin-auto-unpack-natives": "7.10.2",
+    "@electron-forge/plugin-fuses": "7.10.2",
+    "@electron-forge/plugin-vite": "7.10.2",
+    "@electron/fuses": "1.8.0",
+    "@playwright/test": "1.56.1",
+    "@types/electron-squirrel-startup": "1.0.2",
+    "@typescript-eslint/eslint-plugin": "5.62.0",
+    "@typescript-eslint/parser": "5.62.0",
+    "electron": "39.0.0",
+    "eslint": "8.57.1",
+    "eslint-plugin-import": "2.32.0",
+    "playwright": "1.56.1",
+    "typescript": "5.9.3",
+    "vite": "7.1.11"
+  },
+  "dependencies": {
+    "electron-serve": "3.0.0",
+    "electron-squirrel-startup": "1.0.1",
+    "electron-unhandled": "5.0.0",
+    "node-addon-api": "8.5.0",
+    "node-gyp": "12.0.0"
+  },
+  "overrides": {
+    "@inquirer/prompts": "7.9.0",
+    "@electron/notarize": "github:msanft/notarize#msanft/notarytool-json-fix-build"
+  }
+}

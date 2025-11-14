@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/edgelesssys/continuum/internal/gpl/proto/secret-service/userapi"
+	"github.com/edgelesssys/continuum/internal/oss/proto/secret-service/userapi"
 	"github.com/stretchr/testify/assert"
 )
 

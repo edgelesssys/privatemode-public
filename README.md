@@ -14,17 +14,22 @@ See the [Verification from source code](https://docs.privatemode.ai/guides/verif
 
 ## Build the desktop app
 
-You need to have
+Ensure that the following programs are installed:
 
-- [Wails installation v2.9.1+](https://wails.io/docs/gettingstarted/installation)
+- [Nushell](https://www.nushell.sh/)
+- [NodeJS / NPM](https://nodejs.org/en)
 
 before building the app with the following command:
 
 ```bash
-cd privatemode-proxy/app
-VITE_DEFAULT_MODEL="latest" VITE_API_BASE="" wails build -tags "contrast_unstable_api"
+./scripts/build-app.nu v<x>.<y>.<z> <target>
 ```
 
-You may optionally set the `-platform` (cross-platform build) and `-nsis` flags (Windows installer).
+Where `v<x>.<y>.<z>` corresponds to the version number of the release (e.g. v1.30.0).
 
-After the successful build, you can find the app in the `privatemode-proxy/app/build/bin` directory.
+`<target>` can be one of the following:
+
+- `rpm`: RPM package for RedHat-based Linux distributions
+- `deb`: Debian package for Debian-based Linux distributions
+- `dmg`: MacOS disk image installer
+- `msix`: Windows installer

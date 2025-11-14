@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/spf13/afero"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )

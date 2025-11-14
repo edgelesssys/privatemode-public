@@ -1,5 +1,5 @@
 // Copyright (c) Edgeless Systems GmbH
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MIT
 
 // Package server implements the HTTP server to forward encrypted requests to the API.
 package server
@@ -19,13 +19,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edgelesssys/continuum/internal/gpl/auth"
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
-	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
-	"github.com/edgelesssys/continuum/internal/gpl/ocspheader"
-	"github.com/edgelesssys/continuum/internal/gpl/openai"
-	"github.com/edgelesssys/continuum/internal/gpl/process"
-	"github.com/edgelesssys/continuum/internal/gpl/secretmanager"
+	"github.com/edgelesssys/continuum/internal/oss/auth"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
+	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/edgelesssys/continuum/internal/oss/process"
+	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 )
@@ -257,26 +257,15 @@ func (s *Server) inferenceHandler(
 		}
 
 		// Set up retry logic for specific status codes with exponential backoff
-		retryCallback := func(statusCode int, body []byte, attempt int) (bool, time.Duration) {
-			shouldRetry := statusCode == 500 && attempt <= 1 && strings.Contains(string(body), constants.ErrorNoSecretForID)
-			if !shouldRetry {
+		retryCallback := func(statusCode int, errMsg string, attempt int) (bool, time.Duration) {
+			switch {
+			case attempt <= 1 && (statusCode == 500 && strings.Contains(errMsg, constants.ErrorNoSecretForID)):
+				return s.noSecretForIDCallback(w, r, rc)
+			case attempt <= 1 && strings.Contains(errMsg, "read: connection reset by peer"):
+				return s.connectionResetCallback(w, r, rc)
+			default:
 				return false, 0
 			}
-
-			// Force a new rc for the next attempt
-			secret, err := rc.ResetSecret(r)
-			if err != nil {
-				s.log.Error("Resetting request cipher", "error", err)
-				return false, 0
-			}
-
-			if err := s.setDynamicHeaders(r, *secret); err != nil {
-				forwarder.HTTPError(w, r, http.StatusInternalServerError, "setting dynamic headers: %s", err)
-				return false, 0
-			}
-
-			// For now only one retry immediately as we only handle NoSecretForID
-			return true, 0
 		}
 
 		s.forwarder.Forward(
@@ -381,13 +370,10 @@ func (s *Server) setStaticRequestHeaders(r *http.Request) {
 	r.Header.Set(constants.PrivatemodeClientHeader, s.getClientHeader())
 }
 
-// allowDesktopApp allows requests from the desktop apps (Wails or v2).
+// allowDesktopApp allows requests from the desktop app.
 func allowDesktopApp(resp http.Header, req http.Header) error {
 	origin := req.Get("Origin")
-	// TODO(msanft): Adjust this once the Wails app is removed.
-	switch {
-	case strings.HasPrefix(origin, "wails://"), // Wails uses the wails:// scheme
-		strings.HasPrefix(origin, "app://"): // V2 app uses the app:// scheme
+	if strings.HasPrefix(origin, "app://") {
 		resp.Set("Access-Control-Allow-Origin", origin)
 	}
 	return nil
@@ -422,6 +408,40 @@ func (s *Server) setDynamicHeaders(r *http.Request, secret secretmanager.Secret)
 	r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyMACHeader, ocspMACHeader)
 	r.Header.Set(constants.PrivatemodeSecretIDHeader, secret.ID)
 	return nil
+}
+
+func (s *Server) connectionResetCallback(w http.ResponseWriter, r *http.Request, rc *RenewableRequestCipher) (bool, time.Duration) {
+	// Force a new rc for the next attempt, but keep the same secret
+	secret, err := rc.init(r)
+	if err != nil {
+		s.log.Error("Resetting request cipher", "error", err)
+		return false, 0
+	}
+
+	if err := s.setDynamicHeaders(r, *secret); err != nil {
+		forwarder.HTTPError(w, r, http.StatusInternalServerError, "setting dynamic headers: %s", err)
+		return false, 0
+	}
+
+	// Wait a short duration before retrying
+	return true, 50 * time.Millisecond
+}
+
+func (s *Server) noSecretForIDCallback(w http.ResponseWriter, r *http.Request, rc *RenewableRequestCipher) (bool, time.Duration) {
+	// Force a new rc for the next attempt
+	secret, err := rc.ResetSecret(r)
+	if err != nil {
+		s.log.Error("Resetting request cipher", "error", err)
+		return false, 0
+	}
+
+	if err := s.setDynamicHeaders(r, *secret); err != nil {
+		forwarder.HTTPError(w, r, http.StatusInternalServerError, "setting dynamic headers: %s", err)
+		return false, 0
+	}
+
+	// Retry immediately
+	return true, 0
 }
 
 // getOcspHeaders generates the OCSP headers based on the allowed statuses and revocation time.

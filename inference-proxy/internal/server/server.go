@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
-	"github.com/edgelesssys/continuum/internal/gpl/process"
+	"github.com/edgelesssys/continuum/internal/oss/process"
 )
 
 // Server implements the user facing HTTP REST server.

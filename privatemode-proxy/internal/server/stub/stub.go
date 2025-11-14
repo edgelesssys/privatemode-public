@@ -1,5 +1,5 @@
 // Copyright (c) Edgeless Systems GmbH
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MIT
 
 // Package stub implements a stubbed OpenAI API handler.
 package stub
@@ -11,10 +11,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
-	crypto "github.com/edgelesssys/continuum/internal/gpl/crypto"
-	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
-	"github.com/edgelesssys/continuum/internal/gpl/openai"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	crypto "github.com/edgelesssys/continuum/internal/oss/crypto"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/openai"
 )
 
 // OpenAIEchoHandler returns an http.Handler that stubs an OpenAI API completion endpoint.

@@ -11,7 +11,7 @@ import (
 	"net"
 	"time"
 
-	userpb "github.com/edgelesssys/continuum/internal/gpl/proto/secret-service/userapi"
+	userpb "github.com/edgelesssys/continuum/internal/oss/proto/secret-service/userapi"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"

@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"go.etcd.io/etcd/server/v3/embed"
 )

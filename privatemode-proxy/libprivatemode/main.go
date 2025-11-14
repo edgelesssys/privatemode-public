@@ -1,3 +1,6 @@
+// Copyright (c) Edgeless Systems GmbH
+// SPDX-License-Identifier: MIT
+
 // package main implements a C-FFI-callable interface to start the privatemode-proxy server.
 package main
 
@@ -12,9 +15,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
-	"github.com/edgelesssys/continuum/internal/gpl/logging"
-	"github.com/edgelesssys/continuum/internal/gpl/openai"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/logging"
+	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/setup"
 )
 

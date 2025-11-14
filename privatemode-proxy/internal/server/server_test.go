@@ -1,5 +1,5 @@
 // Copyright (c) Edgeless Systems GmbH
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MIT
 package server
 
 import (
@@ -18,11 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
-	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
-	"github.com/edgelesssys/continuum/internal/gpl/ocspheader"
-	"github.com/edgelesssys/continuum/internal/gpl/openai"
-	"github.com/edgelesssys/continuum/internal/gpl/secretmanager"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
+	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/server/stub"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -99,17 +99,6 @@ func TestPromptEncryption(t *testing.T) {
 			prompt:           "Hello",
 			proxyCacheSalt:   "p1234567890123456789012345678912",
 			requestCacheSalt: "r1234567890123456789012345678912",
-		},
-		"ACAO header is set for wails origin": {
-			proxyAPIKey:      &apiKey,
-			expectStatusCode: http.StatusOK,
-			prompt:           "Hello",
-			requestMutator: func(req *http.Request) {
-				req.Header.Set("Origin", "wails://wails.localhost")
-			},
-			expectedHeaders: map[string]string{
-				"Access-Control-Allow-Origin": "wails://wails.localhost",
-			},
 		},
 		"ACAO header is set for app origin": {
 			proxyAPIKey:      &apiKey,

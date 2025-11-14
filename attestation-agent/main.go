@@ -18,12 +18,12 @@ import (
 	"github.com/edgelesssys/continuum/attestation-agent/internal/ocsp"
 	"github.com/edgelesssys/continuum/attestation-agent/internal/rim"
 	"github.com/edgelesssys/continuum/internal/crypto"
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
-	"github.com/edgelesssys/continuum/internal/gpl/logging"
-	"github.com/edgelesssys/continuum/internal/gpl/process"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/logging"
+	"github.com/edgelesssys/continuum/internal/oss/process"
 	"github.com/spf13/cobra"
 
-	internalOCSP "github.com/edgelesssys/continuum/internal/gpl/ocsp"
+	internalOCSP "github.com/edgelesssys/continuum/internal/oss/ocsp"
 )
 
 var (

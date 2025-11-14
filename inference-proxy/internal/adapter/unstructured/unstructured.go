@@ -8,7 +8,7 @@ import (
 	"net/http"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
-	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 )
 
 type mutatingForwarder interface {

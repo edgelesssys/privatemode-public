@@ -16,11 +16,11 @@ let
       "go.sum"
       "secret-service"
       "internal/crypto"
-      "internal/gpl"
+      "internal/oss"
     ];
 
     ldflags = [
-      "-X 'github.com/edgelesssys/continuum/internal/gpl/constants.version=${lib.continuumVersion}'"
+      "-X 'github.com/edgelesssys/continuum/internal/oss/constants.version=${lib.continuumVersion}'"
     ];
 
     subPackages = [ "secret-service" ];

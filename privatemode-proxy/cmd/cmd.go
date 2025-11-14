@@ -1,5 +1,5 @@
 // Copyright (c) Edgeless Systems GmbH
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MIT
 
 // Package cmd defines the privatemode-proxy's root command.
 package cmd
@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
-	"github.com/edgelesssys/continuum/internal/gpl/logging"
-	"github.com/edgelesssys/continuum/internal/gpl/openai"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/logging"
+	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/setup"
 	"github.com/spf13/cobra"
 )

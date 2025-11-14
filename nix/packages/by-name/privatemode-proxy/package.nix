@@ -18,11 +18,11 @@ let
       "privatemode-proxy/cmd"
       "privatemode-proxy/internal"
       "privatemode-proxy/main.go"
-      "internal/gpl"
+      "internal/oss"
     ];
 
     ldflags = [
-      "-X 'github.com/edgelesssys/continuum/internal/gpl/constants.version=${lib.continuumVersion}'"
+      "-X 'github.com/edgelesssys/continuum/internal/oss/constants.version=${lib.continuumVersion}'"
     ];
 
     subPackages = [ "privatemode-proxy" ];

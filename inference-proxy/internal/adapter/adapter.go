@@ -11,7 +11,7 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/unencrypted"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/unstructured"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
-	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 )
 
 const (

@@ -20,9 +20,9 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
-	crypto "github.com/edgelesssys/continuum/internal/gpl/crypto"
-	"github.com/edgelesssys/continuum/internal/gpl/forwarder"
-	"github.com/edgelesssys/continuum/internal/gpl/ocsp"
+	crypto "github.com/edgelesssys/continuum/internal/oss/crypto"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/stretchr/testify/require"
 )
 

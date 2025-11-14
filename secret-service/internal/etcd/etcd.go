@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/crypto"
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/secret-service/internal/etcd/builder"
 	"github.com/spf13/afero"
 	pb "go.etcd.io/etcd/api/v3/etcdserverpb"

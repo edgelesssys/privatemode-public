@@ -7,8 +7,8 @@ import (
 	"fmt"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
-	crypto "github.com/edgelesssys/continuum/internal/gpl/crypto"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	crypto "github.com/edgelesssys/continuum/internal/oss/crypto"
 )
 
 // Cipher encrypts and decrypts messages.

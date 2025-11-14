@@ -1,5 +1,5 @@
 // Copyright (c) Edgeless Systems GmbH
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: MIT
 
 package setup
 
@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/edgelesssys/continuum/internal/gpl/contrast/client"
-	"github.com/edgelesssys/continuum/internal/gpl/secretmanager"
-	"github.com/edgelesssys/continuum/internal/gpl/secretmanager/updater"
+	"github.com/edgelesssys/continuum/internal/oss/contrast/client"
+	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
+	"github.com/edgelesssys/continuum/internal/oss/secretmanager/updater"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/setup/tlsconfig"
 	contrastsdk "github.com/edgelesssys/contrast/sdk"
 	"github.com/spf13/afero"

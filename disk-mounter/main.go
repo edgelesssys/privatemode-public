@@ -9,9 +9,9 @@ import (
 	"os"
 
 	"github.com/edgelesssys/continuum/disk-mounter/internal/mount"
-	"github.com/edgelesssys/continuum/internal/gpl/constants"
-	"github.com/edgelesssys/continuum/internal/gpl/logging"
-	"github.com/edgelesssys/continuum/internal/gpl/process"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/logging"
+	"github.com/edgelesssys/continuum/internal/oss/process"
 )
 
 func main() {

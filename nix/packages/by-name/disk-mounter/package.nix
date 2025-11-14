@@ -18,9 +18,9 @@ rec {
     src = lib.continuumRepoRootSrc [
       "go.mod"
       "go.sum"
-      "internal/gpl/constants"
-      "internal/gpl/logging"
-      "internal/gpl/process"
+      "internal/oss/constants"
+      "internal/oss/logging"
+      "internal/oss/process"
       "disk-mounter"
     ];
 
@@ -32,7 +32,7 @@ rec {
 
     ldflags = [
       "-extldflags=-Wl,-z,lazy"
-      "-X 'github.com/edgelesssys/continuum/internal/gpl/constants.version=${lib.continuumVersion}'"
+      "-X 'github.com/edgelesssys/continuum/internal/oss/constants.version=${lib.continuumVersion}'"
     ];
 
     postFixup = ''
