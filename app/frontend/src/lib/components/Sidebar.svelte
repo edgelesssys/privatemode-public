@@ -446,7 +446,7 @@
           width="18"
           height="18"
         />
-        Get Support
+        Get support
       </a>
     </div>
   </div>

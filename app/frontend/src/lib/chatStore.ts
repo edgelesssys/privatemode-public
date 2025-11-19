@@ -99,7 +99,7 @@ function createChatStore() {
       const now = Date.now();
       const newChat: Chat = {
         id: crypto.randomUUID(),
-        title: 'New Chat',
+        title: 'New chat',
         messages: [],
         createdAt: now,
         updatedAt: now,
