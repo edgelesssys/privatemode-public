@@ -1,5 +1,4 @@
 //go:build gpu
-// +build gpu
 
 package attestation
 

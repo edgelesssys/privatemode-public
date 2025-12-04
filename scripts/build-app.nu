@@ -53,18 +53,18 @@ def main [version: string, ...targets: string] {
             | save -f node_modules/electron-installer-redhat/resources/spec.ejs
     }
 
-    open --raw ./package.json
-        | str replace '1.0.0' $version
+    open ./package.json
+        | update version $version
         | save -f ./package.json
 
     npm run make -- --targets $targets
 
-    open --raw ./package.json
-        | str replace $version '1.0.0'
+    open ./package.json
+        | update version '1.0.0'
         | save -f ./package.json
 
-    open --raw ./package-lock.json
-        | str replace $version '1.0.0'
+    open ./package-lock.json
+        | update version '1.0.0'
         | save -f ./package-lock.json
 
     cd ../..

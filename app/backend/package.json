@@ -37,26 +37,26 @@
     "@electron-forge/plugin-fuses": "7.10.2",
     "@electron-forge/plugin-vite": "7.10.2",
     "@electron/fuses": "1.8.0",
-    "@playwright/test": "1.56.1",
+    "@playwright/test": "1.57.0",
     "@types/electron-squirrel-startup": "1.0.2",
     "@typescript-eslint/eslint-plugin": "5.62.0",
     "@typescript-eslint/parser": "5.62.0",
-    "electron": "39.0.0",
+    "electron": "39.2.4",
     "eslint": "8.57.1",
     "eslint-plugin-import": "2.32.0",
-    "playwright": "1.56.1",
+    "playwright": "1.57.0",
     "typescript": "5.9.3",
-    "vite": "7.1.11"
+    "vite": "7.2.4"
   },
   "dependencies": {
     "electron-serve": "3.0.0",
     "electron-squirrel-startup": "1.0.1",
     "electron-unhandled": "5.0.0",
     "node-addon-api": "8.5.0",
-    "node-gyp": "12.0.0"
+    "node-gyp": "12.1.0"
   },
   "overrides": {
-    "@inquirer/prompts": "7.9.0",
+    "@inquirer/prompts": "8.0.1",
     "@electron/notarize": "github:msanft/notarize#msanft/notarytool-json-fix-build"
   }
 }

@@ -24,7 +24,7 @@ test.describe('General functionality', () => {
   test('should launch Electron app and display main window', async () => {
     const { page } = electronContext;
 
-    expect(await page.isVisible('body')).toBe(true);
+    await expect(page.locator('body')).toBeVisible();
 
     await expect(page.getByPlaceholder('Type a message...')).toBeVisible();
   });

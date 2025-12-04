@@ -60,9 +60,9 @@
 
   <div class="settings-content">
     <section class="setting-section">
-      <h2>Access Key</h2>
+      <h2>Access key</h2>
       <p class="setting-description">
-        Update your
+        Set your
         <a
           href="https://portal.privatemode.ai/access-keys"
           target="_blank"
@@ -129,7 +129,7 @@
     </section>
 
     <section class="setting-section danger-section">
-      <h2>Danger Zone</h2>
+      <h2>Danger zone</h2>
       <p class="setting-description">Delete all conversations permanently</p>
 
       {#if !showDeleteConfirm}
@@ -142,7 +142,7 @@
             width="20"
             height="20"
           />
-          Delete All Chats
+          Delete all chats
         </button>
       {:else}
         <div class="confirm-delete">
@@ -154,7 +154,7 @@
               onclick={handleDeleteAllChats}
               class="confirm-danger-btn"
             >
-              Yes, Delete All
+              Yes, delete all
             </button>
             <button
               onclick={() => (showDeleteConfirm = false)}

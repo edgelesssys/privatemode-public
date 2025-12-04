@@ -236,7 +236,25 @@ func (f *Forwarder) Forward(
 		}
 	}
 
-	f.log.Info("Forwarding finished successfully", "requestID", req.Header.Get(constants.RequestIDHeader), "responseStatus", resp.StatusCode)
+	// If a shard key is present we append it (trimmed) to the log entry.
+	shardKey := req.Header.Get(constants.PrivatemodeShardKeyHeader)
+	if shardKey != "" {
+		// Trim the shard key the same way as the other logs.
+		if len(shardKey) > constants.CacheSaltHashLength {
+			shardKey = shardKey[:constants.CacheSaltHashLength] + "..."
+		}
+		f.log.Info("Forwarding finished successfully",
+			"requestID", req.Header.Get(constants.RequestIDHeader),
+			"responseStatus", resp.StatusCode,
+			"shardKey", shardKey,
+		)
+	} else {
+		// No shard key present
+		f.log.Info("Forwarding finished successfully",
+			"requestID", req.Header.Get(constants.RequestIDHeader),
+			"responseStatus", resp.StatusCode,
+		)
+	}
 }
 
 // applyBackoffDelay applies the configured backoff delay before retrying.

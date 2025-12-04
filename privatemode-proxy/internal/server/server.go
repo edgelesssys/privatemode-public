@@ -251,7 +251,8 @@ func (s *Server) inferenceHandler(
 			forwarder.HTTPError(w, r, http.StatusInternalServerError, "creating request cipher: %s", err)
 			return
 		}
-		if err := s.setDynamicHeaders(r, *secret); err != nil {
+		requestID := newRequestID()
+		if err := s.setDynamicHeaders(r, *secret, requestID, 0); err != nil {
 			forwarder.HTTPError(w, r, http.StatusInternalServerError, "setting dynamic headers: %s", err)
 			return
 		}
@@ -260,9 +261,9 @@ func (s *Server) inferenceHandler(
 		retryCallback := func(statusCode int, errMsg string, attempt int) (bool, time.Duration) {
 			switch {
 			case attempt <= 1 && (statusCode == 500 && strings.Contains(errMsg, constants.ErrorNoSecretForID)):
-				return s.noSecretForIDCallback(w, r, rc)
+				return s.noSecretForIDCallback(w, r, rc, requestID, attempt)
 			case attempt <= 1 && strings.Contains(errMsg, "read: connection reset by peer"):
-				return s.connectionResetCallback(w, r, rc)
+				return s.connectionResetCallback(w, r, rc, requestID, attempt)
 			default:
 				return false, 0
 			}
@@ -340,6 +341,7 @@ func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) noEncryptionHandler(w http.ResponseWriter, r *http.Request) {
 	s.setStaticRequestHeaders(r)
+	r.Header.Set(constants.RequestIDHeader, newRequestID())
 
 	s.forwarder.Forward(
 		w, r,
@@ -363,7 +365,6 @@ func (s *Server) setStaticRequestHeaders(r *http.Request) {
 	if s.apiKey != nil {
 		r.Header.Set("Authorization", fmt.Sprintf("%s %s", auth.Bearer, *s.apiKey))
 	}
-	r.Header.Set(constants.RequestIDHeader, "proxy_"+uuid.New().String())
 	r.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
 	r.Header.Set(constants.PrivatemodeOSHeader, runtime.GOOS)
 	r.Header.Set(constants.PrivatemodeArchitectureHeader, runtime.GOARCH)
@@ -380,7 +381,7 @@ func allowDesktopApp(resp http.Header, req http.Header) error {
 }
 
 // setDynamicHeaders sets the dynamic headers for the request.
-func (s *Server) setDynamicHeaders(r *http.Request, secret secretmanager.Secret) error {
+func (s *Server) setDynamicHeaders(r *http.Request, secret secretmanager.Secret, requestID string, attempt int) error {
 	ocspAllowedStatuses := []ocspheader.AllowStatus{ocspheader.AllowStatusGood}
 	if s.nvidiaOCSPRevokedGracePeriod > 0 {
 		// In theory, we could always add the `revoked` status, since it will render
@@ -407,10 +408,13 @@ func (s *Server) setDynamicHeaders(r *http.Request, secret secretmanager.Secret)
 	r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyHeader, ocspPolicyHeader)
 	r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyMACHeader, ocspMACHeader)
 	r.Header.Set(constants.PrivatemodeSecretIDHeader, secret.ID)
+	r.Header.Set(constants.RequestIDHeader, fmt.Sprintf("%s_%d", requestID, attempt))
 	return nil
 }
 
-func (s *Server) connectionResetCallback(w http.ResponseWriter, r *http.Request, rc *RenewableRequestCipher) (bool, time.Duration) {
+func (s *Server) connectionResetCallback(
+	w http.ResponseWriter, r *http.Request, rc *RenewableRequestCipher, requestID string, attempt int,
+) (bool, time.Duration) {
 	// Force a new rc for the next attempt, but keep the same secret
 	secret, err := rc.init(r)
 	if err != nil {
@@ -418,7 +422,7 @@ func (s *Server) connectionResetCallback(w http.ResponseWriter, r *http.Request,
 		return false, 0
 	}
 
-	if err := s.setDynamicHeaders(r, *secret); err != nil {
+	if err := s.setDynamicHeaders(r, *secret, requestID, attempt); err != nil {
 		forwarder.HTTPError(w, r, http.StatusInternalServerError, "setting dynamic headers: %s", err)
 		return false, 0
 	}
@@ -427,7 +431,9 @@ func (s *Server) connectionResetCallback(w http.ResponseWriter, r *http.Request,
 	return true, 50 * time.Millisecond
 }
 
-func (s *Server) noSecretForIDCallback(w http.ResponseWriter, r *http.Request, rc *RenewableRequestCipher) (bool, time.Duration) {
+func (s *Server) noSecretForIDCallback(
+	w http.ResponseWriter, r *http.Request, rc *RenewableRequestCipher, requestID string, attempt int,
+) (bool, time.Duration) {
 	// Force a new rc for the next attempt
 	secret, err := rc.ResetSecret(r)
 	if err != nil {
@@ -435,7 +441,7 @@ func (s *Server) noSecretForIDCallback(w http.ResponseWriter, r *http.Request, r
 		return false, 0
 	}
 
-	if err := s.setDynamicHeaders(r, *secret); err != nil {
+	if err := s.setDynamicHeaders(r, *secret, requestID, attempt); err != nil {
 		forwarder.HTTPError(w, r, http.StatusInternalServerError, "setting dynamic headers: %s", err)
 		return false, 0
 	}
@@ -461,4 +467,8 @@ func getOcspHeaders(allowedStatuses []ocspheader.AllowStatus, revocNbf time.Time
 	}
 
 	return policyHeader, policyMACHeader, nil
+}
+
+func newRequestID() string {
+	return "proxy_" + uuid.New().String()
 }

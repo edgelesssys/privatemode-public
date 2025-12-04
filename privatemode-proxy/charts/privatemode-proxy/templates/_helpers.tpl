@@ -6,8 +6,11 @@
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+
+# Keep selector labels stable and version-independent
 {{- define "privatemode-proxy.selectorLabels" -}}
-{{- include "privatemode-proxy.labels" . }}
+app.kubernetes.io/name: {{ include "privatemode-proxy.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}-{{ .Release.Namespace }}
 {{- end }}
 
 {{- define "privatemode-proxy.labels" -}}

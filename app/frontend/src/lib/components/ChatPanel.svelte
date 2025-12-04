@@ -10,6 +10,8 @@
 
   let messages: Message[] = [];
   let chatPanelElement: HTMLDivElement;
+  let previousChatId: string | null = null;
+  let previousMessageCount = 0;
 
   interface RenderedMessage extends Message {
     renderedContent: string;
@@ -23,12 +25,27 @@
   })) as RenderedMessage[];
 
   $: if (chatId && chatPanelElement) {
+    const chatChanged = chatId !== previousChatId;
+    const messageCountIncreased = messages.length > previousMessageCount;
+
     requestAnimationFrame(() => {
-      chatPanelElement.scrollTo({
-        top: chatPanelElement.scrollHeight,
-        behavior: 'smooth',
-      });
+      if (chatChanged) {
+        chatPanelElement.scrollTo({
+          top: chatPanelElement.scrollHeight,
+          behavior: 'instant',
+        });
+      } else if (messageCountIncreased && messages.length > 0) {
+        const lastMessage = chatPanelElement.querySelector(
+          '.message:last-child',
+        ) as HTMLElement;
+        if (lastMessage) {
+          lastMessage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
     });
+
+    previousChatId = chatId;
+    previousMessageCount = messages.length;
   }
 
   function handleCopyClick(event: MouseEvent) {

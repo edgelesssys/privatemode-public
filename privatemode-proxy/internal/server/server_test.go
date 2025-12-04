@@ -657,7 +657,9 @@ func TestSetDynamicHeaders(t *testing.T) {
 			server := newTestServer(nil, tc.secret, "", "", false)
 
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			err := server.setDynamicHeaders(req, tc.secret)
+			requestID := newRequestID()
+			attempt := 1
+			err := server.setDynamicHeaders(req, tc.secret, requestID, attempt)
 			if tc.wantErr {
 				require.Error(err)
 			} else {
@@ -665,6 +667,7 @@ func TestSetDynamicHeaders(t *testing.T) {
 				assert.Equal(req.Header.Get(constants.PrivatemodeSecretIDHeader), tc.secret.ID)
 				assert.NotEmpty(req.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyHeader))
 				assert.NotEmpty(req.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyMACHeader))
+				assert.Equal(req.Header.Get(constants.RequestIDHeader), fmt.Sprintf("%s_%d", requestID, attempt))
 			}
 		})
 	}

@@ -280,9 +280,66 @@ func (r *mutatingReader) Read(b []byte) (int, error) {
 		return 0, nil
 	}
 
+	mutated, err := r.mutateChunk(buf)
+	if err != nil {
+		return 0, err
+	}
+
+	// Copy the mutated data to the given buffer
+	// If the buffer is too small, store the remaining data for the next call to Read
+	n := copy(b, mutated)
+	if n < len(mutated) {
+		r.leftover = mutated[n:]
+	}
+
+	return n, nil
+}
+
+// WriteTo implements the [io.WriterTo] interface, allowing direct writing
+// of the mutated data to an [io.Writer], improving performance for copy operations.
+// Data is read, one line (chunk) at a time, from a pre-configured [bufio.Scanner], mutated,
+// and written to the provided [io.Writer].
+func (r *mutatingReader) WriteTo(w io.Writer) (n int64, err error) {
+	if r.scanner == nil {
+		return 0, errors.New("mutatingReader: no data to write")
+	}
+	for r.scanner.Scan() {
+		nPartial, err := r.writeTo(w, r.scanner.Bytes())
+		if err != nil {
+			return n, err
+		}
+		n += nPartial
+	}
+	if err := r.scanner.Err(); err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
+// writeTo writes a single chunk of (mutated) data to the given [io.Writer].
+func (r *mutatingReader) writeTo(w io.Writer, b []byte) (int64, error) {
+	// Skip empty chunks
+	if len(b) == 0 {
+		return 0, nil
+	}
+
+	mutated, err := r.mutateChunk(b)
+	if err != nil {
+		return 0, err
+	}
+
+	n, err := w.Write(mutated)
+	if err != nil {
+		return int64(n), err
+	}
+	return int64(n), nil
+}
+
+// mutateChunk parses and mutates a single data chunk.
+func (r *mutatingReader) mutateChunk(b []byte) ([]byte, error) {
 	// Remove the event stream prefix, since it breaks JSON parsing
-	bufCpy := make([]byte, len(buf))
-	copy(bufCpy, buf)
+	bufCpy := make([]byte, len(b))
+	copy(bufCpy, b)
 	before, after, found := bytes.Cut(bufCpy, []byte(eventStreamSeparator))
 	var toMutate, prefix []byte
 	if found {
@@ -298,28 +355,20 @@ func (r *mutatingReader) Read(b []byte) (int, error) {
 
 	var mutated []byte
 	var err error
-	// Skip the final "[DONE]"" event, since it's not a JSON object we can mutate
+	// Skip the final "[DONE]" event, since it's not a JSON object we can mutate
 	if bytes.EqualFold(toMutate, []byte("[DONE]")) && !r.skipFinalEvent {
 		mutated = toMutate
 	} else {
 		// Mutate the data chunk
 		mutated, err = r.dataParseFunc(toMutate, r.mutate, r.fields)
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
 
 	// Add back event stream prefix and append newlines which were removed by the scanner
 	mutated = append(prefix, append(mutated, []byte(eventStreamSuffix)...)...)
-
-	// Copy the mutated data to the given buffer
-	// If the buffer is too small, store the remaining data for the next call to Read
-	n := copy(b, mutated)
-	if n < len(mutated) {
-		r.leftover = mutated[n:]
-	}
-
-	return n, nil
+	return mutated, nil
 }
 
 func mutateSelectJSONFields(data []byte, mutate MutationFunc, mutateFields FieldSelector) ([]byte, error) {
