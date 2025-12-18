@@ -11,7 +11,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/avast/retry-go/v4"
+	"github.com/avast/retry-go/v5"
 )
 
 // Updater implements how to update prompt secrets when the underlying Continuum deployment is updated. It is not thread-safe.
@@ -44,7 +44,7 @@ func New(ssClient ssClient, tlsConfigGetter tlsConfigGetter, log *slog.Logger) *
 
 // UpdateSecrets implements how to update prompt secrets when the underlying Continuum deployment is updated.
 func (s *Updater) UpdateSecrets(ctx context.Context, secrets map[string][]byte, ttl time.Duration) error {
-	if err := retry.Do(func() error {
+	if err := retry.New(s.retryOpts...).Do(func() error {
 		if ctx.Err() != nil {
 			return retry.Unrecoverable(ctx.Err())
 		}
@@ -57,7 +57,7 @@ func (s *Updater) UpdateSecrets(ctx context.Context, secrets map[string][]byte, 
 			return fmt.Errorf("refreshing deployment: %w", err)
 		}
 		return s.ssClient.SetSecrets(ctx, secrets, ttl)
-	}, s.retryOpts...); err != nil {
+	}); err != nil {
 		return fmt.Errorf("setting secrets: %w", err)
 	}
 	return nil

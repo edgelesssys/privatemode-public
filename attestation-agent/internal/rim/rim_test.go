@@ -14,7 +14,7 @@ func TestFetchRIM(t *testing.T) {
 
 	client := New("https://rim.attestation.nvidia.com/", slog.Default())
 
-	identity, err := client.FetchRIM(t.Context(), "NV_GPU_DRIVER_GH100_535.104.05")
+	identity, err := client.FetchRIM(t.Context(), "NV_GPU_DRIVER_GH100_580.105.08")
 	require.NoError(err)
 	require.NotNil(identity)
 }

@@ -37,6 +37,7 @@ type Flags struct {
 	PromptCacheSalt              string
 	NvidiaOCSPAllowUnknown       bool
 	NvidiaOCSPRevokedGracePeriod time.Duration
+	DumpRequestsDir              string
 }
 
 // ContrastFlags holds the configuration for the Contrast deployment.
@@ -65,6 +66,7 @@ func NewServer(flags Flags, isApp bool, manager *secretmanager.SecretManager, lo
 		IsApp:                        isApp,
 		NvidiaOCSPAllowUnknown:       flags.NvidiaOCSPAllowUnknown,
 		NvidiaOCSPRevokedGracePeriod: flags.NvidiaOCSPRevokedGracePeriod,
+		DumpRequestsDir:              flags.DumpRequestsDir,
 	}
 
 	return server.New(client, manager, opts, log)

@@ -36,6 +36,7 @@ var (
 	tlsCertPath                  string
 	tlsKeyPath                   string
 	insecureAPIConnection        bool
+	dumpRequests                 bool
 
 	// sharedPromptCache is used to share the cache between users.
 	// When true, all users of the proxy will share the same cache.
@@ -101,6 +102,11 @@ func New() *cobra.Command {
 	cmd.Flags().StringVar(&coordinatorEndpoint, "coordinatorEndpoint", constants.CoordinatorEndpoint, "The endpoint for the Contrast coordinator.")
 	cmd.Flags().StringVar(&cdnBaseURL, "cdnBaseURL", "https://cdn.confidential.cloud/privatemode/v2", "Base URL to retrieve deployment information from.")
 	must(cmd.Flags().MarkHidden("cdnBaseURL"))
+
+	// Request dumping
+	cmd.Flags().BoolVar(&dumpRequests, "dumpRequests", false,
+		"If set, the proxy dumps request and response logs to the '/requests' sub‑directory of the workspace. "+
+			"Leaving this flag unset disables request and response dumping.")
 
 	return cmd
 }
@@ -181,6 +187,14 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 		PromptCacheSalt:              cacheSalt,
 		NvidiaOCSPAllowUnknown:       nvidiaOCSPAllowUnknown,
 		NvidiaOCSPRevokedGracePeriod: time.Duration(nvidiaOCSPRevokedGracePeriod) * time.Hour,
+		// If request dumping is enabled, store dumps in a hard‑coded "/requests" sub‑directory
+		// under the workspace. Otherwise leave the directory empty to disable dumping.
+		DumpRequestsDir: func() string {
+			if dumpRequests {
+				return workspace + "/requests"
+			}
+			return ""
+		}(),
 	}
 	manager, err := setup.SecretManager(cmd.Context(), flags, log)
 	if err != nil {

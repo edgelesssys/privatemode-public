@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/avast/retry-go/v4"
+	"github.com/avast/retry-go/v5"
 	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/stretchr/testify/assert"
 )

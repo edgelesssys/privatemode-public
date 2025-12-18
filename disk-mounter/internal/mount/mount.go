@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/avast/retry-go/v4"
+	"github.com/avast/retry-go/v5"
 	"github.com/edgelesssys/continuum/disk-mounter/internal/mount/mount"
 )
 
@@ -23,16 +23,15 @@ func VerityDisk(ctx context.Context, devicePath, mountPath, rootHash string, log
 
 	blockDevice := false
 	// Wait for disk to be available
-	if err := retry.Do(
-		func() error {
-			blockDevice, err = isBlockDevice(devicePath)
-			return err
-		},
+	if err := retry.New(
 		retry.Delay(time.Second*30), // Wait for 30 seconds between each retry
 		retry.OnRetry(func(n uint, err error) {
 			log.Warn("Checking if disk is available", "attempt", n+1, "error", err)
 		}),
-	); err != nil {
+	).Do(func() error {
+		blockDevice, err = isBlockDevice(devicePath)
+		return err
+	}); err != nil {
 		return fmt.Errorf("waiting for disk to be available: %w", err)
 	}
 

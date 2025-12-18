@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,8 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
+
+const defaultModel = "some-model"
 
 // TestSetBytes checks that a string is correctly inserted into a JSON string.
 func TestSetBytes(t *testing.T) {
@@ -60,7 +63,7 @@ func TestForwardModelsRequest(t *testing.T) {
 					Object: "list",
 					Data: []openai.Model{
 						{
-							ID:     "llama-3.3-70b",
+							ID:     defaultModel,
 							Object: "model",
 						},
 					},
@@ -73,7 +76,7 @@ func TestForwardModelsRequest(t *testing.T) {
 					Object: "list",
 					Data: []openai.Model{
 						{
-							ID:     "llama-3.3-70b",
+							ID:     defaultModel,
 							Object: "model",
 							Tasks:  []string{constants.WorkloadTaskGenerate},
 						},
@@ -85,10 +88,10 @@ func TestForwardModelsRequest(t *testing.T) {
 		},
 		"retrieve model": {
 			workloadTasks: []string{constants.WorkloadTaskGenerate},
-			path:          "/v1/models/llama-3.3-70b",
+			path:          fmt.Sprintf("/v1/models/%s", defaultModel),
 			serverResponse: func() string {
 				res, err := json.Marshal(openai.Model{
-					ID:     "llama-3.3-70b",
+					ID:     defaultModel,
 					Object: "model",
 				})
 				require.NoError(t, err)
@@ -96,7 +99,7 @@ func TestForwardModelsRequest(t *testing.T) {
 			}(),
 			wantResponse: func() string {
 				res, err := json.Marshal(openai.Model{
-					ID:     "llama-3.3-70b",
+					ID:     defaultModel,
 					Object: "model",
 					Tasks:  []string{constants.WorkloadTaskGenerate},
 				})
@@ -112,7 +115,7 @@ func TestForwardModelsRequest(t *testing.T) {
 					Object: "list",
 					Data: []openai.Model{
 						{
-							ID:     "llama-3.3-70b",
+							ID:     defaultModel,
 							Object: "model",
 						},
 						{
@@ -129,7 +132,7 @@ func TestForwardModelsRequest(t *testing.T) {
 					Object: "list",
 					Data: []openai.Model{
 						{
-							ID:     "llama-3.3-70b",
+							ID:     defaultModel,
 							Object: "model",
 							Tasks:  []string{constants.WorkloadTaskGenerate, "custom-task"},
 						},
@@ -146,10 +149,10 @@ func TestForwardModelsRequest(t *testing.T) {
 		},
 		"retrieve model with multiple tasks": {
 			workloadTasks: []string{constants.WorkloadTaskGenerate, constants.WorkloadTaskToolCalling},
-			path:          "/v1/models/llama-3.3-70b",
+			path:          fmt.Sprintf("/v1/models/%s", defaultModel),
 			serverResponse: func() string {
 				res, err := json.Marshal(openai.Model{
-					ID:     "llama-3.3-70b",
+					ID:     defaultModel,
 					Object: "model",
 				})
 				require.NoError(t, err)
@@ -157,7 +160,7 @@ func TestForwardModelsRequest(t *testing.T) {
 			}(),
 			wantResponse: func() string {
 				res, err := json.Marshal(openai.Model{
-					ID:     "llama-3.3-70b",
+					ID:     defaultModel,
 					Object: "model",
 					Tasks:  []string{constants.WorkloadTaskGenerate, constants.WorkloadTaskToolCalling},
 				})
@@ -210,7 +213,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 			clientRequest: func() string {
 				res, err := json.Marshal(openai.ChatRequest{
 					ChatRequestPlainData: openai.ChatRequestPlainData{
-						Model: constants.DefaultTextgenModel,
+						Model: defaultModel,
 					},
 					Messages: []openai.Message{
 						{
@@ -229,7 +232,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 			clientRequest: func() string {
 				res, err := json.Marshal(openai.ChatRequest{
 					ChatRequestPlainData: openai.ChatRequestPlainData{
-						Model: constants.DefaultTextgenModel,
+						Model: defaultModel,
 					},
 					Messages: []openai.Message{
 						{
@@ -253,7 +256,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 			clientRequest: func() string {
 				res, err := json.Marshal(openai.ChatRequest{
 					ChatRequestPlainData: openai.ChatRequestPlainData{
-						Model: constants.DefaultTextgenModel,
+						Model: defaultModel,
 					},
 					Messages: []openai.Message{
 						{
@@ -277,7 +280,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 			clientRequest: func() string {
 				res, err := json.Marshal(openai.ChatRequest{
 					ChatRequestPlainData: openai.ChatRequestPlainData{
-						Model: constants.DefaultTextgenModel,
+						Model: defaultModel,
 					},
 					Messages: []openai.Message{
 						{

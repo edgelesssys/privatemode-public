@@ -22,6 +22,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/middleware"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/process"
@@ -40,6 +41,7 @@ type Server struct {
 	isApp                        bool
 	nvidiaOCSPAllowUnknown       bool
 	nvidiaOCSPRevokedGracePeriod time.Duration
+	DumpRequestsDir              string
 }
 
 // Opts are the options for creating a new [Server].
@@ -51,6 +53,7 @@ type Opts struct {
 	IsApp                        bool
 	NvidiaOCSPAllowUnknown       bool
 	NvidiaOCSPRevokedGracePeriod time.Duration
+	DumpRequestsDir              string
 }
 
 type apiForwarder interface {
@@ -75,6 +78,7 @@ func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Se
 		isApp:                        opts.IsApp,
 		nvidiaOCSPAllowUnknown:       opts.NvidiaOCSPAllowUnknown,
 		nvidiaOCSPRevokedGracePeriod: opts.NvidiaOCSPRevokedGracePeriod,
+		DumpRequestsDir:              opts.DumpRequestsDir,
 	}
 }
 
@@ -103,7 +107,14 @@ func (s *Server) GetHandler() http.Handler {
 
 	mux.HandleFunc("/", http.NotFound) // Reject requests to unknown endpoints
 
-	return mux
+	// Only wrap the mux with the dumping middleware when a dump
+	// directory is configured.  If s.DumpRequestsDir == "" we return the
+	// plain mux.
+	if strings.TrimSpace(s.DumpRequestsDir) == "" {
+		return mux
+	}
+
+	return middleware.DumpRequestAndResponse(mux, s.log, s.DumpRequestsDir)
 }
 
 func (s *Server) useRandomCacheSalt() bool {
