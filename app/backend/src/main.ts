@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
-import { startProxy } from './privatemode';
+import { startProxy, getCurrentManifest } from './privatemode';
 import serve from 'electron-serve';
 import packageJson from '../package.json';
 
@@ -87,6 +87,10 @@ app.on('ready', () => {
 
   ipcMain.handle('get-version', () => {
     return `v${packageJson.version}`;
+  });
+
+  ipcMain.handle('get-current-manifest', () => {
+    return getCurrentManifest();
   });
 
   createWindow();

@@ -28,7 +28,7 @@ type ssClient interface {
 }
 
 type tlsConfigGetter interface {
-	GetTLSConfig(ctx context.Context) (*tls.Config, error)
+	GetTLSConfig(ctx context.Context) (*tls.Config, []byte, error)
 }
 
 // New returns a new secret updater.
@@ -64,7 +64,7 @@ func (s *Updater) UpdateSecrets(ctx context.Context, secrets map[string][]byte, 
 }
 
 func (s *Updater) updateTLSConfig(ctx context.Context) error {
-	tlsConfig, err := s.tlsConfigGetter.GetTLSConfig(ctx)
+	tlsConfig, _, err := s.tlsConfigGetter.GetTLSConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("updating TLS config: %w", err)
 	}
@@ -83,6 +83,6 @@ func NewStaticTLSConfigGetter(tlsConfig *tls.Config) StaticTLSConfigGetter {
 }
 
 // GetTLSConfig returns the static TLS config.
-func (s StaticTLSConfigGetter) GetTLSConfig(_ context.Context) (*tls.Config, error) {
-	return s.config, nil
+func (s StaticTLSConfigGetter) GetTLSConfig(_ context.Context) (*tls.Config, []byte, error) {
+	return s.config, nil, nil
 }

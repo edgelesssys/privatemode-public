@@ -196,7 +196,7 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 			return ""
 		}(),
 	}
-	manager, err := setup.SecretManager(cmd.Context(), flags, log)
+	manager, _, err := setup.SecretManager(cmd.Context(), flags, log)
 	if err != nil {
 		return fmt.Errorf("setting up secret manager configuration: %w", err)
 	}

@@ -103,7 +103,6 @@ func (s *Server) GetHandler() http.Handler {
 	mux.HandleFunc(openai.ModelsEndpoint, s.noEncryptionHandler)
 	mux.HandleFunc(openai.EmbeddingsEndpoint, s.embeddingsHandler)
 	mux.HandleFunc(openai.TranscriptionsEndpoint, s.transcriptionsHandler)
-	mux.HandleFunc(openai.TranslationsEndpoint, s.translationsHandler)
 
 	mux.HandleFunc("/", http.NotFound) // Reject requests to unknown endpoints
 
@@ -319,21 +318,10 @@ func (s *Server) embeddingsHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) transcriptionsHandler(w http.ResponseWriter, r *http.Request) {
 	s.inferenceHandler(
 		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-			return forwarder.WithFormRequestMutation(cw.Encrypt, openai.PlainTranscriptionFields, s.log)
+			return forwarder.WithFormRequestMutation(cw.Encrypt, openai.PlainTranscriptionRequestFields, s.log)
 		},
 		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithFullResponseMutation(cw.DecryptResponse)
-		},
-	)(w, r)
-}
-
-func (s *Server) translationsHandler(w http.ResponseWriter, r *http.Request) {
-	s.inferenceHandler(
-		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-			return forwarder.WithFormRequestMutation(cw.Encrypt, openai.PlainTranslationFields, s.log)
-		},
-		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithFullResponseMutation(cw.DecryptResponse)
+			return forwarder.WithFullJSONResponseMutation(cw.DecryptResponse, openai.PlainTranscriptionResponseFields, false)
 		},
 	)(w, r)
 }

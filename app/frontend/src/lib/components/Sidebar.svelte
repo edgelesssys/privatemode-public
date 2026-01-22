@@ -2,11 +2,13 @@
   import sidebarLogo from '$lib/assets/logo-text.svg';
   import Icon from '@iconify/svelte';
   import Tooltip from './Tooltip.svelte';
+
   import { chatStore } from '$lib/chatStore';
   import type { Chat } from '$lib/chatStore';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { modelsLoaded } from '$lib/proxyStore';
+  import { onMount } from 'svelte';
 
   export let onNewChat: () => void = () => {};
   export let onSelectChat: (chatId: string) => void = () => {};
@@ -15,6 +17,11 @@
   let renamingChatId: string | null = null;
   let renameValue: string = '';
   let renameInputElement: HTMLInputElement | null = null;
+  let appVersion: string = '';
+
+  onMount(async () => {
+    appVersion = await window.electron.getVersion();
+  });
 
   $: if (renamingChatId && renameInputElement) {
     renameInputElement.focus();
@@ -393,14 +400,17 @@
 
     <div class="info-section">
       {#if $modelsLoaded}
-        <p class="info-item security-info">
+        <a
+          class="info-item security-info"
+          href="/security"
+        >
           <Icon
             icon="material-symbols:security"
             width="18"
             height="18"
           />
           Your session is secure
-        </p>
+        </a>
       {:else}
         <p class="info-item connecting-info">
           <Icon
@@ -448,6 +458,9 @@
         />
         Get support
       </a>
+      {#if appVersion}
+        <span class="version-text">Privatemode {appVersion}</span>
+      {/if}
     </div>
   </div>
 </div>
@@ -647,7 +660,7 @@
     margin-bottom: 0;
   }
 
-  .info-item:not(.security-info):hover {
+  .info-item:hover {
     cursor: pointer;
     opacity: 0.8;
     transition: opacity 0.2s ease-in-out;
@@ -658,6 +671,11 @@
   }
 
   .connecting-info {
+    color: #9ca3af;
+  }
+
+  .version-text {
+    font-size: 0.75rem;
     color: #9ca3af;
   }
 </style>

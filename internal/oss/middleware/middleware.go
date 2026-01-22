@@ -6,8 +6,12 @@ package middleware
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
+	"math/rand"
 	"net/http"
+	"path/filepath"
+	"time"
 )
 
 // NewResponseRecorder returns a *ResponseRecorder that records the status code,
@@ -64,7 +68,13 @@ func (w *ResponseRecorder) Flush() {
 // and finally writes the captured response to a matching file in the given dumpDir.
 func DumpRequestAndResponse(next http.Handler, logger *slog.Logger, dumpDir string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := dumpRequestToFile(r, dumpDir); err != nil {
+		ts := time.Now().UTC()
+		dir := filepath.Join(dumpDir, ts.Format("2006-01-02"))
+		base := fmt.Sprintf("%s_%02d", ts.Format("2006-01-02_150405.000000"), rand.Intn(100))
+		reqPath := filepath.Join(dir, fmt.Sprintf("%s_req.txt", base))
+		respPath := filepath.Join(dir, fmt.Sprintf("%s_resp.txt", base))
+
+		if err := dumpRequestToFile(r, reqPath); err != nil {
 			logger.Error("failed to dump request",
 				"error", err,
 				"path", r.URL.Path,
@@ -75,7 +85,7 @@ func DumpRequestAndResponse(next http.Handler, logger *slog.Logger, dumpDir stri
 		rec := NewResponseRecorder(w)
 		next.ServeHTTP(rec, r)
 
-		if err := dumpResponseRecorderToFile(rec, dumpDir); err != nil {
+		if err := dumpResponseRecorderToFile(rec, respPath); err != nil {
 			logger.Error("failed to dump response",
 				"error", err,
 				"status", rec.Status,

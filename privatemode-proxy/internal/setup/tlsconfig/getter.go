@@ -58,5 +58,11 @@ func fetchAndVerifyCoordinatorState(ctx context.Context, cacheDir string, coordi
 	if err := cclient.Verify(expectedMfBytes, state.Manifests); err != nil {
 		return contrastsdk.CoordinatorState{}, fmt.Errorf("verifying Contrast manifest: %w", err)
 	}
-	return state, err
+	// TODO(msanft): Return the `state` again once `GetCoordinatorState` is fixed to not return the unexported type.
+	return contrastsdk.CoordinatorState{
+		Manifests: state.Manifests,
+		Policies:  state.Policies,
+		RootCA:    state.RootCA,
+		MeshCA:    state.MeshCA,
+	}, err
 }

@@ -10,6 +10,7 @@ export type StartProxyResult = {
 
 interface PrivatemodeAddon {
   startProxy(): StartProxyResult;
+  getCurrentManifest(): string;
 }
 
 let libPath: string;
@@ -58,4 +59,8 @@ const addon: PrivatemodeAddon = require(addonPath);
 
 export function startProxy(): StartProxyResult {
   return addon.startProxy();
+}
+
+export function getCurrentManifest(): string {
+  return addon.getCurrentManifest();
 }

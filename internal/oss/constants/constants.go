@@ -25,8 +25,6 @@ const (
 	WorkloadTaskEmbed = "embed"
 	// WorkloadTaskTranscribe indicates models that support the /v1/audio/transcriptions API.
 	WorkloadTaskTranscribe = "transcribe"
-	// WorkloadTaskTranslate indicates models that support the /v1/audio/translations API.
-	WorkloadTaskTranslate = "translate"
 
 	// CacheDirEnv is the environment variable that specifies the cache directory of Continuum.
 	// If unset, [os.UserCacheDir()] is used.
@@ -120,6 +118,13 @@ const (
 	ShardKeyThirdBoundaryBlocksPerChar = 32
 	// ShardKeyThirdBoundaryBlocks is the number of cache blocks after the second boundary.
 	ShardKeyThirdBoundaryBlocks = 1_000_000 / CacheBlockSizeTokens
+
+	// MaxFileSizeBytes is the maximum file size that users may upload.
+	// The user-facing limit is 50 MiB of file content; this higher value (128 MiB)
+	// intentionally includes overhead from hex/base64 encoding, multipart form-data
+	// boundaries, and HTTP framing so that a 50 MiB file plus transport overhead
+	// is still accepted while preventing excessively large requests.
+	MaxFileSizeBytes = 128 * 1024 * 1024
 
 	// MetricsEndpoint is the endpoint where Prometheus metrics are exposed by default.
 	MetricsEndpoint = "/metrics"

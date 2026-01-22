@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: secret-service
-  namespace: continuum-8c78c2
+  namespace: continuum-12f63c
   labels:
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
 spec:
   replicas: 3
   serviceName: secret-service-headless
@@ -15,17 +15,17 @@ spec:
     metadata:
       labels:
         app: secret-service
-        app.kubernetes.io/instance: '8c78c2'
+        app.kubernetes.io/instance: '12f63c'
     spec:
       runtimeClassName: contrast-cc
       containers:
         - name: secret-service
-          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.32.0@sha256:ffe498d392cabc957e1a0d746815250aebbb6afcf776445adb28b336c9342229'
+          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.33.0@sha256:7feade8b506b5817036bd5d8e4d20650cda1a9675ec3e3f54ed02dc4c8510c73'
           command: ["/bin/sh", "-c"]
           args:
             - |
               exec /bin/secret-service \
-                --k8s-namespace=continuum-8c78c2 \
+                --k8s-namespace=continuum-12f63c \
                 $([ "${HOSTNAME##*-}" = "0" ] && echo "--may-bootstrap") \
                 --etcd-server-cert=/contrast/tls-config/certChain.pem \
                 --etcd-server-key=/contrast/tls-config/key.pem \
@@ -41,10 +41,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-gptoss
-  namespace: continuum-8c78c2
+  namespace: continuum-12f63c
   labels:
     app: workload-gptoss
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
 spec:
   replicas: 1
   selector:
@@ -54,7 +54,7 @@ spec:
     metadata:
       labels:
         app: workload-gptoss
-        app.kubernetes.io/instance: '8c78c2'
+        app.kubernetes.io/instance: '12f63c'
         privatemode.edgeless.systems/needs-gpu: "true"
       annotations:
         prometheus.io/scrape: "true"
@@ -73,12 +73,12 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.32.0@sha256:3a33467b32bd2bb960f29cf735ee5bf7be3d671d6c4831089722afa8f79f8359
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.33.0@sha256:d5cf5a8a7d72a946cd023203a2dc471f225eeae33547edf13a27e1a83d18d825
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
           args:
-            - --gpu-driver-versions=580.105.08
+            - --gpu-driver-versions=590.48.01
             - --gpu-vbios-versions=96.00.88.00.11,96.00.74.00.11,96.00.9F.00.04,96.00.74.00.1C
           securityContext:
             privileged: true
@@ -86,7 +86,7 @@ spec:
             limits:
               "nvidia.com/GH100_H100_PCIE": 1
         - name: disk-mounter-gptoss-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.32.0@sha256:bac563c03a597eadc19ef466a0ef4533b9f93ee4734047b9d7e2364b8cdaaa2f
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.33.0@sha256:92f8537ea3f8815186e025c22b3b23f9c050b352ee6b965b7e018f7a6caf9905
           command:
             - /bin/sh
             - -ec
@@ -121,6 +121,8 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 5
           env:
+            - name: VLLM_MAX_AUDIO_CLIP_FILESIZE_MB
+              value: "50"
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
           command:
@@ -143,7 +145,7 @@ spec:
             - '--port=8000'
             - '--model=/mnt/modelweights-gptoss-0'
             - '--enable-prompt-tokens-details'
-            - '--gpu-memory-utilization=0.925'
+            - '--kv-cache-memory-bytes=5.2g'
             - '--max-num-seqs=256'
             - '--max-model-len=131072'
             - '--enable-auto-tool-choice'
@@ -170,7 +172,7 @@ spec:
               memory: 64Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-gptoss-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.32.0@sha256:87a07cd5045e759a1bab676f79968aef960461f8e4c901a78fcbdbc332d71cf3
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.33.0@sha256:0db53c8516d1b1ae83ee4aeaa5cf569d2bb475769427f7bba08b737c5b9caf78
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -180,7 +182,7 @@ spec:
             - '--listen-port=8085'
             - '--metrics-port=8185'
             - '--workload-port=8000'
-            - '--secret-svc-address=secret-service-internal.continuum-8c78c2.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-12f63c.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -232,10 +234,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-multimodal-qwenembed
-  namespace: continuum-8c78c2
+  namespace: continuum-12f63c
   labels:
     app: workload-multimodal-qwenembed
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
 spec:
   replicas: 1
   selector:
@@ -245,7 +247,7 @@ spec:
     metadata:
       labels:
         app: workload-multimodal-qwenembed
-        app.kubernetes.io/instance: '8c78c2'
+        app.kubernetes.io/instance: '12f63c'
         privatemode.edgeless.systems/needs-gpu: "true"
       annotations:
         prometheus.io/scrape: "true"
@@ -264,12 +266,12 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.32.0@sha256:3a33467b32bd2bb960f29cf735ee5bf7be3d671d6c4831089722afa8f79f8359
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.33.0@sha256:d5cf5a8a7d72a946cd023203a2dc471f225eeae33547edf13a27e1a83d18d825
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
           args:
-            - --gpu-driver-versions=580.105.08
+            - --gpu-driver-versions=590.48.01
             - --gpu-vbios-versions=96.00.88.00.11,96.00.74.00.11,96.00.9F.00.04,96.00.74.00.1C
           securityContext:
             privileged: true
@@ -277,7 +279,7 @@ spec:
             limits:
               "nvidia.com/GH100_H100_PCIE": 1
         - name: disk-mounter-multimodal-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.32.0@sha256:bac563c03a597eadc19ef466a0ef4533b9f93ee4734047b9d7e2364b8cdaaa2f
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.33.0@sha256:92f8537ea3f8815186e025c22b3b23f9c050b352ee6b965b7e018f7a6caf9905
           command:
             - /bin/sh
             - -ec
@@ -300,7 +302,7 @@ spec:
             - name: modelweights-multimodal-0
               devicePath: /dev/modelweights-multimodal-0
         - name: disk-mounter-qwenembed-1
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.32.0@sha256:bac563c03a597eadc19ef466a0ef4533b9f93ee4734047b9d7e2364b8cdaaa2f
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.33.0@sha256:92f8537ea3f8815186e025c22b3b23f9c050b352ee6b965b7e018f7a6caf9905
           command:
             - /bin/sh
             - -ec
@@ -324,7 +326,7 @@ spec:
               devicePath: /dev/modelweights-qwenembed-1
       containers:
         - name: workload-multimodal-0
-          image: docker.io/vllm/vllm-openai:v0.12.0@sha256:6766ce0c459e24b76f3e9ba14ffc0442131ef4248c904efdcbf0d89e38be01fe
+          image: docker.io/vllm/vllm-openai:v0.13.0@sha256:d623253f2ba246378421c9642e20885e65257f38418ff26d48c81aea1702521b
           ports:
             - containerPort: 8000
           readinessProbe:
@@ -335,6 +337,8 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 5
           env:
+            - name: VLLM_MAX_AUDIO_CLIP_FILESIZE_MB
+              value: "50"
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
           command:
@@ -380,7 +384,7 @@ spec:
               memory: 64Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-multimodal-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.32.0@sha256:87a07cd5045e759a1bab676f79968aef960461f8e4c901a78fcbdbc332d71cf3
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.33.0@sha256:0db53c8516d1b1ae83ee4aeaa5cf569d2bb475769427f7bba08b737c5b9caf78
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -390,7 +394,7 @@ spec:
             - '--listen-port=8085'
             - '--metrics-port=8185'
             - '--workload-port=8000'
-            - '--secret-svc-address=secret-service-internal.continuum-8c78c2.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-12f63c.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -402,7 +406,7 @@ spec:
             - name: continuum-run
               mountPath: /var/run/continuum
         - name: workload-qwenembed-1
-          image: docker.io/vllm/vllm-openai:v0.12.0@sha256:6766ce0c459e24b76f3e9ba14ffc0442131ef4248c904efdcbf0d89e38be01fe
+          image: docker.io/vllm/vllm-openai:v0.13.0@sha256:d623253f2ba246378421c9642e20885e65257f38418ff26d48c81aea1702521b
           ports:
             - containerPort: 8001
           readinessProbe:
@@ -413,6 +417,8 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 5
           env:
+            - name: VLLM_MAX_AUDIO_CLIP_FILESIZE_MB
+              value: "50"
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
           command:
@@ -429,9 +435,11 @@ spec:
             - '--port=8001'
             - '--model=/mnt/modelweights-qwenembed-1'
             - '--enable-prompt-tokens-details'
-            - '--task=embed'
             - '--kv-cache-memory-bytes=6.4g'
             - '--max-num-seqs=256'
+            - '--runner=pooling'
+            - --hf-overrides
+            - '{"matryoshka_dimensions":[1024,2560]}'
             - '--no-enable-prefix-caching'
             - '--served-model-name'
             - 'qwen3-embedding-4b'
@@ -448,7 +456,7 @@ spec:
             limits:
               memory: 64Gi
         - name: inference-proxy-qwenembed-1
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.32.0@sha256:87a07cd5045e759a1bab676f79968aef960461f8e4c901a78fcbdbc332d71cf3
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.33.0@sha256:0db53c8516d1b1ae83ee4aeaa5cf569d2bb475769427f7bba08b737c5b9caf78
           ports:
             - containerPort: 8086
             - containerPort: 8186
@@ -458,7 +466,7 @@ spec:
             - '--listen-port=8086'
             - '--metrics-port=8186'
             - '--workload-port=8001'
-            - '--secret-svc-address=secret-service-internal.continuum-8c78c2.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-12f63c.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -525,10 +533,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-transcriptions-codegen
-  namespace: continuum-8c78c2
+  namespace: continuum-12f63c
   labels:
     app: workload-transcriptions-codegen
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
 spec:
   replicas: 1
   selector:
@@ -538,7 +546,7 @@ spec:
     metadata:
       labels:
         app: workload-transcriptions-codegen
-        app.kubernetes.io/instance: '8c78c2'
+        app.kubernetes.io/instance: '12f63c'
         privatemode.edgeless.systems/needs-gpu: "true"
       annotations:
         prometheus.io/scrape: "true"
@@ -557,12 +565,12 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.32.0@sha256:3a33467b32bd2bb960f29cf735ee5bf7be3d671d6c4831089722afa8f79f8359
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.33.0@sha256:d5cf5a8a7d72a946cd023203a2dc471f225eeae33547edf13a27e1a83d18d825
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
           args:
-            - --gpu-driver-versions=580.105.08
+            - --gpu-driver-versions=590.48.01
             - --gpu-vbios-versions=96.00.88.00.11,96.00.74.00.11,96.00.9F.00.04,96.00.74.00.1C
           securityContext:
             privileged: true
@@ -570,7 +578,7 @@ spec:
             limits:
               "nvidia.com/GH100_H100_PCIE": 1
         - name: disk-mounter-transcriptions-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.32.0@sha256:bac563c03a597eadc19ef466a0ef4533b9f93ee4734047b9d7e2364b8cdaaa2f
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.33.0@sha256:92f8537ea3f8815186e025c22b3b23f9c050b352ee6b965b7e018f7a6caf9905
           command:
             - /bin/sh
             - -ec
@@ -593,7 +601,7 @@ spec:
             - name: modelweights-transcriptions-0
               devicePath: /dev/modelweights-transcriptions-0
         - name: disk-mounter-codegen-1
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.32.0@sha256:bac563c03a597eadc19ef466a0ef4533b9f93ee4734047b9d7e2364b8cdaaa2f
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.33.0@sha256:92f8537ea3f8815186e025c22b3b23f9c050b352ee6b965b7e018f7a6caf9905
           command:
             - /bin/sh
             - -ec
@@ -617,7 +625,7 @@ spec:
               devicePath: /dev/modelweights-codegen-1
       containers:
         - name: workload-transcriptions-0
-          image: docker.io/vllm/vllm-openai:v0.12.0@sha256:6766ce0c459e24b76f3e9ba14ffc0442131ef4248c904efdcbf0d89e38be01fe
+          image: docker.io/vllm/vllm-openai:v0.13.0@sha256:d623253f2ba246378421c9642e20885e65257f38418ff26d48c81aea1702521b
           ports:
             - containerPort: 8000
           readinessProbe:
@@ -628,6 +636,8 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 5
           env:
+            - name: VLLM_MAX_AUDIO_CLIP_FILESIZE_MB
+              value: "50"
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
           command:
@@ -635,11 +645,14 @@ spec:
             - -ec
             - |
               cp /untrusted-pylock/pylock.toml /vllm-workspace/pylock.toml
-              if [ $(sha256sum /vllm-workspace/pylock.toml | cut -d ' ' -f 1) != '955ab5e9cf0e852c5497da18f237a5bca8d31296aba004cfc6ce0f88aa62527f' ]; then echo pylock.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.toml | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/pylock.toml | cut -d ' ' -f 1) != '0f90cc733ae5b71731e825655a6d97ee7d0c761775ef4d033a63c556bce12aac' ]; then echo pylock.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.toml | cut -d ' ' -f 1); exit 1; fi
               uv pip install -r /vllm-workspace/pylock.toml --system
               cp /untrusted-vllm-patch/anon-log.patch /vllm-workspace/anon-log.patch
               if [ $(sha256sum /vllm-workspace/anon-log.patch | cut -d ' ' -f 1) != 'd3fa9c7063e7b41d4c4748782b864dd1e9463d9300bc7f58cc3a4bc3b15b07fe' ]; then echo anon-log.patch hash mismatch: $(sha256sum /vllm-workspace/anon-log.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 /usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/output.py < /vllm-workspace/anon-log.patch
+              cp /untrusted-vllm-patch/fix-timestamps.patch /vllm-workspace/fix-timestamps.patch
+              if [ $(sha256sum /vllm-workspace/fix-timestamps.patch | cut -d ' ' -f 1) != '894e10c37c139b3aac5d90175de44303cf9246e238539a40320488b992b91ec7' ]; then echo fix-timestamps.patch hash mismatch: $(sha256sum /vllm-workspace/fix-timestamps.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 /usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/speech_to_text.py < /vllm-workspace/fix-timestamps.patch
               exec python3 -m vllm.entrypoints.openai.api_server "$@"
             - _
           args:
@@ -647,7 +660,8 @@ spec:
             - '--port=8000'
             - '--model=/mnt/modelweights-transcriptions-0'
             - '--enable-prompt-tokens-details'
-            - '--gpu-memory-utilization=0.4'
+            - '--kv-cache-memory-bytes=26.0g'
+            - '--max-num-seqs=18'
             - '--no-enable-prefix-caching'
             - '--served-model-name'
             - 'openai/whisper-large-v3'
@@ -669,7 +683,7 @@ spec:
               memory: 68Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-transcriptions-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.32.0@sha256:87a07cd5045e759a1bab676f79968aef960461f8e4c901a78fcbdbc332d71cf3
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.33.0@sha256:0db53c8516d1b1ae83ee4aeaa5cf569d2bb475769427f7bba08b737c5b9caf78
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -679,11 +693,11 @@ spec:
             - '--listen-port=8085'
             - '--metrics-port=8185'
             - '--workload-port=8000'
-            - '--secret-svc-address=secret-service-internal.continuum-8c78c2.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-12f63c.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
-            - '--workload-tasks=transcribe,translate'
+            - '--workload-tasks=transcribe'
           volumeMounts:
             - name: inference-proxy-transcriptions-0-tls-cert
               mountPath: /etc/tls
@@ -691,7 +705,7 @@ spec:
             - name: continuum-run
               mountPath: /var/run/continuum
         - name: workload-codegen-1
-          image: docker.io/vllm/vllm-openai:v0.12.0@sha256:6766ce0c459e24b76f3e9ba14ffc0442131ef4248c904efdcbf0d89e38be01fe
+          image: docker.io/vllm/vllm-openai:v0.13.0@sha256:d623253f2ba246378421c9642e20885e65257f38418ff26d48c81aea1702521b
           ports:
             - containerPort: 8001
           readinessProbe:
@@ -702,6 +716,8 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 5
           env:
+            - name: VLLM_MAX_AUDIO_CLIP_FILESIZE_MB
+              value: "50"
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
           command:
@@ -718,7 +734,7 @@ spec:
             - '--port=8001'
             - '--model=/mnt/modelweights-codegen-1'
             - '--enable-prompt-tokens-details'
-            - '--gpu-memory-utilization=0.55'
+            - '--kv-cache-memory-bytes=28.0g'
             - '--max-num-seqs=256'
             - '--max-model-len=131072'
             - '--enable-auto-tool-choice'
@@ -741,7 +757,7 @@ spec:
             limits:
               memory: 64Gi
         - name: inference-proxy-codegen-1
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.32.0@sha256:87a07cd5045e759a1bab676f79968aef960461f8e4c901a78fcbdbc332d71cf3
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.33.0@sha256:0db53c8516d1b1ae83ee4aeaa5cf569d2bb475769427f7bba08b737c5b9caf78
           ports:
             - containerPort: 8086
             - containerPort: 8186
@@ -751,7 +767,7 @@ spec:
             - '--listen-port=8086'
             - '--metrics-port=8186'
             - '--workload-port=8001'
-            - '--secret-svc-address=secret-service-internal.continuum-8c78c2.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-12f63c.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -820,8 +836,207 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: workload-voxtralmini
+  namespace: continuum-12f63c
+  labels:
+    app: workload-voxtralmini
+    app.kubernetes.io/instance: '12f63c'
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: workload-voxtralmini
+  template:
+    metadata:
+      labels:
+        app: workload-voxtralmini
+        app.kubernetes.io/instance: '12f63c'
+        privatemode.edgeless.systems/needs-gpu: "true"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/scheme: "http"
+    spec:
+      serviceAccountName: workload-voxtralmini-sa
+      runtimeClassName: contrast-cc
+      initContainers:
+        - name: attestation-agent
+          volumeMounts:
+            - name: privatemode-ca-cert
+              mountPath: /etc/ssl/certs
+              readOnly: true
+            - name: continuum-run
+              mountPath: /var/run/continuum
+            - mountPath: /contrast
+              name: contrast-secrets
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.33.0@sha256:d5cf5a8a7d72a946cd023203a2dc471f225eeae33547edf13a27e1a83d18d825
+          env:
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+          args:
+            - --gpu-driver-versions=590.48.01
+            - --gpu-vbios-versions=96.00.88.00.11,96.00.74.00.11,96.00.9F.00.04,96.00.74.00.1C
+          securityContext:
+            privileged: true
+          resources:
+            limits:
+              "nvidia.com/GH100_H100_PCIE": 1
+        - name: disk-mounter-voxtralmini-0
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.33.0@sha256:92f8537ea3f8815186e025c22b3b23f9c050b352ee6b965b7e018f7a6caf9905
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              blockdev --setra 16384 /dev/modelweights-voxtralmini-0
+              exec /bin/disk-mounter "$@"
+            - _
+          args:
+            - --root-hash=8304092e55ff2c51ff3c897b0f575eee72a47f499aa3043dacdd19d0ec9ad989
+            - --device-path=/dev/modelweights-voxtralmini-0
+            - --mount-path=/mnt/modelweights-voxtralmini-0
+          restartPolicy: Always
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: mount-dir
+              mountPath: /mnt
+              mountPropagation: Bidirectional
+          volumeDevices:
+            - name: modelweights-voxtralmini-0
+              devicePath: /dev/modelweights-voxtralmini-0
+      containers:
+        - name: workload-voxtralmini-0
+          image: docker.io/vllm/vllm-openai:v0.13.0@sha256:d623253f2ba246378421c9642e20885e65257f38418ff26d48c81aea1702521b
+          ports:
+            - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: 8000
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 5
+          env:
+            - name: VLLM_MAX_AUDIO_CLIP_FILESIZE_MB
+              value: "50"
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              cp /untrusted-pylock/pylock.toml /vllm-workspace/pylock.toml
+              if [ $(sha256sum /vllm-workspace/pylock.toml | cut -d ' ' -f 1) != '0f90cc733ae5b71731e825655a6d97ee7d0c761775ef4d033a63c556bce12aac' ]; then echo pylock.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.toml | cut -d ' ' -f 1); exit 1; fi
+              uv pip install -r /vllm-workspace/pylock.toml --system
+              cp /untrusted-vllm-patch/anon-log.patch /vllm-workspace/anon-log.patch
+              if [ $(sha256sum /vllm-workspace/anon-log.patch | cut -d ' ' -f 1) != 'd3fa9c7063e7b41d4c4748782b864dd1e9463d9300bc7f58cc3a4bc3b15b07fe' ]; then echo anon-log.patch hash mismatch: $(sha256sum /vllm-workspace/anon-log.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 /usr/local/lib/python3.12/dist-packages/vllm/v1/core/sched/output.py < /vllm-workspace/anon-log.patch
+              cp /untrusted-vllm-patch/fix-timestamps.patch /vllm-workspace/fix-timestamps.patch
+              if [ $(sha256sum /vllm-workspace/fix-timestamps.patch | cut -d ' ' -f 1) != '894e10c37c139b3aac5d90175de44303cf9246e238539a40320488b992b91ec7' ]; then echo fix-timestamps.patch hash mismatch: $(sha256sum /vllm-workspace/fix-timestamps.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 /usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/speech_to_text.py < /vllm-workspace/fix-timestamps.patch
+              cp /untrusted-vllm-patch/voxtral.patch /vllm-workspace/voxtral.patch
+              if [ $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1) != '37f2543f38e63ce88461f0f619fb40a2d6a3c027a62d929345427b8dfd9e4b52' ]; then echo voxtral.patch hash mismatch: $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/voxtral.patch
+              exec python3 -m vllm.entrypoints.openai.api_server "$@"
+            - _
+          args:
+            - '--host=0.0.0.0'
+            - '--port=8000'
+            - '--model=/mnt/modelweights-voxtralmini-0'
+            - '--enable-prompt-tokens-details'
+            - '--kv-cache-memory-bytes=20g'
+            - '--max-num-seqs=20'
+            - '--enable-auto-tool-choice'
+            - '--tool-call-parser'
+            - 'mistral'
+            - '--tokenizer-mode'
+            - 'mistral'
+            - '--no-enable-prefix-caching'
+            - '--served-model-name'
+            - 'voxtral-mini-3b'
+          volumeMounts:
+            - name: mount-dir
+              mountPath: /mnt
+              mountPropagation: HostToContainer
+            - name: vllm-audio-pylock
+              mountPath: /untrusted-pylock
+              readOnly: true
+            - name: vllm-patch
+              mountPath: /untrusted-vllm-patch
+              readOnly: true
+          resources:
+            requests:
+              memory: 68Gi
+            limits:
+              memory: 68Gi
+              "nvidia.com/GH100_H100_PCIE": 1
+        - name: inference-proxy-voxtralmini-0
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.33.0@sha256:0db53c8516d1b1ae83ee4aeaa5cf569d2bb475769427f7bba08b737c5b9caf78
+          ports:
+            - containerPort: 8085
+            - containerPort: 8185
+          args:
+            - '--adapter-type=openai'
+            - '--workload-address=127.0.0.1'
+            - '--listen-port=8085'
+            - '--metrics-port=8185'
+            - '--workload-port=8000'
+            - '--secret-svc-address=secret-service-internal.continuum-12f63c.svc.cluster.local'
+            - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
+            - '--etcd-member-key=/contrast/tls-config/key.pem'
+            - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
+            - '--workload-tasks=transcribe'
+          volumeMounts:
+            - name: inference-proxy-voxtralmini-0-tls-cert
+              mountPath: /etc/tls
+              readOnly: true
+            - name: continuum-run
+              mountPath: /var/run/continuum
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: workload-voxtralmini
+      volumes:
+        - name: privatemode-ca-cert
+          secret:
+            secretName: privatemode-ca-secret
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - emptyDir: {}
+          name: mount-dir
+        - emptyDir: {}
+          name: continuum-run
+        - name: vllm-audio-pylock
+          configMap:
+            name: vllm-audio-pylock
+        - name: vllm-patch
+          configMap:
+            name: vllm-patch
+        - name: inference-proxy-voxtralmini-0-tls-cert
+          secret:
+            secretName: inference-proxy-voxtralmini-0-tls-secret
+        - name: modelweights-voxtralmini-0
+          ephemeral:
+            volumeClaimTemplate:
+              metadata: {}
+              spec:
+                storageClassName: mistralai-voxtral-mini-3b-2507
+                volumeMode: Block
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: unstructured-api
-  namespace: continuum-8c78c2
+  namespace: continuum-12f63c
   labels:
     app: unstructured-api
 spec:
@@ -833,7 +1048,7 @@ spec:
     metadata:
       labels:
         app: unstructured-api
-        app.kubernetes.io/instance: '8c78c2'
+        app.kubernetes.io/instance: '12f63c'
     spec:
       runtimeClassName: contrast-cc
       containers:
@@ -878,14 +1093,14 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 5
         - name: inference-proxy
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.32.0@sha256:87a07cd5045e759a1bab676f79968aef960461f8e4c901a78fcbdbc332d71cf3
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.33.0@sha256:0db53c8516d1b1ae83ee4aeaa5cf569d2bb475769427f7bba08b737c5b9caf78
           ports:
             - containerPort: 8085
           args:
             - --adapter-type=unstructured
             - --workload-address=127.0.0.1
             - --workload-port=8000
-            - --secret-svc-address=secret-service-internal.continuum-8c78c2.svc.cluster.local
+            - --secret-svc-address=secret-service-internal.continuum-12f63c.svc.cluster.local
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -905,17 +1120,17 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: coordinator
-  namespace: 'continuum-8c78c2'
+  namespace: 'continuum-12f63c'
   labels:
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: coordinator
-  namespace: 'continuum-8c78c2'
+  namespace: 'continuum-12f63c'
   labels:
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
 rules:
   - apiGroups:
       - ""
@@ -938,9 +1153,9 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: coordinator
-  namespace: 'continuum-8c78c2'
+  namespace: 'continuum-12f63c'
   labels:
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -948,20 +1163,23 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: coordinator
-    namespace: "continuum-8c78c2"
+    namespace: "continuum-12f63c"
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator
-  namespace: 'continuum-8c78c2'
+  namespace: 'continuum-12f63c'
   labels:
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
 spec:
   ports:
     - name: userapi
       port: 1313
       targetPort: 1313
+    - name: httpapi
+      port: 1314
+      targetPort: 1314
     - name: meshapi
       port: 7777
       targetPort: 7777
@@ -974,21 +1192,24 @@ spec:
   publishNotReadyAddresses: true
   selector:
     app.kubernetes.io/name: coordinator
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
   type: ClusterIP
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator-ready
-  namespace: 'continuum-8c78c2'
+  namespace: 'continuum-12f63c'
   labels:
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
 spec:
   ports:
     - name: userapi
       port: 1313
       targetPort: 1313
+    - name: httpapi
+      port: 1314
+      targetPort: 1314
     - name: meshapi
       port: 7777
       targetPort: 7777
@@ -1000,16 +1221,16 @@ spec:
       targetPort: 1313
   selector:
     app.kubernetes.io/name: coordinator
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
   type: ClusterIP
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: coordinator
-  namespace: 'continuum-8c78c2'
+  namespace: 'continuum-12f63c'
   labels:
-    app.kubernetes.io/instance: '8c78c2'
+    app.kubernetes.io/instance: '12f63c'
 spec:
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Delete
@@ -1025,7 +1246,7 @@ spec:
         contrast.edgeless.systems/pod-role: coordinator
       labels:
         app.kubernetes.io/name: coordinator
-        app.kubernetes.io/instance: '8c78c2'
+        app.kubernetes.io/instance: '12f63c'
     spec:
       affinity:
         podAntiAffinity:
@@ -1037,7 +1258,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
               weight: 100
       containers:
-        - image: ghcr.io/edgelesssys/contrast/coordinator:v1.15.0@sha256:ceb7f208025f3284d89dbd9a7aa7a60bbc5901d568e4100c28bc1abdddd4d7f6
+        - image: ghcr.io/edgelesssys/contrast/coordinator:v1.16.0@sha256:59954b330835184a9ecd4604962b6404407c028f85e1b5dd6187ac56a1052e9d
           livenessProbe:
             failureThreshold: 3
             httpGet:
@@ -1048,6 +1269,8 @@ spec:
           ports:
             - containerPort: 1313
               name: userapi
+            - containerPort: 1314
+              name: httpapi
             - containerPort: 7777
               name: meshapi
             - containerPort: 8200
@@ -1059,9 +1282,9 @@ spec:
             periodSeconds: 5
           resources:
             limits:
-              memory: 50Mi
+              memory: 200Mi
             requests:
-              memory: 50Mi
+              memory: 200Mi
           securityContext:
             capabilities:
               add:

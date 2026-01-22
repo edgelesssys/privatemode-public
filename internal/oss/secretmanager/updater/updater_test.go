@@ -63,8 +63,8 @@ type stubTLSCfgUpdater struct {
 	err error
 }
 
-func (t *stubTLSCfgUpdater) GetTLSConfig(_ context.Context) (*tls.Config, error) {
-	return &tls.Config{}, t.err
+func (t *stubTLSCfgUpdater) GetTLSConfig(_ context.Context) (*tls.Config, []byte, error) {
+	return &tls.Config{}, nil, t.err
 }
 
 type stubSecretClient struct {

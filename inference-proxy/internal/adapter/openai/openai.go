@@ -24,6 +24,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"golang.org/x/mod/semver"
 )
 
 var ocspStatusMetrics = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -100,8 +101,6 @@ func (t *Adapter) ServeMux() http.Handler {
 	srv.HandleFunc("POST /v1/embeddings", t.forwardEmbeddingsRequest)
 
 	srv.HandleFunc(openai.TranscriptionsEndpoint, t.forwardTranscriptionsRequest)
-
-	srv.HandleFunc(openai.TranslationsEndpoint, t.forwardTranslationsRequest)
 
 	return t.verifyOCSP(srv)
 }
@@ -203,21 +202,17 @@ func (t *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Reques
 func (t *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Request) {
 	session := t.cipher.NewResponseCipher()
 
-	t.forwarder.Forward(
-		w, r,
-		forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), openai.PlainTranscriptionFields, t.log),
-		forwarder.WithFullResponseMutation(session.EncryptResponse(r.Context())),
-		forwarder.NoHeaderMutation,
-	)
-}
-
-func (t *Adapter) forwardTranslationsRequest(w http.ResponseWriter, r *http.Request) {
-	session := t.cipher.NewResponseCipher()
+	requestFieldSelector := openai.PlainTranscriptionRequestFields
+	responseMutator := forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields, false)
+	if semver.Compare(r.Header.Get(constants.PrivatemodeVersionHeader), "v1.32.9") < 0 {
+		requestFieldSelector = forwarder.FieldSelector{{"model"}}                                  // Clients before v1.33 only have "model" as unencrypted field
+		responseMutator = forwarder.WithFullResponseMutation(session.EncryptResponse(r.Context())) // Clients before v1.33 expect the full response body to be encrypted
+	}
 
 	t.forwarder.Forward(
 		w, r,
-		forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), openai.PlainTranslationFields, t.log),
-		forwarder.WithFullResponseMutation(session.EncryptResponse(r.Context())),
+		forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), requestFieldSelector, t.log),
+		responseMutator,
 		forwarder.NoHeaderMutation,
 	)
 }

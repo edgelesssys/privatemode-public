@@ -38,23 +38,31 @@ func newTLSConfigAdapter(cdnBaseURL string, mfLogger mfLogger, tlsConfigUpdater 
 	}
 }
 
-// GetTLSConfig retrieves the latest TLS config.
-func (t tlsConfigAdapter) GetTLSConfig(ctx context.Context) (*tls.Config, error) {
+// GetTLSConfig retrieves the latest manifest and uses it to get the mesh certificate via aTLS.
+// It returns a [tls.Config] based on the mesh certificate and the raw manifest.
+func (t tlsConfigAdapter) GetTLSConfig(ctx context.Context) (*tls.Config, []byte, error) {
 	return getNewTLSConfig(ctx, t.fetcher, t.mfLogger, t.tlsConfigUpdater, t.log)
 }
 
-func getNewTLSConfig(ctx context.Context, fetcher contrastDeploymentFetcher, mfLogger mfLogger, tlsConfigUpdater tlsConfigUpdater, log *slog.Logger) (*tls.Config, error) {
+func getNewTLSConfig(ctx context.Context, fetcher contrastDeploymentFetcher, mfLogger mfLogger,
+	tlsConfigUpdater tlsConfigUpdater, log *slog.Logger,
+) (*tls.Config, []byte, error) {
 	expectedMfBytes, err := fetcher.FetchManifest(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("fetching manifest: %w", err)
+		return nil, nil, fmt.Errorf("fetching manifest: %w", err)
 	}
 	log.Info("Coordinator manifest fetched successfully")
 
 	if err := mfLogger.Log(expectedMfBytes); err != nil {
-		return nil, fmt.Errorf("log manifest: %w", err)
+		return nil, nil, fmt.Errorf("logging manifest: %w", err)
 	}
 
-	return tlsConfigUpdater.GetTLSConfig(ctx, expectedMfBytes)
+	tlsConfig, err := tlsConfigUpdater.GetTLSConfig(ctx, expectedMfBytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("converting manifest to tls config: %w", err)
+	}
+
+	return tlsConfig, expectedMfBytes, nil
 }
 
 type contrastDeploymentFetcher struct {

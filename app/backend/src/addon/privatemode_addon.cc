@@ -1,4 +1,5 @@
 #include <array>
+#include <cstdlib>
 #include <memory>
 #include <napi.h>
 #include <stdexcept>
@@ -15,11 +16,13 @@
 using namespace std::string_literals;
 using MsgBuffer = std::array<char, 512>;
 using PrivatemodeStartProxyFunc = decltype(PrivatemodeStartProxy) *;
+using CurrentManifestFunc = decltype(CurrentManifest) *;
 
 namespace {
 class LibraryLoader {
   private:
     PrivatemodeStartProxyFunc startProxyFunc;
+    CurrentManifestFunc currentManifestFunc;
 
     static std::string getLibraryPath() {
         const char *const envPath = std::getenv("LIBPRIVATEMODE_PATH");
@@ -30,7 +33,7 @@ class LibraryLoader {
     }
 
   public:
-    LibraryLoader() : startProxyFunc{} {
+    LibraryLoader() : startProxyFunc{}, currentManifestFunc{} {
         const std::string libPath = getLibraryPath();
 
 #ifdef _WIN32
@@ -46,6 +49,12 @@ class LibraryLoader {
             snprintf(buffer.data(), buffer.size(), "Failed to find PrivatemodeStartProxy function (error code: %lu)", GetLastError());
             throw std::runtime_error(buffer.data());
         }
+        currentManifestFunc = reinterpret_cast<CurrentManifestFunc>(GetProcAddress(handle, "CurrentManifest"));
+        if (!currentManifestFunc) {
+            MsgBuffer buffer{};
+            snprintf(buffer.data(), buffer.size(), "Failed to find CurrentManifest function (error code: %lu)", GetLastError());
+            throw std::runtime_error(buffer.data());
+        }
 #else
         const auto handle = dlopen(libPath.c_str(), RTLD_LAZY);
         if (!handle) {
@@ -59,11 +68,21 @@ class LibraryLoader {
             snprintf(buffer.data(), buffer.size(), "Failed to find PrivatemodeStartProxy function (%s)", dlerror());
             throw std::runtime_error(buffer.data());
         }
+        currentManifestFunc = reinterpret_cast<CurrentManifestFunc>(dlsym(handle, "CurrentManifest"));
+        if (!currentManifestFunc) {
+            MsgBuffer buffer{};
+            snprintf(buffer.data(), buffer.size(), "Failed to find CurrentManifest function (%s)", dlerror());
+            throw std::runtime_error(buffer.data());
+        }
 #endif
     }
 
     PrivatemodeStartProxyFunc getStartProxyFunc() const noexcept {
         return startProxyFunc;
+    }
+
+    CurrentManifestFunc getCurrentManifestFunc() const noexcept {
+        return currentManifestFunc;
     }
 };
 } // namespace
@@ -85,14 +104,30 @@ static Napi::Object StartProxy(const Napi::CallbackInfo &info) {
 
     if (result.r0 == -1) {
         returnObj.Set("success", Napi::Boolean::New(env, false));
-        returnObj.Set("error", Napi::String::New(env, result.r1.p, result.r1.n));
+        returnObj.Set("error", Napi::String::New(env, result.r1));
         returnObj.Set("port", Napi::String::New(env, "-1"));
+        free(result.r1);
     } else {
         returnObj.Set("success", Napi::Boolean::New(env, true));
         returnObj.Set("port", Napi::String::New(env, std::to_string(result.r0)));
     }
 
     return returnObj;
+}
+
+static Napi::String GetCurrentManifest(const Napi::CallbackInfo &info) {
+    const Napi::Env env = info.Env();
+
+    if (!libraryLoader) {
+        Napi::Error::New(env, "Library not loaded").ThrowAsJavaScriptException();
+        return Napi::String::New(env, "");
+    }
+
+    const CurrentManifestFunc func = libraryLoader->getCurrentManifestFunc();
+    char *const result = func();
+    const Napi::String str = Napi::String::New(env, result);
+    free(result);
+    return str;
 }
 
 static Napi::Object Init(Napi::Env env, Napi::Object exports) {
@@ -104,6 +139,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     }
 
     exports.Set("startProxy", Napi::Function::New(env, StartProxy));
+    exports.Set("getCurrentManifest", Napi::Function::New(env, GetCurrentManifest));
     return exports;
 }
 

@@ -495,7 +495,7 @@ func TestVerifyOCSP(t *testing.T) {
 			// OCSP verification middleware needs to be applied to all endpoints that interact with vLLM, i.e. the GPU
 			for _, path := range []string{
 				openai.ChatCompletionsEndpoint, openai.LegacyCompletionsEndpoint, openai.EmbeddingsEndpoint,
-				openai.TranscriptionsEndpoint, openai.TranslationsEndpoint,
+				openai.TranscriptionsEndpoint,
 			} {
 				t.Run(path, func(t *testing.T) {
 					assert := assert.New(t)

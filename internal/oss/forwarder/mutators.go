@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -109,7 +110,7 @@ func WithFormRequestMutation(mutate MutationFunc, skipFields FieldSelector, log 
 	return func(r *http.Request) error {
 		log.Info("Mutating HTTP form request")
 
-		if err := r.ParseMultipartForm(64 * 1024 * 1024); err != nil {
+		if err := r.ParseMultipartForm(constants.MaxFileSizeBytes); err != nil {
 			return fmt.Errorf("parsing form: %w", err)
 		}
 
@@ -552,14 +553,14 @@ func mutateFormField(
 
 func mutateFormFile(
 	writer *multipart.Writer, formKey string, formFile multipart.File, mutate MutationFunc, skipFields FieldSelector,
-) (err error) {
+) (retErr error) {
 	formWriter, err := writer.CreateFormFile(formKey, formKey)
 	if err != nil {
 		return fmt.Errorf("creating form file %q: %w", formKey, err)
 	}
 	defer func() {
-		if closeErr := formFile.Close(); err != nil {
-			err = errors.Join(err, fmt.Errorf("closing form file %q: %w", formKey, closeErr))
+		if closeErr := formFile.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("closing form file %q: %w", formKey, closeErr))
 		}
 	}()
 

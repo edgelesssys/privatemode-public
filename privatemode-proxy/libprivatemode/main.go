@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
@@ -21,33 +22,41 @@ import (
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/setup"
 )
 
+var (
+	currentManifest   string
+	currentManifestMu sync.Mutex
+)
+
 //export PrivatemodeStartProxy
-func PrivatemodeStartProxy() (int, string) {
+func PrivatemodeStartProxy() (int, *C.char) {
 	log := logging.NewCLILogger("info", os.Stderr)
 	log.Info("Starting privatemode-proxy")
 
 	flags, err := flagsFromEnv(log)
 	if err != nil {
-		return -1, fmt.Sprintf("getting flags from env: %s", err)
+		return -1, C.CString(fmt.Sprintf("getting flags from env: %s", err))
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:")
 	if err != nil {
-		return -1, fmt.Sprintf("setting up listener: %s", err)
+		return -1, C.CString(fmt.Sprintf("setting up listener: %s", err))
 	}
 
 	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
 	if !ok {
-		return -1, "getting listener address: not a TCP address"
+		return -1, C.CString("getting listener address: not a TCP address")
 	}
 
 	go func() {
 		log.Info("Connecting to secret-service")
-		manager, err := setup.SecretManager(context.Background(), *flags, log)
+		manager, mfBytes, err := setup.SecretManager(context.Background(), *flags, log)
 		if err != nil {
 			log.Error("connecting to secret-service", "error", err)
 			return
 		}
+		currentManifestMu.Lock()
+		currentManifest = string(mfBytes)
+		currentManifestMu.Unlock()
 
 		server := setup.NewServer(*flags, true, manager, log)
 
@@ -57,7 +66,14 @@ func PrivatemodeStartProxy() (int, string) {
 		}
 	}()
 
-	return tcpAddr.Port, ""
+	return tcpAddr.Port, nil
+}
+
+//export CurrentManifest
+func CurrentManifest() *C.char {
+	currentManifestMu.Lock()
+	defer currentManifestMu.Unlock()
+	return C.CString(currentManifest)
 }
 
 func flagsFromEnv(log *slog.Logger) (*setup.Flags, error) {

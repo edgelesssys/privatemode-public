@@ -14,9 +14,12 @@ package openai
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -42,8 +45,6 @@ const (
 	EmbeddingsEndpoint = "/v1/embeddings"
 	// TranscriptionsEndpoint is the endpoint for audio transcriptions.
 	TranscriptionsEndpoint = "/v1/audio/transcriptions"
-	// TranslationsEndpoint is the endpoint for audio translations.
-	TranslationsEndpoint = "/v1/audio/translations"
 )
 
 // PlainCompletionsRequestFields is a field selector for all fields in an OpenAI chat completions request that are not encrypted.
@@ -73,14 +74,18 @@ var PlainEmbeddingsResponseFields = forwarder.FieldSelector{
 	{"usage"},
 }
 
-// PlainTranscriptionFields are the plain form fields for OpenAI audio transcriptions.
-var PlainTranscriptionFields = forwarder.FieldSelector{
+// PlainTranscriptionRequestFields are the plain form fields for OpenAI audio transcriptions.
+var PlainTranscriptionRequestFields = forwarder.FieldSelector{
 	{"model"},
+	{"stream"},
+	{"stream_include_usage"},
+	{"stream_continuous_usage_stats"},
 }
 
-// PlainTranslationFields are the plain form fields for OpenAI audio translations.
-var PlainTranslationFields = forwarder.FieldSelector{
-	{"model"},
+// PlainTranscriptionResponseFields is a field selector for all fields in an OpenAI transcription response that are not encrypted.
+var PlainTranscriptionResponseFields = forwarder.FieldSelector{
+	{"duration"},
+	{"usage"},
 }
 
 // RandomPromptCacheSalt generates a random salt for prompt caching.
@@ -245,6 +250,53 @@ type Usage struct {
 type PromptTokensDetails struct {
 	AudioTokens  int `json:"audio_tokens,omitzero"`
 	CachedTokens int `json:"cached_tokens,omitzero"`
+}
+
+// TranscriptionUsageResponse contains all usage information provided by vLLM transcription responses.
+type TranscriptionUsageResponse struct {
+	Duration int        `json:"duration,omitzero"`
+	Usage    AudioUsage `json:"usage,omitzero"`
+}
+
+// AudioUsage contains usage information of audio endpoints, e.g. /v1/audio/transcriptions.
+type AudioUsage struct {
+	Type             string `json:"type"`
+	Seconds          int    `json:"seconds,omitzero"`
+	PromptTokens     int    `json:"prompt_tokens,omitzero"`
+	TotalTokens      int    `json:"total_tokens,omitzero"`
+	CompletionTokens int    `json:"completion_tokens,omitzero"`
+}
+
+// MarshalJSON implements custom JSON marshalling for AudioUsage to serialize Duration as a string.
+func (a *TranscriptionUsageResponse) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Duration string     `json:"duration,omitzero"`
+		Usage    AudioUsage `json:"usage,omitzero"`
+	}{
+		Duration: strconv.FormatFloat(float64(a.Duration), 'f', -1, 64),
+		Usage:    a.Usage,
+	})
+}
+
+// UnmarshalJSON implements custom JSON unmarshalling for AudioUsage to parse Duration from a string.
+func (a *TranscriptionUsageResponse) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		Duration string     `json:"duration,omitzero"`
+		Usage    AudioUsage `json:"usage,omitzero"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	a.Usage = aux.Usage
+	if aux.Duration != "" {
+		duration, err := strconv.ParseFloat(aux.Duration, 64)
+		if err != nil {
+			return fmt.Errorf("parsing duration: %w", err)
+		}
+		a.Duration = int(math.Ceil(duration))
+	}
+	return nil
 }
 
 // CacheSaltGenerator returns a cache salt for the vLLM prompt cache.

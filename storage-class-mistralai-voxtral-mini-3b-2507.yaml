@@ -1,0 +1,27 @@
+allowVolumeExpansion: false
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"allowVolumeExpansion":false,"apiVersion":"storage.k8s.io/v1","kind":"StorageClass","metadata":{"annotations":{"privatemode.edgeless.systems/build_version":"v1.33.0","privatemode.edgeless.systems/commit_hash":"3060fe34b35ba5d44202ce9ff3c097642914f8f3","privatemode.edgeless.systems/disk_size_gb":"10","privatemode.edgeless.systems/excluded_files":"model-00001-of-00002.safetensors,model-00002-of-00002.safetensors","privatemode.edgeless.systems/model_source":"https://huggingface.co/mistralai/Voxtral-Mini-3B-2507","privatemode.edgeless.systems/root_hash":"8304092e55ff2c51ff3c897b0f575eee72a47f499aa3043dacdd19d0ec9ad989"},"name":"mistralai-voxtral-mini-3b-2507"},"parameters":{"backingImage":"verity-disk-fuwcvl","backingImageChecksum":"3ed0ece51d34737ca5a43db3928c340f23ea1ee02cc8170cc5d9f32371db9d3f72caab0eddbe121415cba6db84197ccb8e5220a79a5633baa7ae9e53ad74dc05","dataEngine":"v1","dataLocality":"strict-local","numberOfReplicas":"1","staleReplicaTimeout":"2880"},"provisioner":"driver.longhorn.io","reclaimPolicy":"Delete","volumeBindingMode":"WaitForFirstConsumer"}
+    privatemode.edgeless.systems/build_version: v1.33.0
+    privatemode.edgeless.systems/commit_hash: 3060fe34b35ba5d44202ce9ff3c097642914f8f3
+    privatemode.edgeless.systems/disk_size_gb: "10"
+    privatemode.edgeless.systems/excluded_files: model-00001-of-00002.safetensors,model-00002-of-00002.safetensors
+    privatemode.edgeless.systems/model_source: https://huggingface.co/mistralai/Voxtral-Mini-3B-2507
+    privatemode.edgeless.systems/root_hash: 8304092e55ff2c51ff3c897b0f575eee72a47f499aa3043dacdd19d0ec9ad989
+  creationTimestamp: "2026-01-12T13:50:20Z"
+  name: mistralai-voxtral-mini-3b-2507
+  resourceVersion: "7376463397"
+  uid: 47034ab5-7ac2-4e64-a440-7efbebe7ddba
+parameters:
+  backingImage: verity-disk-fuwcvl
+  backingImageChecksum: 3ed0ece51d34737ca5a43db3928c340f23ea1ee02cc8170cc5d9f32371db9d3f72caab0eddbe121415cba6db84197ccb8e5220a79a5633baa7ae9e53ad74dc05
+  dataEngine: v1
+  dataLocality: strict-local
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer

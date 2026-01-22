@@ -240,7 +240,7 @@ test.describe('Model interaction', () => {
   test('should fetch available models from API', async () => {
     const { page } = electronContext;
 
-    const modelPicker = page.getByText('Select model');
+    const modelPicker = page.locator('.model-button');
     await expect(modelPicker).toBeVisible();
     await modelPicker.click();
 
@@ -307,6 +307,58 @@ test.describe('Model interaction', () => {
         .locator('.message.user')
         .filter({ hasText: /Remember the number 42./i }),
     ).toBeVisible();
+  });
+});
+
+test.describe('Security page', () => {
+  test.beforeEach(async () => {
+    electronContext = await electron.launchElectronApp();
+    await electron.waitForAppReady(electronContext.page);
+    await electron.clearStorage(electronContext.page);
+    await electron.setupTestApiKey(
+      electronContext.page,
+      process.env.PRIVATEMODE_API_KEY,
+    );
+    await electronContext.page.reload();
+    await electron.waitForAppReady(electronContext.page);
+  });
+
+  test.afterEach(async () => {
+    if (electronContext?.app) {
+      await electron.closeElectronApp(electronContext.app);
+    }
+  });
+
+  test('should display security status sections', async () => {
+    const { page } = electronContext;
+
+    const securityLink = page.getByRole('link', {
+      name: /your session is secure/i,
+    });
+    await expect(securityLink).toBeVisible({ timeout: 30000 });
+    await securityLink.click();
+
+    await expect(
+      page.getByRole('heading', { name: 'Security', exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText('Remote attestation')).toBeVisible();
+    await expect(page.getByText('Reproducible software')).toBeVisible();
+    await expect(page.getByText('Hardware-based security')).toBeVisible();
+  });
+
+  test('should display manifest hash after loading', async () => {
+    const { page } = electronContext;
+
+    const securityLink = page.getByRole('link', {
+      name: /your session is secure/i,
+    });
+    await expect(securityLink).toBeVisible({ timeout: 30000 });
+    await securityLink.click();
+
+    await expect(page.getByText('Manifest hash (SHA-256)')).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(page.locator('.data-value').first()).toBeVisible();
   });
 });
 
