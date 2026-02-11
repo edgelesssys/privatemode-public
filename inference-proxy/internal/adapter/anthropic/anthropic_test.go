@@ -1,0 +1,235 @@
+package anthropic
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
+	"github.com/edgelesssys/continuum/internal/oss/anthropic"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/ocsp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const defaultModel = "claude-3-opus-20240229"
+
+func TestForwardMessagesRequest(t *testing.T) {
+	testCases := map[string]struct {
+		clientRequest    string
+		serverResponse   string
+		validateResponse func(assert *assert.Assertions, responseRecorder *httptest.ResponseRecorder)
+	}{
+		"success": {
+			clientRequest: func() string {
+				res, err := json.Marshal(anthropic.MessagesRequest{
+					MessagesRequestPlainData: anthropic.MessagesRequestPlainData{
+						Model: defaultModel,
+					},
+					MaxTokens: 1024,
+					Messages: []anthropic.Message{
+						{Role: "user", Content: "Hello, Claude!"},
+					},
+				})
+				require.NoError(t, err)
+				return string(res)
+			}(),
+			serverResponse: func() string {
+				res, err := json.Marshal(anthropic.MessagesResponse{
+					ID:         "msg_123",
+					Type:       "message",
+					Role:       "assistant",
+					Content:    []anthropic.ContentBlock{{Type: "text", Text: "Hello!"}},
+					Model:      defaultModel,
+					StopReason: "end_turn",
+					Usage:      anthropic.Usage{InputTokens: 10, OutputTokens: 5},
+				})
+				require.NoError(t, err)
+				return string(res)
+			}(),
+			validateResponse: func(assert *assert.Assertions, responseRecorder *httptest.ResponseRecorder) {
+				assert.Equal(http.StatusOK, responseRecorder.Code)
+			},
+		},
+		"with streaming": {
+			clientRequest: func() string {
+				res, err := json.Marshal(anthropic.MessagesRequest{
+					MessagesRequestPlainData: anthropic.MessagesRequestPlainData{
+						Model:  defaultModel,
+						Stream: true,
+					},
+					MaxTokens: 1024,
+					Messages: []anthropic.Message{
+						{Role: "user", Content: "Hello, Claude!"},
+					},
+				})
+				require.NoError(t, err)
+				return string(res)
+			}(),
+			serverResponse: func() string {
+				res, err := json.Marshal(anthropic.MessagesResponse{
+					ID:   "msg_123",
+					Type: "message",
+				})
+				require.NoError(t, err)
+				return string(res)
+			}(),
+			validateResponse: func(assert *assert.Assertions, responseRecorder *httptest.ResponseRecorder) {
+				assert.Equal(http.StatusOK, responseRecorder.Code)
+			},
+		},
+		"with system prompt": {
+			clientRequest: func() string {
+				res, err := json.Marshal(anthropic.MessagesRequest{
+					MessagesRequestPlainData: anthropic.MessagesRequestPlainData{
+						Model: defaultModel,
+					},
+					MaxTokens: 1024,
+					System:    "You are a helpful assistant.",
+					Messages: []anthropic.Message{
+						{Role: "user", Content: "Hello!"},
+					},
+				})
+				require.NoError(t, err)
+				return string(res)
+			}(),
+			serverResponse: func() string {
+				res, err := json.Marshal(anthropic.MessagesResponse{
+					ID:      "msg_123",
+					Type:    "message",
+					Content: []anthropic.ContentBlock{{Type: "text", Text: "Hi there!"}},
+					Usage:   anthropic.Usage{InputTokens: 10, OutputTokens: 5},
+				})
+				require.NoError(t, err)
+				return string(res)
+			}(),
+			validateResponse: func(assert *assert.Assertions, responseRecorder *httptest.ResponseRecorder) {
+				assert.Equal(http.StatusOK, responseRecorder.Code)
+			},
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.serverResponse))
+			}))
+			defer srv.Close()
+
+			ocspStatus, err := json.Marshal([]ocsp.StatusInfo{{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}})
+			require.NoError(err)
+			ocspFile := filepath.Join(t.TempDir(), "ocsp.json")
+			require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
+
+			log := slog.Default()
+			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, log)
+			require.NoError(err)
+
+			request := httptest.NewRequest(http.MethodPost, anthropic.MessagesEndpoint, strings.NewReader(tc.clientRequest))
+			responseRecorder := httptest.NewRecorder()
+
+			adapter.forwardMessagesRequest(responseRecorder, request)
+			tc.validateResponse(assert, responseRecorder)
+		})
+	}
+}
+
+func TestRegisterRoutes(t *testing.T) {
+	testCases := map[string]struct {
+		method       string
+		path         string
+		expectedCode int
+	}{
+		"POST messages": {
+			method:       http.MethodPost,
+			path:         "/v1/messages",
+			expectedCode: http.StatusOK,
+		},
+		"GET messages returns 501": {
+			method:       http.MethodGet,
+			path:         "/v1/messages",
+			expectedCode: http.StatusNotImplemented,
+		},
+		"unknown endpoint returns 501": {
+			method:       http.MethodPost,
+			path:         "/v1/unknown",
+			expectedCode: http.StatusNotImplemented,
+		},
+		"root returns 501": {
+			method:       http.MethodGet,
+			path:         "/",
+			expectedCode: http.StatusNotImplemented,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+
+			adapter := &Adapter{
+				Adapter: &inference.Adapter{
+					Cipher:        &stubCipher{},
+					Forwarder:     &stubForwarder{},
+					WorkloadTasks: []string{constants.WorkloadTaskGenerate},
+					Log:           slog.Default(),
+					OCSPStatus:    []ocsp.StatusInfo{{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}},
+				},
+			}
+
+			// Build handler like the server does - middleware is applied per-route by RegisterRoutes
+			mux := http.NewServeMux()
+			mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "unsupported endpoint", http.StatusNotImplemented)
+			})
+			adapter.RegisterRoutes(mux)
+
+			request := httptest.NewRequest(tc.method, tc.path, http.NoBody)
+			responseRecorder := httptest.NewRecorder()
+
+			mux.ServeHTTP(responseRecorder, request)
+			assert.Equal(tc.expectedCode, responseRecorder.Code)
+		})
+	}
+}
+
+type stubCipher struct {
+	secretMap map[string][]byte
+}
+
+func (c *stubCipher) Secret(_ context.Context, id string) ([]byte, error) {
+	return c.secretMap[id], nil
+}
+
+func (c *stubCipher) NewResponseCipher() cipher.ResponseCipher {
+	return c
+}
+
+func (c *stubCipher) DecryptRequest(context.Context) func(encryptedData string) (res string, err error) {
+	return func(encryptedData string) (res string, err error) {
+		return encryptedData, nil
+	}
+}
+
+func (c *stubCipher) EncryptResponse(context.Context) func(plainData string) (string, error) {
+	return func(plainData string) (res string, err error) {
+		return plainData, nil
+	}
+}
+
+type stubForwarder struct{}
+
+func (f *stubForwarder) Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator, ...forwarder.Opts) {
+}

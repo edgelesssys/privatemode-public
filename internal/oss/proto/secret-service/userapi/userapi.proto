@@ -7,6 +7,9 @@ option go_package = "github.com/edgelesssys/continuum/internal/oss/proto/secret-
 service UserAPI {
     // SetSecrets allows clients to set additional secrets.
     rpc SetSecrets(SetSecretsRequest) returns (SetSecretsResponse);
+
+    // ExchangeSecret performs a cryptographic key agreement.
+    rpc ExchangeSecret(ExchangeSecretRequest) returns (ExchangeSecretResponse);
 }
 
 message SetSecretsResponse {}
@@ -18,4 +21,14 @@ message SetSecretsRequest {
     // TimeToLive is the time in seconds that the secrets are valid for.
     // 0 or negative values means the secrets are valid indefinitely.
     int64 TimeToLive = 2;
+}
+
+message ExchangeSecretRequest {
+  bytes PublicKey = 1;
+}
+
+message ExchangeSecretResponse {
+  bytes EncapsulatedKey = 1;
+  bytes Signature = 2;
+  bytes MeshCert = 3;
 }

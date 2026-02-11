@@ -49,8 +49,29 @@ func benchmarkServe(b *testing.B, apiType string) {
 
 	proxyLis, err := net.Listen("tcp", "")
 	require.NoError(err)
+
+	// Build combined handler like the real server does.
+	// Middleware is now applied per-route by each adapter.
+	mux := http.NewServeMux()
+
+	// Check if any adapter handles catch-all routing
+	hasCatchAll := false
+	for _, a := range server.adapters {
+		if a.HandlesCatchAll() {
+			hasCatchAll = true
+			break
+		}
+	}
+	if !hasCatchAll {
+		mux.HandleFunc("/", adapter.UnsupportedEndpoint)
+	}
+
+	for _, a := range server.adapters {
+		a.RegisterRoutes(mux)
+	}
+
 	go func() {
-		if err := http.Serve(proxyLis, server.adapter.ServeMux()); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := http.Serve(proxyLis, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			panic(err)
 		}
 	}()
@@ -110,10 +131,10 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 	ocspFile := filepath.Join(b.TempDir(), "ocsp.json")
 	require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
 
-	adapter, err := adapter.New(apiType, []string{"generate"}, c, ocspFile, fw, log)
+	adapters, err := adapter.New([]string{apiType}, []string{"generate"}, c, ocspFile, fw, log)
 	require.NoError(err)
 
-	server := New(adapter, log)
+	server := New(adapters, log)
 
 	return []byte(payload), server
 }

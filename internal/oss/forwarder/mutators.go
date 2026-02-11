@@ -356,8 +356,11 @@ func (r *mutatingReader) mutateChunk(b []byte) ([]byte, error) {
 
 	var mutated []byte
 	var err error
-	// Skip the final "[DONE]" event, since it's not a JSON object we can mutate
-	if bytes.EqualFold(toMutate, []byte("[DONE]")) && !r.skipFinalEvent {
+	// Skip SSE "event:" lines (used in Anthropic format) - they don't contain JSON.
+	// Also skip the final "[DONE]" event (used in OpenAI format), since it's not a JSON object we can mutate.
+	isEventLine := found && bytes.Equal(before, []byte("event"))
+	isDoneEvent := bytes.EqualFold(toMutate, []byte("[DONE]")) && !r.skipFinalEvent
+	if isEventLine || isDoneEvent {
 		mutated = toMutate
 	} else {
 		// Mutate the data chunk

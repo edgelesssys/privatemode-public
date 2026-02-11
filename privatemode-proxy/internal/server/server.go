@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -103,17 +104,29 @@ func (s *Server) GetHandler() http.Handler {
 	mux.HandleFunc(openai.ModelsEndpoint, s.noEncryptionHandler)
 	mux.HandleFunc(openai.EmbeddingsEndpoint, s.embeddingsHandler)
 	mux.HandleFunc(openai.TranscriptionsEndpoint, s.transcriptionsHandler)
+	mux.HandleFunc(anthropic.MessagesEndpoint, s.anthropicMessagesHandler)
 
 	mux.HandleFunc("/", http.NotFound) // Reject requests to unknown endpoints
+
+	// If the api key wasn't provided via command line flag, offer the secret manager the API key from the request.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if apiKey, err := auth.GetAuth(auth.Bearer, r.Header); err == nil {
+			if err := s.sm.OfferAPIKey(r.Context(), apiKey); err != nil {
+				forwarder.HTTPError(w, r, http.StatusUnauthorized, "trying API key: %s", err)
+				return
+			}
+		}
+		mux.ServeHTTP(w, r)
+	})
 
 	// Only wrap the mux with the dumping middleware when a dump
 	// directory is configured.  If s.DumpRequestsDir == "" we return the
 	// plain mux.
 	if strings.TrimSpace(s.DumpRequestsDir) == "" {
-		return mux
+		return handler
 	}
 
-	return middleware.DumpRequestAndResponse(mux, s.log, s.DumpRequestsDir)
+	return middleware.DumpRequestAndResponse(handler, s.log, s.DumpRequestsDir)
 }
 
 func (s *Server) useRandomCacheSalt() bool {
@@ -334,6 +347,17 @@ func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
 		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
 			// currently only json response mutation is supported
 			return forwarder.WithFullJSONResponseMutation(cw.DecryptResponse, nil, false)
+		},
+	)(w, r)
+}
+
+func (s *Server) anthropicMessagesHandler(w http.ResponseWriter, r *http.Request) {
+	s.inferenceHandler(
+		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
+			return forwarder.WithFullJSONRequestMutation(cw.Encrypt, anthropic.PlainMessagesRequestFields, s.log)
+		},
+		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
+			return forwarder.WithFullJSONResponseMutation(cw.DecryptResponse, anthropic.PlainMessagesResponseFields, false)
 		},
 	)(w, r)
 }

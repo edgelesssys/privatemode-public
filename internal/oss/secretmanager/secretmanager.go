@@ -6,23 +6,29 @@ package secretmanager
 
 import (
 	"context"
-	"crypto/rand"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/edgelesssys/continuum/internal/oss/httpapi"
 	"k8s.io/utils/clock"
+)
+
+const (
+	secretLifetime      = time.Hour
+	secretRefreshBuffer = 5 * time.Minute
 )
 
 // SecretManager manages the lifetime of a secret and always returns an up-to-date secret.
 type SecretManager struct {
-	secret              *Secret
-	secretLifetime      time.Duration
-	secretRefreshBuffer time.Duration
-	updateSecretFn      updateSecretFn
-	mut                 sync.Mutex
-	clock               clock.Clock
+	secret                   *Secret
+	updateSecretFn           updateSecretFn
+	mut                      sync.Mutex
+	clock                    clock.Clock
+	apiKey                   string
+	apiKeyDropOnUnauthorized bool
+	apiKeyChan               chan struct{} // signals the Loop that an API key has been set
 }
 
 // Secret includes all the information needed to identify and use a secret.
@@ -39,17 +45,15 @@ func (s Secret) Map() map[string][]byte {
 	}
 }
 
-type updateSecretFn func(ctx context.Context, secrets map[string][]byte, ttl time.Duration) error
+type updateSecretFn func(ctx context.Context, apiKey string) (string, []byte, error)
 
 // New creates a new SecretManager.
-func New(updateSecretFn updateSecretFn, secretLifetime, secretRefreshBuffer time.Duration) *SecretManager {
+func New(updateSecretFn updateSecretFn, apiKeyDropOnUnauthorized bool) *SecretManager {
 	return &SecretManager{
-		secret:              nil,
-		secretLifetime:      secretLifetime,
-		secretRefreshBuffer: secretRefreshBuffer,
-		updateSecretFn:      updateSecretFn,
-		mut:                 sync.Mutex{},
-		clock:               clock.RealClock{},
+		updateSecretFn:           updateSecretFn,
+		clock:                    clock.RealClock{},
+		apiKeyDropOnUnauthorized: apiKeyDropOnUnauthorized,
+		apiKeyChan:               make(chan struct{}),
 	}
 }
 
@@ -58,9 +62,13 @@ func (sm *SecretManager) LatestSecret(ctx context.Context) (Secret, error) {
 	sm.mut.Lock()
 	defer sm.mut.Unlock()
 
+	if sm.apiKey == "" {
+		return Secret{}, errors.New("don't have an API key yet")
+	}
+
 	now := sm.clock.Now()
 	if sm.secret == nil || !now.Before(sm.secret.expirationDate) { // should trigger on expiration date and not after
-		if err := sm.updateSecret(ctx, now); err != nil {
+		if err := sm.updateSecret(ctx, now, sm.apiKey); err != nil {
 			return Secret{}, err
 		}
 	}
@@ -72,12 +80,34 @@ func (sm *SecretManager) ForceUpdate(ctx context.Context) error {
 	sm.mut.Lock()
 	defer sm.mut.Unlock()
 
-	return sm.updateSecret(ctx, sm.clock.Now())
+	return sm.updateSecret(ctx, sm.clock.Now(), sm.apiKey)
+}
+
+// OfferAPIKey offers an API key to the SecretManager.
+// If the SecretManager already has one, this is a no-op.
+func (sm *SecretManager) OfferAPIKey(ctx context.Context, apiKey string) error {
+	sm.mut.Lock()
+	defer sm.mut.Unlock()
+	if sm.apiKey != "" {
+		return nil
+	}
+	if err := sm.updateSecret(ctx, sm.clock.Now(), apiKey); err != nil {
+		return err
+	}
+	sm.apiKey = apiKey
+	close(sm.apiKeyChan) // signal the Loop that an API key has been set
+	return nil
 }
 
 // Loop keeps the secret up-to-date by periodically updating it.
 func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
-	log.Info("Fetching initial secret")
+	// wait for API key
+	select {
+	case <-ctx.Done():
+		log.Info("Context cancelled, stopping loop")
+		return nil
+	case <-sm.apiKeyChan:
+	}
 
 	for {
 		secret, err := sm.LatestSecret(ctx)
@@ -100,38 +130,23 @@ func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
 	}
 }
 
-func (sm *SecretManager) updateSecret(ctx context.Context, now time.Time) error {
-	// Create secrets with a buffer to refresh the secrets before they expire in the AS.
-
-	// Clock.Now() returns the current time with monotonic time. Some operations on monotonic
-	// times do not work on MacOS as the OS stops the monotonic clock when the system goes
-	// to sleep. This leads to expiration time comparison failure after sleep.
-	// To prevent this, we must remove the monotonic part using Round(0).
-	// Cf. https://golang.google.cn/pkg/time/#hdr-Monotonic_Clocks
-	expirationDate := now.Round(0).Add(sm.secretLifetime - sm.secretRefreshBuffer)
-	secret, err := createRandom32ByteSecret(expirationDate)
+func (sm *SecretManager) updateSecret(ctx context.Context, now time.Time, apiKey string) error {
+	id, data, err := sm.updateSecretFn(ctx, apiKey)
+	if sm.apiKeyDropOnUnauthorized && errors.Is(err, httpapi.ErrUnauthorized) {
+		sm.apiKey = ""
+	}
 	if err != nil {
 		return err
 	}
-
-	if err := sm.updateSecretFn(ctx, secret.Map(), sm.secretLifetime); err != nil {
-		return err
+	sm.secret = &Secret{
+		ID:   id,
+		Data: data,
+		// Clock.Now() returns the current time with monotonic time. Some operations on monotonic
+		// times do not work on MacOS as the OS stops the monotonic clock when the system goes
+		// to sleep. This leads to expiration time comparison failure after sleep.
+		// To prevent this, we must remove the monotonic part using Round(0).
+		// Cf. https://pkg.go.dev/time#hdr-Monotonic_Clocks
+		expirationDate: now.Round(0).Add(secretLifetime - secretRefreshBuffer),
 	}
-	sm.secret = secret
 	return nil
-}
-
-// createRandom32ByteSecret creates a random 32 byte secret.
-func createRandom32ByteSecret(expirationDate time.Time) (*Secret, error) {
-	data := make([]byte, 32) // AES-256
-	_, err := rand.Read(data)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Secret{
-		ID:             uuid.New().String(),
-		Data:           data,
-		expirationDate: expirationDate,
-	}, nil
 }

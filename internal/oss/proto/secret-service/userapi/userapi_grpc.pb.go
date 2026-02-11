@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	UserAPI_SetSecrets_FullMethodName = "/edgelesssys.continuum.secret_service.userapi.UserAPI/SetSecrets"
+	UserAPI_SetSecrets_FullMethodName     = "/edgelesssys.continuum.secret_service.userapi.UserAPI/SetSecrets"
+	UserAPI_ExchangeSecret_FullMethodName = "/edgelesssys.continuum.secret_service.userapi.UserAPI/ExchangeSecret"
 )
 
 // UserAPIClient is the client API for UserAPI service.
@@ -28,6 +29,8 @@ const (
 type UserAPIClient interface {
 	// SetSecrets allows clients to set additional secrets.
 	SetSecrets(ctx context.Context, in *SetSecretsRequest, opts ...grpc.CallOption) (*SetSecretsResponse, error)
+	// ExchangeSecret performs a cryptographic key agreement.
+	ExchangeSecret(ctx context.Context, in *ExchangeSecretRequest, opts ...grpc.CallOption) (*ExchangeSecretResponse, error)
 }
 
 type userAPIClient struct {
@@ -48,12 +51,24 @@ func (c *userAPIClient) SetSecrets(ctx context.Context, in *SetSecretsRequest, o
 	return out, nil
 }
 
+func (c *userAPIClient) ExchangeSecret(ctx context.Context, in *ExchangeSecretRequest, opts ...grpc.CallOption) (*ExchangeSecretResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExchangeSecretResponse)
+	err := c.cc.Invoke(ctx, UserAPI_ExchangeSecret_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserAPIServer is the server API for UserAPI service.
 // All implementations must embed UnimplementedUserAPIServer
 // for forward compatibility.
 type UserAPIServer interface {
 	// SetSecrets allows clients to set additional secrets.
 	SetSecrets(context.Context, *SetSecretsRequest) (*SetSecretsResponse, error)
+	// ExchangeSecret performs a cryptographic key agreement.
+	ExchangeSecret(context.Context, *ExchangeSecretRequest) (*ExchangeSecretResponse, error)
 	mustEmbedUnimplementedUserAPIServer()
 }
 
@@ -66,6 +81,9 @@ type UnimplementedUserAPIServer struct{}
 
 func (UnimplementedUserAPIServer) SetSecrets(context.Context, *SetSecretsRequest) (*SetSecretsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetSecrets not implemented")
+}
+func (UnimplementedUserAPIServer) ExchangeSecret(context.Context, *ExchangeSecretRequest) (*ExchangeSecretResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExchangeSecret not implemented")
 }
 func (UnimplementedUserAPIServer) mustEmbedUnimplementedUserAPIServer() {}
 func (UnimplementedUserAPIServer) testEmbeddedByValue()                 {}
@@ -106,6 +124,24 @@ func _UserAPI_SetSecrets_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _UserAPI_ExchangeSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExchangeSecretRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserAPIServer).ExchangeSecret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: UserAPI_ExchangeSecret_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserAPIServer).ExchangeSecret(ctx, req.(*ExchangeSecretRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // UserAPI_ServiceDesc is the grpc.ServiceDesc for UserAPI service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -116,6 +152,10 @@ var UserAPI_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetSecrets",
 			Handler:    _UserAPI_SetSecrets_Handler,
+		},
+		{
+			MethodName: "ExchangeSecret",
+			Handler:    _UserAPI_ExchangeSecret_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

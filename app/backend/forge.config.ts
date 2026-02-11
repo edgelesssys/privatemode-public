@@ -1,3 +1,4 @@
+import type { HASHES } from '@electron/windows-sign/dist/esm/types';
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerDeb } from '@electron-forge/maker-deb';
 import { MakerRpm } from '@electron-forge/maker-rpm';
@@ -43,6 +44,15 @@ const config: ForgeConfig = {
       executableName: 'privatemode',
       name: 'Privatemode',
     }),
+    windowsSign:
+      process.env.PRIVATEMODE_SIGN_APP === '1'
+        ? {
+            signToolPath: process.env.SIGNTOOL_PATH,
+            signWithParams: `/v /dlib ${process.env.AZURE_CODE_SIGNING_DLIB} /dmdf ${process.env.AZURE_METADATA_JSON}`,
+            timestampServer: 'http://timestamp.acs.microsoft.com',
+            hashes: ['sha256' as HASHES],
+          }
+        : undefined,
   },
   hooks: {
     packageAfterCopy: async (_config, buildPath) => {
@@ -82,6 +92,16 @@ const config: ForgeConfig = {
         packageBackgroundColor: '#7A49F6',
         appDisplayName: 'Privatemode',
       },
+      windowsSignOptions:
+        process.env.PRIVATEMODE_SIGN_APP === '1'
+          ? {
+              signToolPath: process.env.SIGNTOOL_PATH,
+              signWithParams: `/v /dlib ${process.env.AZURE_CODE_SIGNING_DLIB} /dmdf ${process.env.AZURE_METADATA_JSON}`,
+              timestampServer: 'http://timestamp.acs.microsoft.com',
+              // @ts-expect-error - incorrect types exported by MakerMSIX
+              hashes: ['sha256' as HASHES],
+            }
+          : undefined,
     }),
   ],
   plugins: [

@@ -3,11 +3,17 @@ package userapi
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"log/slog"
 	"testing"
 
+	"github.com/edgelesssys/continuum/internal/oss/hpke"
 	"github.com/edgelesssys/continuum/internal/oss/proto/secret-service/userapi"
+	"github.com/edgelesssys/continuum/internal/oss/secretexchange"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetSecrets(t *testing.T) {
@@ -64,6 +70,70 @@ func TestSetSecrets(t *testing.T) {
 			}
 			assert.NoError(err)
 			assert.Equal(tc.secretReq.Secrets, tc.secretSetter.gotSecrets)
+		})
+	}
+}
+
+func TestExchangeSecret(t *testing.T) {
+	validKey, err := hpke.MLKEM768X25519().GenerateKey()
+	require.NoError(t, err)
+	meshPriv, err := ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+	require.NoError(t, err)
+
+	testCases := map[string]struct {
+		req          *userapi.ExchangeSecretRequest
+		secretSetter *stubSecretSetter
+		wantErr      bool
+	}{
+		"success": {
+			req:          &userapi.ExchangeSecretRequest{PublicKey: validKey.PublicKey().Bytes()},
+			secretSetter: &stubSecretSetter{},
+		},
+		"empty key": {
+			req:          &userapi.ExchangeSecretRequest{PublicKey: nil},
+			secretSetter: &stubSecretSetter{},
+			wantErr:      true,
+		},
+		"invalid key": {
+			req:          &userapi.ExchangeSecretRequest{PublicKey: []byte{2, 3}},
+			secretSetter: &stubSecretSetter{},
+			wantErr:      true,
+		},
+		"secret setter error": {
+			req:          &userapi.ExchangeSecretRequest{PublicKey: validKey.PublicKey().Bytes()},
+			secretSetter: &stubSecretSetter{err: assert.AnError},
+			wantErr:      true,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+			require := require.New(t)
+
+			s := &Server{
+				secretStore: tc.secretSetter,
+				meshCertRaw: []byte("meshcert"),
+				meshPriv:    meshPriv,
+			}
+
+			resp, err := s.ExchangeSecret(t.Context(), tc.req)
+			if tc.wantErr {
+				assert.Error(err)
+				return
+			}
+			require.NoError(err)
+
+			assert.EqualValues("meshcert", resp.MeshCert)
+			require.True(ecdsa.VerifyASN1(&meshPriv.PublicKey, secretexchange.Hash(tc.req.PublicKey, resp.EncapsulatedKey), resp.Signature))
+
+			recipient, err := hpke.NewRecipient(resp.EncapsulatedKey, validKey, hpke.HKDFSHA256(), hpke.ExportOnly(), nil)
+			require.NoError(err)
+			secret, err := recipient.Export("", 32)
+			require.NoError(err)
+
+			require.Len(tc.secretSetter.gotSecrets, 1)
+			assert.Equal(secret, tc.secretSetter.gotSecrets[secretexchange.ID(tc.req.PublicKey)])
 		})
 	}
 }

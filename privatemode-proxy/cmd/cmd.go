@@ -27,7 +27,6 @@ var (
 	logFormat                    string
 	apiKeyStr                    string
 	workspace                    string
-	secretEndpoint               string
 	apiEndpoint                  string
 	port                         string
 	manifestPath                 string
@@ -43,10 +42,9 @@ var (
 	// When false (default), the proxy will disable caching by
 	// using a random salt for each request. Clients can then
 	// use request param cache_salt to enable caching.
-	sharedPromptCache   bool
-	promptCacheSalt     string
-	coordinatorEndpoint string
-	cdnBaseURL          string
+	sharedPromptCache bool
+	promptCacheSalt   string
+	cdnBaseURL        string
 )
 
 // New returns the root command of the privatemode-proxy.
@@ -70,7 +68,8 @@ func New() *cobra.Command {
 
 	cmd.Flags().StringVar(&apiKeyStr, "apiKey", "",
 		"The API key for the Privatemode API. Accepts either a direct literal or a file path prefixed with '@'. If no key is set, the proxy will not authenticate with the API.")
-	cmd.Flags().StringVar(&secretEndpoint, "ssEndpoint", constants.SecretServiceEndpoint, "The endpoint of the secret service.")
+	cmd.Flags().String("ssEndpoint", "", "")
+	must(cmd.Flags().MarkDeprecated("ssEndpoint", "direct connection to the secret-service is no longer required"))
 	cmd.Flags().StringVar(&apiEndpoint, "apiEndpoint", constants.APIEndpoint, "The endpoint for the Privatemode API")
 	cmd.Flags().StringVar(&port, "port", "8080",
 		"The port on which the proxy listens for incoming API requests.")
@@ -99,7 +98,8 @@ func New() *cobra.Command {
 	cmd.Flags().StringVar(&tlsKeyPath, "tlsKeyPath", "", "The path to the TLS key. If not provided, the server will start without TLS.")
 
 	// Contrast flags
-	cmd.Flags().StringVar(&coordinatorEndpoint, "coordinatorEndpoint", constants.CoordinatorEndpoint, "The endpoint for the Contrast coordinator.")
+	cmd.Flags().String("coordinatorEndpoint", "", "")
+	must(cmd.Flags().MarkDeprecated("coordinatorEndpoint", "direct connection to the Coordinator is no longer required"))
 	cmd.Flags().StringVar(&cdnBaseURL, "cdnBaseURL", "https://cdn.confidential.cloud/privatemode/v2", "Base URL to retrieve deployment information from.")
 	must(cmd.Flags().MarkHidden("cdnBaseURL"))
 
@@ -174,12 +174,10 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 
 	log.Info("Starting proxy")
 	flags := setup.Flags{
-		Workspace:      workspace,
-		ManifestPath:   manifestPath,
-		SecretEndpoint: secretEndpoint,
+		Workspace:    workspace,
+		ManifestPath: manifestPath,
 		ContrastFlags: setup.ContrastFlags{
-			CoordinatorEndpoint: coordinatorEndpoint,
-			CDNBaseURL:          cdnBaseURL,
+			CDNBaseURL: cdnBaseURL,
 		},
 		InsecureAPIConnection:        insecureAPIConnection,
 		APIEndpoint:                  apiEndpoint,

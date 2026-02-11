@@ -3,7 +3,6 @@ module github.com/edgelesssys/continuum
 go 1.25.0
 
 replace (
-	github.com/google/go-sev-guest => github.com/edgelesssys/go-sev-guest v0.0.0-20250811150530-d85b756e97f2
 	github.com/google/go-tdx-guest => github.com/edgelesssys/go-tdx-guest v0.0.0-20260112092709-e6425e8bd411
 	// goxmldsig incorrectly requires ECDSA signatures to be ASN.1 encoded
 	// Remove the following PR is merged: https://github.com/russellhaering/goxmldsig/pull/164
@@ -18,8 +17,8 @@ require (
 	github.com/clerk/clerk-sdk-go/v2 v2.5.1
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.6.0
-	github.com/edgelesssys/contrast v1.16.0
-	github.com/go-git/go-git/v5 v5.16.4
+	github.com/edgelesssys/contrast v0.0.0-20260115142824-f35955340723
+	github.com/go-git/go-git/v5 v5.16.5
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/golang-jwt/jwt/v5 v5.3.0
@@ -109,7 +108,7 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/go-sev-guest v0.14.1 // indirect
+	github.com/google/go-sev-guest v0.14.2-0.20251119154202-af1c107a648f // indirect
 	github.com/google/go-tdx-guest v0.3.2-0.20260104162950-32866d7a678f // indirect
 	github.com/google/logger v1.1.1 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect

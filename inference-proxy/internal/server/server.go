@@ -16,16 +16,16 @@ import (
 
 // Server implements the user facing HTTP REST server.
 type Server struct {
-	adapter adapter.InferenceAdapter
+	adapters []adapter.InferenceAdapter
 
 	log *slog.Logger
 }
 
 // New creates a new Server.
-func New(adapter adapter.InferenceAdapter, log *slog.Logger) *Server {
+func New(adapters []adapter.InferenceAdapter, log *slog.Logger) *Server {
 	return &Server{
-		adapter: adapter,
-		log:     log,
+		adapters: adapters,
+		log:      log,
 	}
 }
 
@@ -35,9 +35,31 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	if err != nil {
 		return err
 	}
+
+	// Build combined ServeMux from all adapters.
+	// Each adapter registers its routes with middleware already applied per-route.
+	mux := http.NewServeMux()
+
+	// Check if any adapter handles catch-all routing (e.g., unstructured, unencrypted).
+	// If so, skip registering the server-level 501 handler to avoid conflicts.
+	hasCatchAll := false
+	for _, a := range s.adapters {
+		if a.HandlesCatchAll() {
+			hasCatchAll = true
+			break
+		}
+	}
+	if !hasCatchAll {
+		mux.HandleFunc("/", adapter.UnsupportedEndpoint)
+	}
+
+	for _, a := range s.adapters {
+		a.RegisterRoutes(mux)
+	}
+
 	server := &http.Server{
 		Addr:    listener.Addr().String(),
-		Handler: s.adapter.ServeMux(),
+		Handler: mux,
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{certs},
 		},

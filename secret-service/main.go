@@ -84,7 +84,10 @@ func run(config secretServiceConfig, fs afero.Afero, log *slog.Logger) error {
 	}
 	contrastTLS := contrastMTLS.Clone()
 	contrastTLS.ClientAuth = tls.NoClientCert // the user API should not enforce mTLS
-	userServer := userapi.New(contrastTLS, etcdServer, log)
+	userServer, err := userapi.New(contrastTLS, etcdServer, log)
+	if err != nil {
+		return fmt.Errorf("setting up user server: %w", err)
+	}
 	healthServer := health.New(log)
 
 	var wg sync.WaitGroup

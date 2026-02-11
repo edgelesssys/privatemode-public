@@ -113,6 +113,110 @@ func (x *SetSecretsRequest) GetTimeToLive() int64 {
 	return 0
 }
 
+type ExchangeSecretRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PublicKey     []byte                 `protobuf:"bytes,1,opt,name=PublicKey,proto3" json:"PublicKey,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExchangeSecretRequest) Reset() {
+	*x = ExchangeSecretRequest{}
+	mi := &file_internal_oss_proto_secret_service_userapi_userapi_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExchangeSecretRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExchangeSecretRequest) ProtoMessage() {}
+
+func (x *ExchangeSecretRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_oss_proto_secret_service_userapi_userapi_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExchangeSecretRequest.ProtoReflect.Descriptor instead.
+func (*ExchangeSecretRequest) Descriptor() ([]byte, []int) {
+	return file_internal_oss_proto_secret_service_userapi_userapi_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ExchangeSecretRequest) GetPublicKey() []byte {
+	if x != nil {
+		return x.PublicKey
+	}
+	return nil
+}
+
+type ExchangeSecretResponse struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	EncapsulatedKey []byte                 `protobuf:"bytes,1,opt,name=EncapsulatedKey,proto3" json:"EncapsulatedKey,omitempty"`
+	Signature       []byte                 `protobuf:"bytes,2,opt,name=Signature,proto3" json:"Signature,omitempty"`
+	MeshCert        []byte                 `protobuf:"bytes,3,opt,name=MeshCert,proto3" json:"MeshCert,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ExchangeSecretResponse) Reset() {
+	*x = ExchangeSecretResponse{}
+	mi := &file_internal_oss_proto_secret_service_userapi_userapi_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExchangeSecretResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExchangeSecretResponse) ProtoMessage() {}
+
+func (x *ExchangeSecretResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_oss_proto_secret_service_userapi_userapi_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExchangeSecretResponse.ProtoReflect.Descriptor instead.
+func (*ExchangeSecretResponse) Descriptor() ([]byte, []int) {
+	return file_internal_oss_proto_secret_service_userapi_userapi_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ExchangeSecretResponse) GetEncapsulatedKey() []byte {
+	if x != nil {
+		return x.EncapsulatedKey
+	}
+	return nil
+}
+
+func (x *ExchangeSecretResponse) GetSignature() []byte {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
+func (x *ExchangeSecretResponse) GetMeshCert() []byte {
+	if x != nil {
+		return x.MeshCert
+	}
+	return nil
+}
+
 var File_internal_oss_proto_secret_service_userapi_userapi_proto protoreflect.FileDescriptor
 
 const file_internal_oss_proto_secret_service_userapi_userapi_proto_rawDesc = "" +
@@ -126,10 +230,17 @@ const file_internal_oss_proto_secret_service_userapi_userapi_proto_rawDesc = "" 
 	"TimeToLive\x1a:\n" +
 	"\fSecretsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\fR\x05value:\x028\x012\x9b\x01\n" +
+	"\x05value\x18\x02 \x01(\fR\x05value:\x028\x01\"5\n" +
+	"\x15ExchangeSecretRequest\x12\x1c\n" +
+	"\tPublicKey\x18\x01 \x01(\fR\tPublicKey\"|\n" +
+	"\x16ExchangeSecretResponse\x12(\n" +
+	"\x0fEncapsulatedKey\x18\x01 \x01(\fR\x0fEncapsulatedKey\x12\x1c\n" +
+	"\tSignature\x18\x02 \x01(\fR\tSignature\x12\x1a\n" +
+	"\bMeshCert\x18\x03 \x01(\fR\bMeshCert2\xb9\x02\n" +
 	"\aUserAPI\x12\x8f\x01\n" +
 	"\n" +
-	"SetSecrets\x12?.edgelesssys.continuum.secret_service.userapi.SetSecretsRequest\x1a@.edgelesssys.continuum.secret_service.userapi.SetSecretsResponseBLZJgithub.com/edgelesssys/continuum/internal/oss/proto/secret-service/userapib\x06proto3"
+	"SetSecrets\x12?.edgelesssys.continuum.secret_service.userapi.SetSecretsRequest\x1a@.edgelesssys.continuum.secret_service.userapi.SetSecretsResponse\x12\x9b\x01\n" +
+	"\x0eExchangeSecret\x12C.edgelesssys.continuum.secret_service.userapi.ExchangeSecretRequest\x1aD.edgelesssys.continuum.secret_service.userapi.ExchangeSecretResponseBLZJgithub.com/edgelesssys/continuum/internal/oss/proto/secret-service/userapib\x06proto3"
 
 var (
 	file_internal_oss_proto_secret_service_userapi_userapi_proto_rawDescOnce sync.Once
@@ -143,18 +254,22 @@ func file_internal_oss_proto_secret_service_userapi_userapi_proto_rawDescGZIP() 
 	return file_internal_oss_proto_secret_service_userapi_userapi_proto_rawDescData
 }
 
-var file_internal_oss_proto_secret_service_userapi_userapi_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_internal_oss_proto_secret_service_userapi_userapi_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_internal_oss_proto_secret_service_userapi_userapi_proto_goTypes = []any{
-	(*SetSecretsResponse)(nil), // 0: edgelesssys.continuum.secret_service.userapi.SetSecretsResponse
-	(*SetSecretsRequest)(nil),  // 1: edgelesssys.continuum.secret_service.userapi.SetSecretsRequest
-	nil,                        // 2: edgelesssys.continuum.secret_service.userapi.SetSecretsRequest.SecretsEntry
+	(*SetSecretsResponse)(nil),     // 0: edgelesssys.continuum.secret_service.userapi.SetSecretsResponse
+	(*SetSecretsRequest)(nil),      // 1: edgelesssys.continuum.secret_service.userapi.SetSecretsRequest
+	(*ExchangeSecretRequest)(nil),  // 2: edgelesssys.continuum.secret_service.userapi.ExchangeSecretRequest
+	(*ExchangeSecretResponse)(nil), // 3: edgelesssys.continuum.secret_service.userapi.ExchangeSecretResponse
+	nil,                            // 4: edgelesssys.continuum.secret_service.userapi.SetSecretsRequest.SecretsEntry
 }
 var file_internal_oss_proto_secret_service_userapi_userapi_proto_depIdxs = []int32{
-	2, // 0: edgelesssys.continuum.secret_service.userapi.SetSecretsRequest.Secrets:type_name -> edgelesssys.continuum.secret_service.userapi.SetSecretsRequest.SecretsEntry
+	4, // 0: edgelesssys.continuum.secret_service.userapi.SetSecretsRequest.Secrets:type_name -> edgelesssys.continuum.secret_service.userapi.SetSecretsRequest.SecretsEntry
 	1, // 1: edgelesssys.continuum.secret_service.userapi.UserAPI.SetSecrets:input_type -> edgelesssys.continuum.secret_service.userapi.SetSecretsRequest
-	0, // 2: edgelesssys.continuum.secret_service.userapi.UserAPI.SetSecrets:output_type -> edgelesssys.continuum.secret_service.userapi.SetSecretsResponse
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
+	2, // 2: edgelesssys.continuum.secret_service.userapi.UserAPI.ExchangeSecret:input_type -> edgelesssys.continuum.secret_service.userapi.ExchangeSecretRequest
+	0, // 3: edgelesssys.continuum.secret_service.userapi.UserAPI.SetSecrets:output_type -> edgelesssys.continuum.secret_service.userapi.SetSecretsResponse
+	3, // 4: edgelesssys.continuum.secret_service.userapi.UserAPI.ExchangeSecret:output_type -> edgelesssys.continuum.secret_service.userapi.ExchangeSecretResponse
+	3, // [3:5] is the sub-list for method output_type
+	1, // [1:3] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -171,7 +286,7 @@ func file_internal_oss_proto_secret_service_userapi_userapi_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_oss_proto_secret_service_userapi_userapi_proto_rawDesc), len(file_internal_oss_proto_secret_service_userapi_userapi_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

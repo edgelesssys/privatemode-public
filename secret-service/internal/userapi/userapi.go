@@ -4,6 +4,8 @@ package userapi
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/rand"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -11,7 +13,9 @@ import (
 	"net"
 	"time"
 
+	"github.com/edgelesssys/continuum/internal/oss/hpke"
 	userpb "github.com/edgelesssys/continuum/internal/oss/proto/secret-service/userapi"
+	"github.com/edgelesssys/continuum/internal/oss/secretexchange"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -24,12 +28,23 @@ type Server struct {
 	grpc        *grpc.Server
 	secretStore secretSetter
 	log         *slog.Logger
+	meshCertRaw []byte
+	meshPriv    *ecdsa.PrivateKey
 
 	userpb.UnimplementedUserAPIServer
 }
 
 // New returns a new Server for the user API.
-func New(tlsConfig *tls.Config, secretStore secretSetter, logger *slog.Logger) *Server {
+func New(tlsConfig *tls.Config, secretStore secretSetter, logger *slog.Logger) (*Server, error) {
+	if tlsConfig == nil || len(tlsConfig.Certificates) != 1 {
+		return nil, errors.New("expected a tlsConfig with exactly one certificate chain")
+	}
+	tlsCertChain := tlsConfig.Certificates[0]
+	priv, ok := tlsCertChain.PrivateKey.(*ecdsa.PrivateKey)
+	if !ok {
+		return nil, errors.New("expected an ECDSA private key in the TLS certificate")
+	}
+
 	grpcServer := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: 15 * time.Second}),
@@ -39,11 +54,13 @@ func New(tlsConfig *tls.Config, secretStore secretSetter, logger *slog.Logger) *
 		grpc:                       grpcServer,
 		secretStore:                secretStore,
 		log:                        logger,
+		meshCertRaw:                tlsCertChain.Certificate[0],
+		meshPriv:                   priv,
 		UnimplementedUserAPIServer: userpb.UnimplementedUserAPIServer{},
 	}
 	userpb.RegisterUserAPIServer(grpcServer, s)
 
-	return s
+	return s, nil
 }
 
 // Serve starts the server on the given endpoint.
@@ -88,6 +105,41 @@ func (s *Server) SetSecrets(ctx context.Context, req *userpb.SetSecretsRequest) 
 	}
 
 	return &userpb.SetSecretsResponse{}, nil
+}
+
+// ExchangeSecret performs a cryptographic key agreement.
+func (s *Server) ExchangeSecret(ctx context.Context, req *userpb.ExchangeSecretRequest) (*userpb.ExchangeSecretResponse, error) {
+	// Create HPKE encapsulated key and sender context.
+	pub, err := hpke.MLKEM768X25519().NewPublicKey(req.PublicKey)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "parsing public key: %v", err)
+	}
+	encapKey, sender, err := hpke.NewSender(pub, hpke.HKDFSHA256(), hpke.ExportOnly(), nil)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "creating HPKE sender: %v", err)
+	}
+
+	// Sign the request (to prove freshness) and the response (to prove that it has been generated inside the TEE) with the mesh private key.
+	signature, err := ecdsa.SignASN1(rand.Reader, s.meshPriv, secretexchange.Hash(req.PublicKey, encapKey))
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "signing: %v", err)
+	}
+
+	// Store the shared secret.
+	secret, err := sender.Export("", 32)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "exporting secret: %v", err)
+	}
+	secrets := map[string][]byte{secretexchange.ID(req.PublicKey): secret}
+	if err := s.secretStore.SetSecrets(ctx, secrets, int64(time.Hour/time.Second)); err != nil {
+		return nil, status.Errorf(codes.Internal, "saving secrets: %s", err)
+	}
+
+	return &userpb.ExchangeSecretResponse{
+		EncapsulatedKey: encapKey,
+		Signature:       signature,
+		MeshCert:        s.meshCertRaw,
+	}, nil
 }
 
 type secretSetter interface {

@@ -23,7 +23,7 @@ import (
 )
 
 var (
-	currentManifest   string
+	currentManifest   = func() string { return "" }
 	currentManifestMu sync.Mutex
 )
 
@@ -49,13 +49,13 @@ func PrivatemodeStartProxy() (int, *C.char) {
 
 	go func() {
 		log.Info("Connecting to secret-service")
-		manager, mfBytes, err := setup.SecretManager(context.Background(), *flags, log)
+		manager, getManifest, err := setup.SecretManager(context.Background(), *flags, log)
 		if err != nil {
 			log.Error("connecting to secret-service", "error", err)
 			return
 		}
 		currentManifestMu.Lock()
-		currentManifest = string(mfBytes)
+		currentManifest = getManifest
 		currentManifestMu.Unlock()
 
 		server := setup.NewServer(*flags, true, manager, log)
@@ -73,7 +73,7 @@ func PrivatemodeStartProxy() (int, *C.char) {
 func CurrentManifest() *C.char {
 	currentManifestMu.Lock()
 	defer currentManifestMu.Unlock()
-	return C.CString(currentManifest)
+	return C.CString(currentManifest())
 }
 
 func flagsFromEnv(log *slog.Logger) (*setup.Flags, error) {
@@ -88,14 +88,12 @@ func flagsFromEnv(log *slog.Logger) (*setup.Flags, error) {
 	}
 
 	flags := &setup.Flags{
-		Workspace:      filepath.Join(cfgDir, "EdgelessSystems", "privatemode"),
-		ManifestPath:   "",
-		APIKey:         nil, // the key is set in the UI. needs to be nil
-		APIEndpoint:    constants.APIEndpoint,
-		SecretEndpoint: constants.SecretServiceEndpoint,
+		Workspace:    filepath.Join(cfgDir, "EdgelessSystems", "privatemode"),
+		ManifestPath: "",
+		APIKey:       nil, // the key is set in the UI. needs to be nil
+		APIEndpoint:  constants.APIEndpoint,
 		ContrastFlags: setup.ContrastFlags{
-			CoordinatorEndpoint: constants.CoordinatorEndpoint,
-			CDNBaseURL:          "https://cdn.confidential.cloud/privatemode/v2",
+			CDNBaseURL: "https://cdn.confidential.cloud/privatemode/v2",
 		},
 		InsecureAPIConnection: false,
 		// In the app we always want prompt caching and use a random salt that lives as long as the app.
@@ -109,16 +107,6 @@ func flagsFromEnv(log *slog.Logger) (*setup.Flags, error) {
 		log.Info("LIBPRIVATEMODE_API_ENDPOINT is set, overriding default API endpoint", "endpoint", apiEndpoint)
 		flags.APIEndpoint = apiEndpoint
 		flags.InsecureAPIConnection = true
-	}
-
-	if secretEndpoint := os.Getenv("LIBPRIVATEMODE_SECRET_ENDPOINT"); secretEndpoint != "" {
-		log.Info("LIBPRIVATEMODE_SECRET_ENDPOINT is set, overriding default secret endpoint", "endpoint", secretEndpoint)
-		flags.SecretEndpoint = secretEndpoint
-	}
-
-	if coordinatorEndpoint := os.Getenv("LIBPRIVATEMODE_COORDINATOR_ENDPOINT"); coordinatorEndpoint != "" {
-		log.Info("LIBPRIVATEMODE_COORDINATOR_ENDPOINT is set, overriding default coordinator endpoint", "endpoint", coordinatorEndpoint)
-		flags.CoordinatorEndpoint = coordinatorEndpoint
 	}
 
 	if manifestPath := os.Getenv("LIBPRIVATEMODE_MANIFEST_PATH"); manifestPath != "" {

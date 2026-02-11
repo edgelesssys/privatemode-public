@@ -18,19 +18,11 @@ import (
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/server"
 )
 
-const (
-	// secretLifetime is the lifetime of a secret.
-	secretLifetime = 1 * time.Hour
-	// secretRefreshBuffer controls how many minutes before expiration the secret should be refreshed.
-	secretRefreshBuffer = 5 * time.Minute
-)
-
 // Flags are flags that are common to all setups.
 type Flags struct {
 	ContrastFlags
 	Workspace                    string
 	ManifestPath                 string
-	SecretEndpoint               string
 	InsecureAPIConnection        bool
 	APIEndpoint                  string
 	APIKey                       *string
@@ -42,8 +34,7 @@ type Flags struct {
 
 // ContrastFlags holds the configuration for the Contrast deployment.
 type ContrastFlags struct {
-	CoordinatorEndpoint string
-	CDNBaseURL          string
+	CDNBaseURL string
 }
 
 // NewServer creates a new server instance.

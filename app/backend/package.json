@@ -28,6 +28,7 @@
     "libprivatemode": "../../build-libprivatemode"
   },
   "devDependencies": {
+    "@electron/windows-sign": "2.0.2",
     "@electron-forge/cli": "7.10.2",
     "@electron-forge/maker-deb": "7.10.2",
     "@electron-forge/maker-dmg": "7.10.2",
@@ -57,6 +58,7 @@
   },
   "overrides": {
     "@inquirer/prompts": "8.1.0",
-    "@electron/notarize": "github:msanft/notarize#msanft/notarytool-json-fix-build"
+    "@electron/notarize": "github:msanft/notarize#msanft/notarytool-json-fix-build",
+    "electron-windows-msix": "github:daniel-weisse/electron-windows-msix#azure-trusted-signing"
   }
 }

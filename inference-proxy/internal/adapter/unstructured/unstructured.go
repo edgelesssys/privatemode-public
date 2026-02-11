@@ -31,12 +31,16 @@ func New(cipher *cipher.Cipher, forwarder mutatingForwarder, log *slog.Logger) (
 	}, nil
 }
 
-// ServeMux returns a ServeMux that forwards requests with encryption.
-func (t *Adapter) ServeMux() http.Handler {
-	srv := http.NewServeMux()
-	srv.HandleFunc("/", t.forwardRequest)
-	srv.HandleFunc("/healthcheck", t.forwardHealthcheckRequest)
-	return srv
+// RegisterRoutes registers the Unstructured API handlers on the given ServeMux.
+// No OCSP verification middleware is applied for Unstructured API.
+func (t *Adapter) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/", t.forwardRequest)
+	mux.HandleFunc("/healthcheck", t.forwardHealthcheckRequest)
+}
+
+// HandlesCatchAll returns true because Unstructured adapter forwards all requests.
+func (t *Adapter) HandlesCatchAll() bool {
+	return true
 }
 
 func (t *Adapter) forwardRequest(w http.ResponseWriter, r *http.Request) {

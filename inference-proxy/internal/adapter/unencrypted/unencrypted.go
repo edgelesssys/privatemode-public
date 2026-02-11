@@ -30,11 +30,15 @@ func New(forwarder mutatingForwarder, log *slog.Logger) (*Adapter, error) {
 	}, nil
 }
 
-// ServeMux returns a ServeMux that forwards requests without encryption.
-func (t *Adapter) ServeMux() http.Handler {
-	srv := http.NewServeMux()
-	srv.HandleFunc("/", t.forwardRequest)
-	return srv
+// RegisterRoutes registers the unencrypted adapter handlers on the given ServeMux.
+// No middleware is applied for unencrypted adapter.
+func (t *Adapter) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/", t.forwardRequest)
+}
+
+// HandlesCatchAll returns true because unencrypted adapter forwards all requests.
+func (t *Adapter) HandlesCatchAll() bool {
+	return true
 }
 
 func (t *Adapter) forwardRequest(w http.ResponseWriter, r *http.Request) {

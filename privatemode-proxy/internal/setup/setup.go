@@ -5,47 +5,57 @@ package setup
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net/http"
 
-	"github.com/edgelesssys/continuum/internal/oss/contrast/client"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager/updater"
-	"github.com/edgelesssys/continuum/privatemode-proxy/internal/setup/tlsconfig"
+	"github.com/edgelesssys/continuum/privatemode-proxy/internal/attest"
+	"github.com/edgelesssys/continuum/privatemode-proxy/internal/secretclient"
 	contrastsdk "github.com/edgelesssys/contrast/sdk"
 	"github.com/spf13/afero"
 )
 
 // SecretManager sets up the secret manager for the Contrast deployment.
-func SecretManager(ctx context.Context, flags Flags, log *slog.Logger) (*secretmanager.SecretManager, []byte, error) {
-	tlsConfigGetter := tlsconfig.NewGetter(flags.CoordinatorEndpoint, contrastsdk.NewWithSlog(log.With("component", "contrast-client")), flags.Workspace)
+func SecretManager(ctx context.Context, flags Flags, log *slog.Logger) (*secretmanager.SecretManager, func() string, error) {
+	httpClient := http.DefaultClient
+	if flags.InsecureAPIConnection {
+		httpClient = &http.Client{
+			Transport: &http.Transport{
+				Proxy:           http.ProxyFromEnvironment,
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		}
+	}
+
+	fs := afero.Afero{Fs: afero.NewOsFs()}
+	ssClient := secretclient.New(httpClient, flags.APIEndpoint)
+	caUpdater := attest.NewGetter(httpClient, flags.APIEndpoint, contrastsdk.NewWithSlog(log.With("component", "contrast-client")), flags.Workspace)
+
+	var caGetter updater.CAGetter
+	var currentManifest func() string
 	if flags.ManifestPath != "" { // static mode
-		fs := afero.Afero{Fs: afero.NewOsFs()}
 		expectedMfBytes, err := fs.ReadFile(flags.ManifestPath)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to read manifest file: %w", err)
 		}
-		tlsConfig, err := tlsConfigGetter.GetTLSConfig(ctx, expectedMfBytes)
-		if err != nil {
-			return nil, nil, fmt.Errorf("updating TLS config: %w", err)
+		caGetter = updater.NewStaticCAGetter(caUpdater, expectedMfBytes)
+		currentManifest = func() string { return string(expectedMfBytes) }
+	} else {
+		caAdapter := newCAAdapter(flags.CDNBaseURL, mfLogger{fs: fs, workspace: flags.Workspace}, caUpdater, log)
+		caGetter = caAdapter
+		currentManifest = caAdapter.CurrentManifest
+	}
+
+	secretUpdater := updater.New(ssClient, caGetter, log)
+	apiKeyDropOnUnauthorized := flags.APIKey == nil
+	sm := secretmanager.New(secretUpdater.UpdateSecret, apiKeyDropOnUnauthorized)
+	if flags.APIKey != nil {
+		if err := sm.OfferAPIKey(ctx, *flags.APIKey); err != nil {
+			return nil, nil, fmt.Errorf("trying API key: %w", err)
 		}
-		ssClient := client.New(flags.SecretEndpoint, tlsConfig, &client.Opts{Log: log, RetryInterval: 0, MaxRetries: 0})
-		secretUpdater := updater.New(ssClient, updater.NewStaticTLSConfigGetter(tlsConfig), log)
-		sm := secretmanager.New(secretUpdater.UpdateSecrets,
-			secretLifetime, secretRefreshBuffer,
-		)
-		return sm, expectedMfBytes, nil
 	}
-	fs := afero.Afero{Fs: afero.NewOsFs()}
-	tlsConfigAdapter := newTLSConfigAdapter(flags.CDNBaseURL, mfLogger{fs: fs, workspace: flags.Workspace}, tlsConfigGetter, log)
-	tlsConfig, mfBytes, err := tlsConfigAdapter.GetTLSConfig(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("getting TLS config: %w", err)
-	}
-	ssClient := client.New(flags.SecretEndpoint, tlsConfig, &client.Opts{Log: log, RetryInterval: 0, MaxRetries: 0})
-	secretUpdater := updater.New(ssClient, tlsConfigAdapter, log)
-	sm := secretmanager.New(secretUpdater.UpdateSecrets,
-		secretLifetime, secretRefreshBuffer,
-	)
-	return sm, mfBytes, nil
+	return sm, currentManifest, nil
 }

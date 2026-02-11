@@ -6,11 +6,12 @@ set -euo pipefail
 
 manifest=$1
 
-# set TCB versions
+# set TCB versions and mitigation vector
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.BootloaderVersion=10' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.TEEVersion=0' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.SNPVersion=28' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.MicrocodeVersion=88' "$manifest"
+yq eval -i '.ReferenceValues.snp[].MinimumMitigationVector=11' "$manifest"
 
 # configure GuestPolicy and PlatformInfo
 yq eval -i '.ReferenceValues.snp[].GuestPolicy={ "SMT":true, "MigrateMA":false, "Debug":false, "CXLAllowed":false, "PageSwapDisable":true }' "$manifest"

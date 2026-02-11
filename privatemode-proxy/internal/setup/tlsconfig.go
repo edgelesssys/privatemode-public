@@ -5,9 +5,10 @@ package setup
 
 import (
 	"context"
-	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/manifestlog"
 	"github.com/spf13/afero"
@@ -15,54 +16,60 @@ import (
 
 const manifest = "manifest.json"
 
-// tlsConfigAdapter updates the TLS config with the interface for the secretupdater.
-type tlsConfigAdapter struct {
-	fetcher          contrastDeploymentFetcher
-	mfLogger         mfLogger
-	tlsConfigUpdater tlsConfigUpdater
-	log              *slog.Logger
+// caAdapter updates the mesh CA with the interface for the secretupdater.
+type caAdapter struct {
+	fetcher   contrastDeploymentFetcher
+	mfLogger  mfLogger
+	caUpdater caUpdater
+	log       *slog.Logger
+
+	manifestMu sync.Mutex
+	manifest   []byte
 }
 
-type tlsConfigUpdater interface {
-	GetTLSConfig(ctx context.Context, expectedMfBytes []byte) (*tls.Config, error)
+type caUpdater interface {
+	GetAttestedMeshCA(ctx context.Context, expectedMfBytes []byte, apiKey string) (*x509.Certificate, error)
 }
 
-// newTLSConfigAdapter returns a new TLSConfigGetter that updates the TLS config.
-func newTLSConfigAdapter(cdnBaseURL string, mfLogger mfLogger, tlsConfigUpdater tlsConfigUpdater, log *slog.Logger) *tlsConfigAdapter {
+// newCAAdapter creates a new caAdapter.
+func newCAAdapter(cdnBaseURL string, mfLogger mfLogger, caUpdater caUpdater, log *slog.Logger) *caAdapter {
 	fetcher := contrastDeploymentFetcher{cdnBaseURL: cdnBaseURL}
-	return &tlsConfigAdapter{
-		fetcher:          fetcher,
-		mfLogger:         mfLogger,
-		tlsConfigUpdater: tlsConfigUpdater,
-		log:              log,
+	return &caAdapter{
+		fetcher:   fetcher,
+		mfLogger:  mfLogger,
+		caUpdater: caUpdater,
+		log:       log,
 	}
 }
 
-// GetTLSConfig retrieves the latest manifest and uses it to get the mesh certificate via aTLS.
-// It returns a [tls.Config] based on the mesh certificate and the raw manifest.
-func (t tlsConfigAdapter) GetTLSConfig(ctx context.Context) (*tls.Config, []byte, error) {
-	return getNewTLSConfig(ctx, t.fetcher, t.mfLogger, t.tlsConfigUpdater, t.log)
+// GetMeshCA retrieves the latest manifest and gets the attested mesh CA.
+func (c *caAdapter) GetMeshCA(ctx context.Context, apiKey string) (*x509.Certificate, error) {
+	expectedMfBytes, err := c.fetcher.FetchManifest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetching manifest: %w", err)
+	}
+	c.log.Info("Coordinator manifest fetched successfully")
+
+	if err := c.mfLogger.Log(expectedMfBytes); err != nil {
+		return nil, fmt.Errorf("logging manifest: %w", err)
+	}
+
+	cert, err := c.caUpdater.GetAttestedMeshCA(ctx, expectedMfBytes, apiKey)
+	if err != nil {
+		return nil, fmt.Errorf("getting attested certificate: %w", err)
+	}
+
+	c.manifestMu.Lock()
+	c.manifest = expectedMfBytes
+	c.manifestMu.Unlock()
+
+	return cert, nil
 }
 
-func getNewTLSConfig(ctx context.Context, fetcher contrastDeploymentFetcher, mfLogger mfLogger,
-	tlsConfigUpdater tlsConfigUpdater, log *slog.Logger,
-) (*tls.Config, []byte, error) {
-	expectedMfBytes, err := fetcher.FetchManifest(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("fetching manifest: %w", err)
-	}
-	log.Info("Coordinator manifest fetched successfully")
-
-	if err := mfLogger.Log(expectedMfBytes); err != nil {
-		return nil, nil, fmt.Errorf("logging manifest: %w", err)
-	}
-
-	tlsConfig, err := tlsConfigUpdater.GetTLSConfig(ctx, expectedMfBytes)
-	if err != nil {
-		return nil, nil, fmt.Errorf("converting manifest to tls config: %w", err)
-	}
-
-	return tlsConfig, expectedMfBytes, nil
+func (c *caAdapter) CurrentManifest() string {
+	c.manifestMu.Lock()
+	defer c.manifestMu.Unlock()
+	return string(c.manifest)
 }
 
 type contrastDeploymentFetcher struct {

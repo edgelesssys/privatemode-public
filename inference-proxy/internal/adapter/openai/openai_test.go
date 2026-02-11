@@ -1,7 +1,6 @@
 package openai
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,13 +11,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
-	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -334,190 +332,42 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 	}
 }
 
-func TestVerifyOCSP(t *testing.T) {
-	gpuPolicyFailure := "GPU attestation returned a GPU OCSP status that is not accepted by the client"
-	driverPolicyFailure := "GPU attestation returned a driver OCSP status that is not accepted by the client"
-	vbiosPolicyFailure := "GPU attestation returned a VBIOS OCSP status that is not accepted by the client"
+// TestModelsEndpointExcludedFromOCSP verifies that the models endpoint is excluded from OCSP verification.
+// This is an OpenAI-specific behavior since /v1/models is used for health checks and shouldn't require GPU attestation.
+func TestModelsEndpointExcludedFromOCSP(t *testing.T) {
+	assert := assert.New(t)
 
-	testCases := map[string]struct {
-		ocspStatus     ocsp.StatusInfo
-		acceptedStatus []ocspheader.AllowStatus
-		expectedCode   int
-		expectedBody   string
-	}{
-		"all good, accepted good": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood},
-			expectedCode:   http.StatusOK,
+	// Create adapter with bad OCSP status - would normally fail verification
+	a := &Adapter{
+		Adapter: &inference.Adapter{
+			Cipher:        &stubCipher{},
+			Forwarder:     &stubForwarder{},
+			WorkloadTasks: []string{constants.WorkloadTaskGenerate},
+			Log:           slog.Default(),
+			OCSPStatus:    []ocsp.StatusInfo{{GPU: ocsp.StatusUnknown, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}},
 		},
-		"all good, no header set": {
-			ocspStatus:   ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood},
-			expectedCode: http.StatusOK,
-		},
-		"unknown gpu, accept good": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusUnknown, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood},
-			expectedCode:   http.StatusInternalServerError,
-			expectedBody:   gpuPolicyFailure,
-		},
-		"unknown driver, accept good": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusUnknown},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood},
-			expectedCode:   http.StatusInternalServerError,
-			expectedBody:   driverPolicyFailure,
-		},
-		"unknown vbios, accept good": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusUnknown, Driver: ocsp.StatusGood},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood},
-			expectedCode:   http.StatusInternalServerError,
-			expectedBody:   vbiosPolicyFailure,
-		},
-		"revoked gpu, accept good": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusRevoked(time.Now()), VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood},
-			expectedCode:   http.StatusInternalServerError,
-			expectedBody:   gpuPolicyFailure,
-		},
-		"revoked driver, accept good": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusRevoked(time.Now())},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood},
-			expectedCode:   http.StatusInternalServerError,
-			expectedBody:   driverPolicyFailure,
-		},
-		"revoked vbios, accept good": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusRevoked(time.Now()), Driver: ocsp.StatusGood},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood},
-			expectedCode:   http.StatusInternalServerError,
-			expectedBody:   vbiosPolicyFailure,
-		},
-		"unknown gpu, accept unknown": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusUnknown, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusUnknown},
-			expectedCode:   http.StatusOK,
-		},
-		"unknown driver, accept unknown": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusUnknown},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusUnknown},
-			expectedCode:   http.StatusOK,
-		},
-		"unknown vbios, accept unknown": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusUnknown, Driver: ocsp.StatusGood},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusUnknown},
-			expectedCode:   http.StatusOK,
-		},
-		"revoked gpu, accept revoked": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusRevoked(time.Now()), VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusUnknown, ocspheader.AllowStatusRevoked},
-			expectedCode:   http.StatusOK,
-		},
-		"revoked driver, accept revoked": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusRevoked(time.Now())},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusUnknown, ocspheader.AllowStatusRevoked},
-			expectedCode:   http.StatusOK,
-		},
-		"revoked vbios, accept revoked": {
-			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusRevoked(time.Now()), Driver: ocsp.StatusGood},
-			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusUnknown, ocspheader.AllowStatusRevoked},
-			expectedCode:   http.StatusOK,
-		},
-		"unknown gpu, no header set": {
-			ocspStatus:   ocsp.StatusInfo{GPU: ocsp.StatusUnknown, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood},
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: gpuPolicyFailure,
-		},
-		"unknown driver, no header set": {
-			ocspStatus:   ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusUnknown},
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: driverPolicyFailure,
-		},
-		"unknown vbios, no header set": {
-			ocspStatus:   ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusUnknown, Driver: ocsp.StatusGood},
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: vbiosPolicyFailure,
-		},
-		"revoked gpu, no header set": {
-			ocspStatus:   ocsp.StatusInfo{GPU: ocsp.StatusRevoked(time.Now()), VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood},
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: gpuPolicyFailure,
-		},
-		"revoked driver, no header set": {
-			ocspStatus:   ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusRevoked(time.Now())},
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: driverPolicyFailure,
-		},
-		"revoked vbios, no header set": {
-			ocspStatus:   ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusRevoked(time.Now()), Driver: ocsp.StatusGood},
-			expectedCode: http.StatusInternalServerError,
-			expectedBody: vbiosPolicyFailure,
+		mutators: openai.DefaultRequestMutators{
+			CacheSaltInjector:       stubRequestMutator,
+			CacheSaltValidator:      stubRequestMutator,
+			SecureImageURLValidator: stubRequestMutator,
 		},
 	}
 
-	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			require := require.New(t)
+	// Build handler like the server does - middleware is applied per-route by RegisterRoutes
+	mux := http.NewServeMux()
+	a.RegisterRoutes(mux)
 
-			secret := bytes.Repeat([]byte{0x01}, 32)
-			secretID := "test"
-			a := &Adapter{
-				cipher: &stubCipher{
-					secretMap: map[string][]byte{secretID: secret},
-				},
-				forwarder:     &stubForwarder{},
-				workloadTasks: []string{constants.WorkloadTaskGenerate},
-				mutators: openai.DefaultRequestMutators{
-					CacheSaltInjector:       stubRequestMutator,
-					CacheSaltValidator:      stubRequestMutator,
-					SecureImageURLValidator: stubRequestMutator,
-				},
-				log:        slog.Default(),
-				ocspStatus: []ocsp.StatusInfo{tc.ocspStatus},
-			}
-			handler := a.ServeMux()
+	// Models endpoint should succeed despite bad OCSP status (not wrapped with OCSP middleware)
+	request := httptest.NewRequest(http.MethodGet, openai.ModelsEndpoint, http.NoBody)
+	responseRecorder := httptest.NewRecorder()
+	mux.ServeHTTP(responseRecorder, request)
+	assert.Equal(http.StatusOK, responseRecorder.Code)
 
-			createRequest := func(method, path string) (*httptest.ResponseRecorder, *http.Request) {
-				request := httptest.NewRequest(method, path, http.NoBody)
-
-				if tc.acceptedStatus != nil {
-					ocspHeader := ocspheader.NewHeader(tc.acceptedStatus, time.Time{})
-					policyHeader, err := ocspHeader.Marshal()
-					require.NoError(err)
-					policyMACHeader, err := ocspHeader.MarshalMACHeader([32]byte(secret))
-					require.NoError(err)
-
-					request.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyHeader, policyHeader)
-					request.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyMACHeader, policyMACHeader)
-					request.Header.Set(constants.PrivatemodeSecretIDHeader, secretID)
-				}
-
-				return httptest.NewRecorder(), request
-			}
-
-			// OCSP verification middleware needs to be applied to all endpoints that interact with vLLM, i.e. the GPU
-			for _, path := range []string{
-				openai.ChatCompletionsEndpoint, openai.LegacyCompletionsEndpoint, openai.EmbeddingsEndpoint,
-				openai.TranscriptionsEndpoint,
-			} {
-				t.Run(path, func(t *testing.T) {
-					assert := assert.New(t)
-					responseRecorder, request := createRequest(http.MethodPost, path)
-
-					handler.ServeHTTP(responseRecorder, request)
-					assert.Equal(tc.expectedCode, responseRecorder.Code)
-					assert.Contains(responseRecorder.Body.String(), tc.expectedBody)
-				})
-			}
-
-			// Models endpoint is used for heartbeats and doesn't need the GPU
-			// OCSP middleware must not be applied to allow health checks on this endpoint
-			t.Run(openai.ModelsEndpoint, func(t *testing.T) {
-				assert := assert.New(t)
-				responseRecorder, request := createRequest(http.MethodGet, openai.ModelsEndpoint)
-
-				handler.ServeHTTP(responseRecorder, request)
-				assert.Equal(http.StatusOK, responseRecorder.Code)
-			})
-		})
-	}
+	// Other endpoints should fail with bad OCSP status (wrapped with OCSP middleware)
+	request = httptest.NewRequest(http.MethodPost, openai.ChatCompletionsEndpoint, http.NoBody)
+	responseRecorder = httptest.NewRecorder()
+	mux.ServeHTTP(responseRecorder, request)
+	assert.Equal(http.StatusInternalServerError, responseRecorder.Code)
 }
 
 type stubCipher struct {

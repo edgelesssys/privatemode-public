@@ -768,6 +768,10 @@ func (s *stubSecretManager) ForceUpdate(_ context.Context) error {
 	return nil
 }
 
+func (s *stubSecretManager) OfferAPIKey(context.Context, string) error {
+	return nil
+}
+
 func toPtr(s string) *string {
 	return &s
 }

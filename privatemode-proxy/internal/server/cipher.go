@@ -21,6 +21,7 @@ type RenewableRequestCipher struct {
 type secretManager interface {
 	LatestSecret(ctx context.Context) (secretmanager.Secret, error)
 	ForceUpdate(ctx context.Context) error
+	OfferAPIKey(context.Context, string) error
 }
 
 // NewRenewableRequestCipher creates a new RenewableRequestCipher with the given secretManager.

@@ -5,8 +5,7 @@ package updater
 
 import (
 	"context"
-	"crypto/tls"
-	"errors"
+	"crypto/x509"
 	"testing"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestUpdateSecrets(t *testing.T) {
+func TestUpdateSecret(t *testing.T) {
 	testCases := map[string]struct {
 		wantErr   bool
 		customize func(*Updater)
@@ -23,8 +22,8 @@ func TestUpdateSecrets(t *testing.T) {
 		"succeeds after client TLS config is updated": {},
 		"fails when TLS config update fails": {
 			customize: func(sut *Updater) {
-				sut.tlsConfigGetter = &stubTLSCfgUpdater{
-					err: errors.New("failed to update TLS config"),
+				sut.caGetter = &stubCAGetter{
+					err: assert.AnError,
 				}
 			},
 			wantErr: true,
@@ -35,50 +34,46 @@ func TestUpdateSecrets(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			log := logging.NewLogger(logging.DefaultFlagValue)
 			secretClient := &stubSecretClient{
-				errWithoutTLSCfg: errors.New("need tls update"),
-				tlsConfig:        nil,
+				errWithoutCA: assert.AnError,
 			}
 			sut := &Updater{
-				ssClient:        secretClient,
-				tlsConfigGetter: &stubTLSCfgUpdater{},
-				log:             log,
-				retryOpts:       []retry.Option{retry.Delay(time.Millisecond), retry.Attempts(2)},
+				ssClient:  secretClient,
+				caGetter:  &stubCAGetter{},
+				log:       log,
+				retryOpts: []retry.Option{retry.Delay(time.Millisecond), retry.Attempts(2)},
 			}
 			if tc.customize != nil {
 				tc.customize(sut)
 			}
 
-			err := sut.UpdateSecrets(t.Context(), map[string][]byte{"key": []byte("value")}, time.Hour)
+			id, data, err := sut.UpdateSecret(t.Context(), "")
 			assert := assert.New(t)
 			if tc.wantErr {
 				assert.Error(err)
 				return
 			}
 			assert.NoError(err)
+			assert.Equal("id", id)
+			assert.EqualValues("data", data)
 		})
 	}
 }
 
-type stubTLSCfgUpdater struct {
+type stubCAGetter struct {
 	err error
 }
 
-func (t *stubTLSCfgUpdater) GetTLSConfig(_ context.Context) (*tls.Config, []byte, error) {
-	return &tls.Config{}, nil, t.err
+func (c *stubCAGetter) GetMeshCA(context.Context, string) (*x509.Certificate, error) {
+	return &x509.Certificate{}, c.err
 }
 
 type stubSecretClient struct {
-	errWithoutTLSCfg error
-	tlsConfig        *tls.Config
+	errWithoutCA error
 }
 
-func (s *stubSecretClient) SetSecrets(_ context.Context, _ map[string][]byte, _ time.Duration) error {
-	if s.tlsConfig == nil {
-		return s.errWithoutTLSCfg
+func (s *stubSecretClient) ExchangeSecret(_ context.Context, meshCA *x509.Certificate, _ string) (string, []byte, error) {
+	if meshCA == nil {
+		return "", nil, s.errWithoutCA
 	}
-	return nil
-}
-
-func (s *stubSecretClient) SetTLSConfig(tlsConfig *tls.Config) {
-	s.tlsConfig = tlsConfig
+	return "id", []byte("data"), nil
 }
