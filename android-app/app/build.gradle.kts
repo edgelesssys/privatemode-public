@@ -4,6 +4,51 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// ---------------------------------------------------------------------------
+// Task: build the native Go proxy library (libprivatemode) via the NDK.
+//
+// This calls scripts/build-native.sh which cross-compiles the Go code for
+// every Android ABI and places the resulting .so files into jniLibs/.
+// Gradle's input/output tracking ensures it only re-runs when source files
+// change.
+// ---------------------------------------------------------------------------
+val buildNativeLibs by tasks.registering(Exec::class) {
+    description = "Cross-compile the Go proxy library for Android"
+    group = "build"
+
+    val scriptFile = project.file("../scripts/build-native.sh")
+    val goSource = project.file("../../privatemode-proxy/libprivatemode")
+    val jniCSource = project.file("src/main/cpp/privatemode_jni.c")
+    val jniLibsDir = project.file("src/main/jniLibs")
+
+    // Inputs: the build script, Go sources, and the JNI C bridge.
+    inputs.file(scriptFile)
+    inputs.dir(goSource)
+    inputs.file(jniCSource)
+
+    // Output: the jniLibs directory that will contain the .so files.
+    outputs.dir(jniLibsDir)
+
+    commandLine("bash", scriptFile.absolutePath)
+
+    // Fail the build with a clear message when prerequisites are missing.
+    doFirst {
+        val goFound = try {
+            Runtime.getRuntime().exec(arrayOf("go", "version")).waitFor() == 0
+        } catch (_: Exception) { false }
+
+        if (!goFound) {
+            throw GradleException(
+                "Go is required to build the native proxy library but was not found on PATH.\n" +
+                "Install Go 1.25+ from https://go.dev/dl/ and make sure it is on your PATH."
+            )
+        }
+
+        // ANDROID_NDK_HOME is resolved by the script itself (it checks
+        // standard SDK locations), so we only warn here if it's unset.
+    }
+}
+
 android {
     namespace = "ai.privatemode.android"
     compileSdk = 35
@@ -39,6 +84,15 @@ android {
 
     buildFeatures {
         compose = true
+    }
+}
+
+// Wire buildNativeLibs into the merge-jniLibs step for every build variant.
+// This must happen in afterEvaluate because variants are created during
+// evaluation of the android block.
+afterEvaluate {
+    android.applicationVariants.configureEach {
+        mergeJniLibsFolders.dependsOn(buildNativeLibs)
     }
 }
 
