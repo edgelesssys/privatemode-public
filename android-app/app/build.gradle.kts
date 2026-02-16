@@ -88,11 +88,13 @@ android {
 }
 
 // Wire buildNativeLibs into the merge-jniLibs step for every build variant.
-// This must happen in afterEvaluate because variants are created during
-// evaluation of the android block.
+// AGP names these tasks merge{Variant}JniLibFolders (e.g. mergeDebugJniLibFolders).
 afterEvaluate {
     android.applicationVariants.configureEach {
-        mergeJniLibsFolders.dependsOn(buildNativeLibs)
+        val variantName = name.replaceFirstChar { it.uppercaseChar() }
+        tasks.named("merge${variantName}JniLibFolders") {
+            dependsOn(buildNativeLibs)
+        }
     }
 }
 
