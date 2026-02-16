@@ -33,18 +33,22 @@ class PrivatemodeClient(
 ) {
     private val TAG = "PrivatemodeClient"
     private val gson = Gson()
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .addInterceptor(Interceptor { chain ->
-            val request = chain.request().newBuilder()
-                .addHeader("Privatemode-Version", "v1.23.0")
-                .addHeader("Privatemode-Client", "App")
-                .build()
-            chain.proceed(request)
-        })
-        .build()
+
+    companion object {
+        /** Shared OkHttpClient across all PrivatemodeClient instances for connection reuse. */
+        val sharedClient: OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .addInterceptor(Interceptor { chain ->
+                val request = chain.request().newBuilder()
+                    .addHeader("Privatemode-Version", "v1.23.0")
+                    .addHeader("Privatemode-Client", "App")
+                    .build()
+                chain.proceed(request)
+            })
+            .build()
+    }
 
     suspend fun fetchModels(): List<ApiModel> = withContext(Dispatchers.IO) {
         val request = Request.Builder()
@@ -54,12 +58,10 @@ class PrivatemodeClient(
             .get()
             .build()
 
-        val response = client.newCall(request).execute()
+        val response = sharedClient.newCall(request).execute()
         if (!response.isSuccessful) {
-            throw ApiException(
-                "Failed to fetch models: ${response.code} ${response.message}",
-                response.code
-            )
+            val errorBody = try { response.body?.string() } catch (_: Exception) { null }
+            throw parseApiError(response.code, response.message, errorBody)
         }
 
         val body = response.body?.string() ?: throw ApiException("Response body is null")
@@ -111,7 +113,7 @@ class PrivatemodeClient(
             .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
             .build()
 
-        val call = client.newCall(request)
+        val call = sharedClient.newCall(request)
         Log.i(TAG, "Sending chat completion to $baseUrl/v1/chat/completions model=$model messages=${messages.size}")
 
         call.enqueue(object : Callback {
@@ -126,13 +128,7 @@ class PrivatemodeClient(
                 if (!response.isSuccessful) {
                     val errorBody = try { response.body?.string() } catch (_: Exception) { null }
                     Log.e(TAG, "Chat completion failed: ${response.code} body=$errorBody")
-                    close(
-                        ApiException(
-                            "Chat completion failed: ${response.code} ${response.message}" +
-                                if (errorBody != null) "\n$errorBody" else "",
-                            response.code
-                        )
-                    )
+                    close(parseApiError(response.code, response.message, errorBody))
                     return
                 }
 
@@ -163,13 +159,13 @@ class PrivatemodeClient(
                                 if (choices != null && choices.size() > 0) {
                                     val delta = choices[0].asJsonObject
                                         .getAsJsonObject("delta")
-                                    val content = delta?.get("content")?.asString
-                                    if (content != null) {
+                                    val contentElement = delta?.get("content")
+                                    if (contentElement != null && contentElement.isJsonPrimitive) {
+                                        val content = contentElement.asString
                                         chunkCount++
                                         trySend(content)
                                     }
                                 } else if (chunkCount == 0) {
-                                    // Log first non-content chunk to help debug format issues
                                     Log.w(TAG, "SSE chunk has no choices: $data")
                                 }
                             } catch (e: Exception) {
@@ -212,18 +208,42 @@ class PrivatemodeClient(
                 .post(requestBody)
                 .build()
 
-            val response = client.newCall(request).execute()
+            val response = sharedClient.newCall(request).execute()
             if (!response.isSuccessful) {
-                throw ApiException(
-                    "File upload failed: ${response.code} ${response.message}",
-                    response.code
-                )
+                val errorBody = try { response.body?.string() } catch (_: Exception) { null }
+                throw parseApiError(response.code, response.message, errorBody)
             }
 
             val body = response.body?.string() ?: throw ApiException("Response body is null")
             val elements = gson.fromJson(body, Array<UnstructuredElement>::class.java)
             elements.toList()
         }
+
+    private fun parseApiError(code: Int, message: String, errorBody: String?): ApiException {
+        if (errorBody != null) {
+            try {
+                val errorJson = gson.fromJson(errorBody, JsonObject::class.java)
+                val errorMsg = errorJson?.getAsJsonObject("error")?.get("message")?.asString
+                if (errorMsg != null) {
+                    if (errorMsg.contains("invalid message format") || errorMsg.contains("nonce:iv:cipher")) {
+                        return ApiException(
+                            "The secure proxy is required but not running. " +
+                                "Please restart the app to establish a secure connection.",
+                            code
+                        )
+                    }
+                    if (errorMsg.contains("minimum client version")) {
+                        return ApiException(
+                            "Please update the app to the latest version.",
+                            code
+                        )
+                    }
+                    return ApiException(errorMsg, code)
+                }
+            } catch (_: Exception) { }
+        }
+        return ApiException("Request failed: $code $message", code)
+    }
 }
 
 data class UnstructuredElement(

@@ -41,12 +41,10 @@ class ChatRepository(
     val extendedThinking: Flow<Boolean> = preferences.extendedThinking
     val serverUrl: Flow<String> = preferences.serverUrl
 
-    private fun createClient(): PrivatemodeClient? {
+    private suspend fun createClient(): PrivatemodeClient? {
         val baseUrl = proxyManager.getBaseUrl()
-        // The proxy handles auth internally; we pass the user's API key
-        // which the proxy forwards to the backend
         val key = try {
-            kotlinx.coroutines.runBlocking { preferences.getApiKey() }
+            preferences.getApiKey()
         } catch (_: Exception) {
             null
         }
@@ -112,7 +110,7 @@ class ChatRepository(
         chatStorage.setStreaming(chatId, isStreaming)
     }
 
-    fun streamChatCompletion(
+    suspend fun streamChatCompletion(
         model: String,
         messages: List<Message>,
         systemPrompt: String?,
