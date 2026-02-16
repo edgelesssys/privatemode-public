@@ -268,6 +268,8 @@ class ChatViewModel(
         return MODEL_CONFIG[model]?.supportsExtendedThinking ?: false
     }
 
+    fun getFilteredModels() = repository.getFilteredModels()
+
     private fun getFileName(context: Context, uri: Uri): String {
         var name = "file"
         context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->

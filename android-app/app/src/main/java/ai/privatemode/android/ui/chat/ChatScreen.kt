@@ -181,7 +181,7 @@ fun ChatScreen(
             onStop = { viewModel.stopGeneration() },
             onModelSelect = { viewModel.selectModel(it) },
             onToggleThinking = { viewModel.toggleExtendedThinking() },
-            onAttachFile = { uri -> viewModel.uploadFile(it, uri) },
+            onAttachFile = { context, uri -> viewModel.uploadFile(context, uri) },
             onRemoveFile = { viewModel.removeAttachedFile(it) },
             supportsFileUploads = viewModel.supportsFileUploads(),
             supportsExtendedThinking = viewModel.supportsExtendedThinking(),
@@ -189,7 +189,7 @@ fun ChatScreen(
             maxWords = viewModel.getMaxWords(),
             messageWordCount = countWords(messageText),
             attachedFilesWordCount = attachedFiles.sumOf { countWords(it.content) },
-            filteredModels = viewModel.repository.getFilteredModels(),
+            filteredModels = viewModel.getFilteredModels(),
         )
     }
 }
