@@ -24,7 +24,7 @@ struct PrivatemodeStartProxy_return {
     char* r1; /* error message (NULL on success) */
 };
 
-extern struct PrivatemodeStartProxy_return PrivatemodeStartProxy(void);
+extern struct PrivatemodeStartProxy_return PrivatemodeStartProxy(char* dataDir);
 extern char* CurrentManifest(void);
 
 /*
@@ -40,18 +40,20 @@ JNIEXPORT jobject JNICALL
 Java_ai_privatemode_android_proxy_NativeProxy_nativeStartProxy(
     JNIEnv *env, jobject thiz, jstring dataDir) {
 
-    /* Set up environment for Go's os.UserConfigDir() and os.UserHomeDir() */
+    /* Pass dataDir to Go so it can call os.Setenv() directly.
+     * C's setenv() doesn't work because Go caches the environment at init. */
+    char *dataDirCopy = NULL;
     if (dataDir != NULL) {
         const char *dataDirStr = (*env)->GetStringUTFChars(env, dataDir, NULL);
         if (dataDirStr != NULL) {
-            setenv("HOME", dataDirStr, 0);          /* don't overwrite if set */
-            setenv("XDG_CONFIG_HOME", dataDirStr, 0);
+            dataDirCopy = strdup(dataDirStr);
             (*env)->ReleaseStringUTFChars(env, dataDir, dataDirStr);
         }
     }
 
-    /* Call the Go function */
-    struct PrivatemodeStartProxy_return result = PrivatemodeStartProxy();
+    /* Call the Go function with the data directory */
+    struct PrivatemodeStartProxy_return result = PrivatemodeStartProxy(dataDirCopy);
+    free(dataDirCopy);
 
     /* Find the ProxyStartResult class */
     jclass resultClass = (*env)->FindClass(env,
