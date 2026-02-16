@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.PrivatemodeAI" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#FF232323</item>
+        <item name="android:navigationBarColor">#FFF3F4F5</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
