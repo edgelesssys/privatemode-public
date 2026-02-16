@@ -72,9 +72,9 @@ private fun AppContent(app: PrivatemodeApp) {
         apiKeyChecked = true
     }
 
-    // When proxy is running and we have an API key, load models
+    // When connection is ready and we have an API key, load models
     LaunchedEffect(proxyState, apiKey) {
-        if (proxyState is ProxyManager.ProxyState.Running && apiKey != null) {
+        if (app.proxyManager.isReady() && apiKey != null) {
             app.repository.loadModels()
             initialized = true
         }
@@ -95,11 +95,11 @@ private fun AppContent(app: PrivatemodeApp) {
                 },
             )
         }
-        // Proxy loading
+        // Connection loading
         proxyState is ProxyManager.ProxyState.Loading || proxyState is ProxyManager.ProxyState.NotStarted -> {
             LoadingScreen("Connecting to secure backend...")
         }
-        // Proxy error
+        // Connection error
         proxyState is ProxyManager.ProxyState.Error -> {
             ErrorScreen(
                 message = (proxyState as ProxyManager.ProxyState.Error).message,
@@ -110,8 +110,9 @@ private fun AppContent(app: PrivatemodeApp) {
                 },
             )
         }
-        // Ready
-        else -> {
+        // Ready (either native proxy running or direct HTTPS mode)
+        proxyState is ProxyManager.ProxyState.Running ||
+            proxyState is ProxyManager.ProxyState.DirectMode -> {
             MainNavigation(
                 repository = app.repository,
                 proxyManager = app.proxyManager,

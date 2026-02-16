@@ -4,9 +4,28 @@
 
 - Android Studio Arctic Fox or later (or Android Gradle Plugin 8.7+)
 - Android SDK with API level 35
-- Android NDK (for native proxy compilation)
-- Go 1.25+ (for cross-compiling the proxy)
 - JDK 17
+
+Optional (for native proxy — not required for basic functionality):
+- Android NDK
+- Go 1.25+
+
+## Quick Start
+
+The app works out of the box in **direct HTTPS mode**, connecting to `api.privatemode.ai`
+over TLS. No native proxy compilation is needed.
+
+```bash
+cd android-app
+
+# Debug build
+./gradlew assembleDebug
+
+# Install on connected device/emulator
+./gradlew installDebug
+```
+
+Or open the `android-app/` directory in Android Studio and build from the IDE.
 
 ## Project Structure
 
@@ -16,14 +35,14 @@ android-app/
 │   ├── build.gradle.kts          # App build configuration
 │   └── src/main/
 │       ├── AndroidManifest.xml
-│       ├── cpp/                   # JNI bridge C code
+│       ├── cpp/                   # JNI bridge C code (future)
 │       │   └── privatemode_jni.c  # JNI bridge to Go proxy
 │       ├── java/ai/privatemode/android/
 │       │   ├── MainActivity.kt    # Entry point
 │       │   ├── PrivatemodeApp.kt  # Application class
-│       │   ├── proxy/             # Native proxy management
+│       │   ├── proxy/             # Connection management
 │       │   │   ├── NativeProxy.kt # JNI declarations
-│       │   │   └── ProxyManager.kt# Proxy lifecycle
+│       │   │   └── ProxyManager.kt# Connection lifecycle
 │       │   ├── data/              # Data layer
 │       │   │   ├── model/         # Data models
 │       │   │   ├── local/         # Local storage
@@ -38,21 +57,45 @@ android-app/
 │       │   │   ├── security/      # Security info screen
 │       │   │   └── components/    # Shared components
 │       │   └── util/              # Utilities
-│       ├── jniLibs/               # Native libraries (built)
+│       ├── jniLibs/               # Native libraries (optional)
 │       └── res/                   # Android resources
 ├── scripts/
-│   └── build-native.sh           # Cross-compile script
+│   └── build-native.sh           # Cross-compile script (future)
 ├── build.gradle.kts              # Root build file
 └── settings.gradle.kts
 ```
 
-## Building the Native Proxy
+## Connection Modes
 
-The Android app embeds the same proxy as the desktop app, cross-compiled for
-Android architectures. This proxy handles remote attestation, HPKE secret
-exchange, and end-to-end encryption.
+The app supports two connection modes, selected automatically at startup:
 
-### Step 1: Build native libraries
+### 1. Direct HTTPS Mode (default)
+
+Connects directly to `https://api.privatemode.ai` over TLS. This is the default
+mode when the native proxy library is not present.
+
+- Transport encryption via TLS
+- Backend runs in a Trusted Execution Environment (AMD SEV-SNP + NVIDIA H100)
+- No client-side attestation verification (the Contrast SDK requires Linux)
+
+### 2. Native Proxy Mode (future)
+
+When `libprivatemode.so` is available, the app loads it via JNI and routes all
+traffic through a local proxy, identical to the desktop Electron app. This adds:
+
+- Client-side remote attestation via the Contrast SDK
+- HPKE field-level end-to-end encryption on top of TLS
+- Manifest verification with hash display in the Security screen
+
+The JNI bridge and build scripts are in place for when the Contrast SDK
+adds Android/mobile support.
+
+## Building the Native Proxy (Optional)
+
+> **Note:** The Contrast SDK currently requires Linux-specific interfaces
+> (AMD SEV-SNP) that are not available on Android. The native proxy cross-compilation
+> will succeed once upstream support is added. In the meantime, the app works
+> fully in direct HTTPS mode.
 
 ```bash
 # Set Android NDK path
@@ -62,52 +105,41 @@ export ANDROID_NDK_HOME=$HOME/Android/Sdk/ndk/<version>
 ./scripts/build-native.sh
 ```
 
-This produces `libprivatemode.so` files in `app/src/main/jniLibs/` for each
+This would produce `libprivatemode.so` files in `app/src/main/jniLibs/` for each
 supported architecture (arm64-v8a, armeabi-v7a, x86_64).
-
-### Step 2: Build the APK
-
-```bash
-# Debug build
-./gradlew assembleDebug
-
-# Release build (requires signing configuration)
-./gradlew assembleRelease
-```
-
-Or open the project in Android Studio and build from the IDE.
 
 ## Architecture
 
-The app follows the same architecture as the desktop Electron app:
-
 ```
-┌─────────────────────────────────┐
-│     Android App (Kotlin/Compose)│
-│  ┌───────────────────────────┐  │
-│  │     UI Layer (Compose)    │  │
-│  │  Chat │ Settings│Security │  │
-│  └───────────┬───────────────┘  │
-│  ┌───────────┴───────────────┐  │
-│  │    Repository Layer       │  │
-│  └───────────┬───────────────┘  │
-│  ┌───────────┴───────────────┐  │
-│  │   HTTP Client (OkHttp)    │  │
-│  │   connects to localhost   │  │
-│  └───────────┬───────────────┘  │
-│  ┌───────────┴───────────────┐  │
-│  │   Native Proxy (JNI)     │  │
-│  │   libprivatemode.so       │  │
-│  │   ┌───────────────────┐   │  │
-│  │   │ Go proxy server   │   │  │
-│  │   │ - Attestation     │   │  │
-│  │   │ - HPKE encryption │   │  │
-│  │   │ - Secret exchange │   │  │
-│  │   └───────────────────┘   │  │
-│  └───────────┬───────────────┘  │
-└──────────────┼──────────────────┘
-               │ HTTPS (E2E encrypted)
-               ▼
+┌──────────────────────────────────┐
+│     Android App (Kotlin/Compose) │
+│  ┌────────────────────────────┐  │
+│  │     UI Layer (Compose)     │  │
+│  │  Chat │ Settings │Security │  │
+│  └────────────┬───────────────┘  │
+│  ┌────────────┴───────────────┐  │
+│  │     Repository Layer       │  │
+│  └────────────┬───────────────┘  │
+│  ┌────────────┴───────────────┐  │
+│  │   HTTP Client (OkHttp)     │  │
+│  └────────────┬───────────────┘  │
+│  ┌────────────┴───────────────┐  │
+│  │   ProxyManager             │  │
+│  │   ┌──────────────────────┐ │  │
+│  │   │ Native Proxy (JNI)   │ │  │
+│  │   │ libprivatemode.so    │ │  │
+│  │   │ - Attestation        │ │  │
+│  │   │ - HPKE encryption    │ │  │
+│  │   └──────────────────────┘ │  │
+│  │   OR                       │  │
+│  │   ┌──────────────────────┐ │  │
+│  │   │ Direct HTTPS         │ │  │
+│  │   │ (TLS to backend)     │ │  │
+│  │   └──────────────────────┘ │  │
+│  └────────────┬───────────────┘  │
+└───────────────┼──────────────────┘
+                │ HTTPS
+                ▼
 ┌──────────────────────────────────┐
 │  Privatemode Backend (TEE)       │
 │  api.privatemode.ai:443          │
@@ -115,22 +147,18 @@ The app follows the same architecture as the desktop Electron app:
 └──────────────────────────────────┘
 ```
 
-The proxy runs as a library loaded into the app process (not a separate
-service), binding to `127.0.0.1` on a random port. The app's HTTP client
-connects to this local proxy for all API calls.
-
 ## Features
 
-- **Onboarding** - Welcome screen with API key setup (UUID v4 validation)
-- **Chat** - Multi-turn conversations with streaming SSE responses
-- **Model selection** - gpt-oss-120b, Gemma 3 27B, Qwen3 Coder 30B
-- **File upload** - Document upload via unstructured API
-- **Extended thinking** - Reasoning mode toggle for supported models
-- **Chat history** - Persistent local storage with date grouping
-- **Chat management** - Create, rename, delete conversations
-- **Word count tracking** - Context limit with visual indicators
-- **Markdown rendering** - Rich message display (code, tables, lists)
-- **Security dashboard** - Remote attestation info, manifest hash, TCB versions
-- **Settings** - API key management, danger zone for data deletion
-- **End-to-end encryption** - Via embedded proxy with HPKE
-- **Remote attestation** - AMD SEV-SNP verification before connecting
+- **Onboarding** — Welcome screen with API key setup (UUID v4 validation)
+- **Chat** — Multi-turn conversations with streaming SSE responses
+- **Model selection** — gpt-oss-120b, Gemma 3 27B, Qwen3 Coder 30B
+- **File upload** — Document upload via unstructured API
+- **Extended thinking** — Reasoning mode toggle for supported models
+- **Chat history** — Persistent local storage with date grouping
+- **Chat management** — Create, rename, delete conversations
+- **Word count tracking** — Context limit with visual indicators
+- **Markdown rendering** — Rich message display (code, tables, lists)
+- **Security dashboard** — Connection security info and attestation details
+- **Settings** — API key management, danger zone for data deletion
+- **Direct HTTPS** — TLS-encrypted connection to TEE-protected backend
+- **Native proxy** (future) — Client-side attestation + HPKE encryption via JNI

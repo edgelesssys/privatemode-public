@@ -64,6 +64,7 @@ fun SecurityScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val isDirectMode = !proxyManager.isUsingNativeProxy()
 
     var manifestHash by remember { mutableStateOf("") }
     var trustedMeasurement by remember { mutableStateOf("") }
@@ -152,7 +153,11 @@ fun SecurityScreen(
                             style = MaterialTheme.typography.headlineSmall,
                         )
                         Text(
-                            text = "Your connection to Privatemode is protected by confidential computing technology.",
+                            text = if (isDirectMode) {
+                                "Your connection to Privatemode is encrypted via TLS. The backend runs in a Trusted Execution Environment (TEE) with AMD SEV-SNP."
+                            } else {
+                                "Your connection to Privatemode is protected by confidential computing technology."
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextSecondary,
                         )
@@ -164,7 +169,11 @@ fun SecurityScreen(
             SecuritySection(
                 icon = Icons.Default.Verified,
                 title = "Remote attestation",
-                description = "Before establishing a connection, the security of the Privatemode deployment is cryptographically verified. This proves that all components within the deployment run nothing but the expected code.",
+                description = if (isDirectMode) {
+                    "Remote attestation verifies the Privatemode deployment before connecting. On Android, attestation details are verified server-side. The desktop app can perform client-side verification using the Contrast SDK."
+                } else {
+                    "Before establishing a connection, the security of the Privatemode deployment is cryptographically verified. This proves that all components within the deployment run nothing but the expected code."
+                },
             ) {
                 if (manifestHash.isNotEmpty()) {
                     DataBlock(label = "MANIFEST HASH (SHA-256)", value = manifestHash)
@@ -173,6 +182,8 @@ fun SecurityScreen(
                         text = "Learn how to reproduce this hash",
                         url = "https://docs.privatemode.ai/guides/verify-source",
                     )
+                } else if (isDirectMode) {
+                    DirectModeNote()
                 } else {
                     Text("Loading...", style = MaterialTheme.typography.bodySmall, color = TextTertiary)
                 }
@@ -191,6 +202,8 @@ fun SecurityScreen(
                         text = "Learn how to reproduce this hash",
                         url = "https://docs.privatemode.ai/guides/verify-source",
                     )
+                } else if (isDirectMode) {
+                    DirectModeNote()
                 } else {
                     Text("Loading...", style = MaterialTheme.typography.bodySmall, color = TextTertiary)
                 }
@@ -215,6 +228,8 @@ fun SecurityScreen(
                             TcbItem(label = label, value = value.toString())
                         }
                     }
+                } else if (isDirectMode) {
+                    DirectModeNote()
                 } else {
                     Text("Loading...", style = MaterialTheme.typography.bodySmall, color = TextTertiary)
                 }
@@ -235,6 +250,21 @@ fun SecurityScreen(
 
             Spacer(modifier = Modifier.height(40.dp))
         }
+    }
+}
+
+@Composable
+private fun DirectModeNote() {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = BackgroundLight,
+    ) {
+        Text(
+            text = "Client-side attestation details are available on the desktop app. The Android app connects over TLS to the TEE-protected backend.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextTertiary,
+            modifier = Modifier.padding(12.dp),
+        )
     }
 }
 
