@@ -13,16 +13,16 @@ import kotlinx.coroutines.withContext
  *
  * Connection modes:
  *
- * 1. **Direct mode** (current): Connects directly to the Privatemode API over HTTPS.
- *    The TLS connection provides transport encryption. TEE attestation verification
- *    is not available on Android because the Contrast SDK requires Linux-specific
- *    interfaces (AMD SEV-SNP) that don't exist on mobile devices.
+ * 1. **Proxy mode** (preferred): Loads the native proxy library (libprivatemode.so)
+ *    via JNI and connects through a local proxy, identical to the desktop app.
+ *    This enables:
+ *    - Client-side TEE attestation (AMD SEV-SNP) via the Contrast SDK
+ *    - HPKE field-level E2E encryption on top of TLS
+ *    - Manifest verification with hash display in the Security screen
  *
- * 2. **Proxy mode** (future): When the native proxy library (libprivatemode.so) is
- *    available, the app will load it via JNI and connect through a local proxy,
- *    identical to how the desktop Electron app operates. This enables field-level
- *    E2E encryption via HPKE on top of TLS. The JNI bridge and build scripts are
- *    already in place (see NativeProxy.kt and scripts/build-native.sh).
+ * 2. **Direct mode** (fallback): Connects directly to the Privatemode API over
+ *    HTTPS when the native proxy library is not present. Transport encryption
+ *    via TLS only; no client-side attestation verification.
  */
 class ProxyManager(private val context: Context) {
 
@@ -75,7 +75,8 @@ class ProxyManager(private val context: Context) {
 
         Log.i(TAG, "Native proxy library loaded, starting proxy...")
         return try {
-            proxyPort = NativeProxy.startProxy()
+            val dataDir = context.filesDir.absolutePath
+            proxyPort = NativeProxy.startProxy(dataDir)
             baseUrl = "http://127.0.0.1:$proxyPort"
             usingNativeProxy = true
             Log.i(TAG, "Native proxy started on port $proxyPort")

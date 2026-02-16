@@ -44,12 +44,16 @@ object NativeProxy {
      * Start the proxy server. Returns the port number on success,
      * or throws ProxyException on failure.
      *
+     * @param dataDir The app's internal files directory. This is passed to the
+     *   Go proxy so it can set HOME/XDG_CONFIG_HOME for os.UserConfigDir(),
+     *   which is used to cache attestation data (KDS certs, manifests).
+     *
      * The proxy binds to 127.0.0.1 on a random available port and
      * begins the attestation + secret exchange in a background goroutine.
      */
-    fun startProxy(): Int {
+    fun startProxy(dataDir: String): Int {
         if (!loaded) throw ProxyException("Native library not loaded")
-        val result = nativeStartProxy()
+        val result = nativeStartProxy(dataDir)
         if (result.port < 0) {
             throw ProxyException(result.error ?: "Unknown proxy error")
         }
@@ -66,7 +70,7 @@ object NativeProxy {
     }
 
     // JNI native methods
-    private external fun nativeStartProxy(): ProxyStartResult
+    private external fun nativeStartProxy(dataDir: String): ProxyStartResult
     private external fun nativeGetCurrentManifest(): String
 }
 

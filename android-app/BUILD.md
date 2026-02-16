@@ -4,28 +4,35 @@
 
 - Android Studio Arctic Fox or later (or Android Gradle Plugin 8.7+)
 - Android SDK with API level 35
+- Android NDK (for native proxy / TEE attestation)
+- Go 1.25+ (for cross-compiling the proxy)
 - JDK 17
 
-Optional (for native proxy — not required for basic functionality):
-- Android NDK
-- Go 1.25+
-
-## Quick Start
-
-The app works out of the box in **direct HTTPS mode**, connecting to `api.privatemode.ai`
-over TLS. No native proxy compilation is needed.
+## Quick Start (with TEE Attestation)
 
 ```bash
 cd android-app
 
-# Debug build
+# Step 1: Set Android NDK path
+export ANDROID_NDK_HOME=$HOME/Android/Sdk/ndk/<version>
+
+# Step 2: Build the native proxy (TEE attestation + HPKE encryption)
+./scripts/build-native.sh
+
+# Step 3: Build the APK
 ./gradlew assembleDebug
 
-# Install on connected device/emulator
+# Step 4: Install on connected device/emulator
 ./gradlew installDebug
 ```
 
 Or open the `android-app/` directory in Android Studio and build from the IDE.
+
+### Without Native Proxy (direct HTTPS only)
+
+If you skip the `build-native.sh` step, the app will fall back to direct HTTPS
+mode: it still connects to `api.privatemode.ai` over TLS, but without client-side
+attestation verification or HPKE encryption.
 
 ## Project Structure
 
@@ -35,7 +42,7 @@ android-app/
 │   ├── build.gradle.kts          # App build configuration
 │   └── src/main/
 │       ├── AndroidManifest.xml
-│       ├── cpp/                   # JNI bridge C code (future)
+│       ├── cpp/                   # JNI bridge C code
 │       │   └── privatemode_jni.c  # JNI bridge to Go proxy
 │       ├── java/ai/privatemode/android/
 │       │   ├── MainActivity.kt    # Entry point
@@ -57,10 +64,10 @@ android-app/
 │       │   │   ├── security/      # Security info screen
 │       │   │   └── components/    # Shared components
 │       │   └── util/              # Utilities
-│       ├── jniLibs/               # Native libraries (optional)
+│       ├── jniLibs/               # Native libraries (built by build-native.sh)
 │       └── res/                   # Android resources
 ├── scripts/
-│   └── build-native.sh           # Cross-compile script (future)
+│   └── build-native.sh           # Cross-compile Go proxy for Android
 ├── build.gradle.kts              # Root build file
 └── settings.gradle.kts
 ```
@@ -69,44 +76,58 @@ android-app/
 
 The app supports two connection modes, selected automatically at startup:
 
-### 1. Direct HTTPS Mode (default)
+### 1. Native Proxy Mode (preferred)
 
-Connects directly to `https://api.privatemode.ai` over TLS. This is the default
-mode when the native proxy library is not present.
+When `libprivatemode.so` is present (built by `build-native.sh`), the app loads
+it via JNI and routes all traffic through a local proxy. This is identical to how
+the desktop Electron app operates, providing:
 
-- Transport encryption via TLS
-- Backend runs in a Trusted Execution Environment (AMD SEV-SNP + NVIDIA H100)
-- No client-side attestation verification (the Contrast SDK requires Linux)
+- **Client-side TEE attestation** — Verifies the AMD SEV-SNP attestation report
+  from the Privatemode backend using the Contrast SDK. This cryptographically
+  proves the backend is running unmodified code in a Trusted Execution Environment.
+- **HPKE end-to-end encryption** — Field-level encryption on top of TLS using
+  keys derived from the attested mesh CA certificate.
+- **Manifest verification** — The Security screen displays the manifest hash,
+  trusted measurement, product line, and TCB firmware versions.
 
-### 2. Native Proxy Mode (future)
+### 2. Direct HTTPS Mode (fallback)
 
-When `libprivatemode.so` is available, the app loads it via JNI and routes all
-traffic through a local proxy, identical to the desktop Electron app. This adds:
+When the native proxy library is not present, the app connects directly to
+`https://api.privatemode.ai` over TLS. The backend still runs in a TEE, but
+the Android client cannot independently verify this.
 
-- Client-side remote attestation via the Contrast SDK
-- HPKE field-level end-to-end encryption on top of TLS
-- Manifest verification with hash display in the Security screen
+## Building the Native Proxy
 
-The JNI bridge and build scripts are in place for when the Contrast SDK
-adds Android/mobile support.
-
-## Building the Native Proxy (Optional)
-
-> **Note:** The Contrast SDK currently requires Linux-specific interfaces
-> (AMD SEV-SNP) that are not available on Android. The native proxy cross-compilation
-> will succeed once upstream support is added. In the meantime, the app works
-> fully in direct HTTPS mode.
+The build script cross-compiles the Go proxy from `privatemode-proxy/libprivatemode/`
+for each Android architecture. It passes the `-tags contrast_unstable_api` build
+tag required by the Contrast SDK (matching the desktop Nix build).
 
 ```bash
-# Set Android NDK path
 export ANDROID_NDK_HOME=$HOME/Android/Sdk/ndk/<version>
-
-# Run the cross-compilation script
 ./scripts/build-native.sh
 ```
 
-This would produce `libprivatemode.so` files in `app/src/main/jniLibs/` for each
-supported architecture (arm64-v8a, armeabi-v7a, x86_64).
+This produces `libprivatemode.so` files in `app/src/main/jniLibs/` for:
+- `arm64-v8a` (most modern Android phones)
+- `armeabi-v7a` (older 32-bit devices)
+- `x86_64` (emulators)
+
+### Why this works
+
+The Contrast SDK's attestation *verification* is pure cryptography (ECDSA-P384,
+x509 cert chains, SHA-512) with zero platform dependencies. Only attestation
+report *generation* (accessing `/dev/sev-guest`) requires Linux — but the Android
+app only needs to **verify** reports received from the backend, not generate them.
+
+The dependency chain for `ValidateAttestation`:
+```
+Contrast SDK → snp/validator.go → go-sev-guest/verify (platform-independent)
+             → tdx/validator.go → go-tdx-guest/verify (platform-independent)
+```
+
+The Linux-only `go-sev-guest/client` and `go-tdx-guest/client` packages are only
+imported by the `issuer/` sub-packages (for report generation), which are not in
+the `ValidateAttestation` import chain.
 
 ## Architecture
 
@@ -128,17 +149,18 @@ supported architecture (arm64-v8a, armeabi-v7a, x86_64).
 │  │   ┌──────────────────────┐ │  │
 │  │   │ Native Proxy (JNI)   │ │  │
 │  │   │ libprivatemode.so    │ │  │
-│  │   │ - Attestation        │ │  │
+│  │   │ - TEE Attestation    │ │  │
 │  │   │ - HPKE encryption    │ │  │
+│  │   │ - Secret exchange    │ │  │
 │  │   └──────────────────────┘ │  │
-│  │   OR                       │  │
+│  │   OR (fallback)            │  │
 │  │   ┌──────────────────────┐ │  │
 │  │   │ Direct HTTPS         │ │  │
-│  │   │ (TLS to backend)     │ │  │
+│  │   │ (TLS only)           │ │  │
 │  │   └──────────────────────┘ │  │
 │  └────────────┬───────────────┘  │
 └───────────────┼──────────────────┘
-                │ HTTPS
+                │ HTTPS (E2E encrypted with proxy)
                 ▼
 ┌──────────────────────────────────┐
 │  Privatemode Backend (TEE)       │
@@ -149,6 +171,8 @@ supported architecture (arm64-v8a, armeabi-v7a, x86_64).
 
 ## Features
 
+- **TEE attestation** — Client-side AMD SEV-SNP verification via Contrast SDK
+- **E2E encryption** — HPKE field-level encryption via embedded Go proxy
 - **Onboarding** — Welcome screen with API key setup (UUID v4 validation)
 - **Chat** — Multi-turn conversations with streaming SSE responses
 - **Model selection** — gpt-oss-120b, Gemma 3 27B, Qwen3 Coder 30B
@@ -158,7 +182,5 @@ supported architecture (arm64-v8a, armeabi-v7a, x86_64).
 - **Chat management** — Create, rename, delete conversations
 - **Word count tracking** — Context limit with visual indicators
 - **Markdown rendering** — Rich message display (code, tables, lists)
-- **Security dashboard** — Connection security info and attestation details
+- **Security dashboard** — Attestation info, manifest hash, TCB versions
 - **Settings** — API key management, danger zone for data deletion
-- **Direct HTTPS** — TLS-encrypted connection to TEE-protected backend
-- **Native proxy** (future) — Client-side attestation + HPKE encryption via JNI

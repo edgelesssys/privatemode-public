@@ -83,7 +83,10 @@ for goarch in "${!ARCH_MAP[@]}"; do
         continue
     fi
 
-    # Cross-compile the Go library as a shared C library
+    # Cross-compile the Go library as a shared C library.
+    # The contrast_unstable_api tag is required by the Contrast SDK (all its
+    # files are gated behind this build constraint). This matches the desktop
+    # build (see nix/packages/by-name/privatemode-proxy/package.nix).
     (
         cd "$LIB_SOURCE"
         CGO_ENABLED=1 \
@@ -92,6 +95,7 @@ for goarch in "${!ARCH_MAP[@]}"; do
         CC="$CC" \
         CXX="$CXX" \
         go build -buildmode=c-shared \
+            -tags contrast_unstable_api \
             -o "$OUTPUT_DIR/libprivatemode_go.so" \
             .
     )

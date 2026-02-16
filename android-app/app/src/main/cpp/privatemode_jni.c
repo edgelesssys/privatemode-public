@@ -30,12 +30,25 @@ extern char* CurrentManifest(void);
 /*
  * JNI method: nativeStartProxy
  *
+ * Sets up the Android environment (HOME, XDG_CONFIG_HOME) so that Go's
+ * os.UserConfigDir() returns a valid path, then starts the proxy.
+ *
  * Returns a ProxyStartResult object with port and error fields.
- * Matches: ai.privatemode.android.proxy.NativeProxy.nativeStartProxy()
+ * Matches: ai.privatemode.android.proxy.NativeProxy.nativeStartProxy(String)
  */
 JNIEXPORT jobject JNICALL
 Java_ai_privatemode_android_proxy_NativeProxy_nativeStartProxy(
-    JNIEnv *env, jobject thiz) {
+    JNIEnv *env, jobject thiz, jstring dataDir) {
+
+    /* Set up environment for Go's os.UserConfigDir() and os.UserHomeDir() */
+    if (dataDir != NULL) {
+        const char *dataDirStr = (*env)->GetStringUTFChars(env, dataDir, NULL);
+        if (dataDirStr != NULL) {
+            setenv("HOME", dataDirStr, 0);          /* don't overwrite if set */
+            setenv("XDG_CONFIG_HOME", dataDirStr, 0);
+            (*env)->ReleaseStringUTFChars(env, dataDir, dataDirStr);
+        }
+    }
 
     /* Call the Go function */
     struct PrivatemodeStartProxy_return result = PrivatemodeStartProxy();
