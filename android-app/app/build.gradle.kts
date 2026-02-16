@@ -87,14 +87,11 @@ android {
     }
 }
 
-// Wire buildNativeLibs into the merge-jniLibs step for every build variant.
-// AGP names these tasks merge{Variant}JniLibFolders (e.g. mergeDebugJniLibFolders).
-afterEvaluate {
-    android.applicationVariants.configureEach {
-        val variantName = name.replaceFirstChar { it.uppercaseChar() }
-        tasks.named("merge${variantName}JniLibFolders") {
-            dependsOn(buildNativeLibs)
-        }
+// Wire buildNativeLibs so the .so files are ready before Gradle packages them.
+// Match all merge*JniLibFolders tasks (mergeDebugJniLibFolders, mergeReleaseJniLibFolders, …).
+tasks.configureEach {
+    if (name.contains("JniLibFolders")) {
+        dependsOn(buildNativeLibs)
     }
 }
 
