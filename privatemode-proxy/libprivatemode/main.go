@@ -28,24 +28,9 @@ var (
 )
 
 //export PrivatemodeStartProxy
-func PrivatemodeStartProxy(dataDir *C.char) (int, *C.char) {
+func PrivatemodeStartProxy() (int, *C.char) {
 	log := logging.NewCLILogger("info", os.Stderr)
 	log.Info("Starting privatemode-proxy")
-
-	// On Android, HOME and XDG_CONFIG_HOME are not set. The caller passes the
-	// app's files directory so Go's os.UserConfigDir() can resolve a path.
-	// C's setenv() does not work because Go caches the environment at init.
-	if dataDir != nil {
-		dir := C.GoString(dataDir)
-		if dir != "" {
-			if os.Getenv("HOME") == "" {
-				os.Setenv("HOME", dir)
-			}
-			if os.Getenv("XDG_CONFIG_HOME") == "" {
-				os.Setenv("XDG_CONFIG_HOME", dir)
-			}
-		}
-	}
 
 	flags, err := flagsFromEnv(log)
 	if err != nil {

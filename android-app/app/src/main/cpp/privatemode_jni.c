@@ -24,36 +24,26 @@ struct PrivatemodeStartProxy_return {
     char* r1; /* error message (NULL on success) */
 };
 
-extern struct PrivatemodeStartProxy_return PrivatemodeStartProxy(char* dataDir);
+extern struct PrivatemodeStartProxy_return PrivatemodeStartProxy(void);
 extern char* CurrentManifest(void);
 
 /*
  * JNI method: nativeStartProxy
  *
- * Sets up the Android environment (HOME, XDG_CONFIG_HOME) so that Go's
- * os.UserConfigDir() returns a valid path, then starts the proxy.
- *
  * Returns a ProxyStartResult object with port and error fields.
  * Matches: ai.privatemode.android.proxy.NativeProxy.nativeStartProxy(String)
+ *
+ * Note: HOME and XDG_CONFIG_HOME must be set BEFORE loading the Go library
+ * (in Kotlin via android.system.Os.setenv) because Go caches the environment
+ * at runtime init. The dataDir parameter is accepted for API compatibility
+ * but env setup is handled on the Kotlin side.
  */
 JNIEXPORT jobject JNICALL
 Java_ai_privatemode_android_proxy_NativeProxy_nativeStartProxy(
     JNIEnv *env, jobject thiz, jstring dataDir) {
 
-    /* Pass dataDir to Go so it can call os.Setenv() directly.
-     * C's setenv() doesn't work because Go caches the environment at init. */
-    char *dataDirCopy = NULL;
-    if (dataDir != NULL) {
-        const char *dataDirStr = (*env)->GetStringUTFChars(env, dataDir, NULL);
-        if (dataDirStr != NULL) {
-            dataDirCopy = strdup(dataDirStr);
-            (*env)->ReleaseStringUTFChars(env, dataDir, dataDirStr);
-        }
-    }
-
-    /* Call the Go function with the data directory */
-    struct PrivatemodeStartProxy_return result = PrivatemodeStartProxy(dataDirCopy);
-    free(dataDirCopy);
+    /* Call the Go function */
+    struct PrivatemodeStartProxy_return result = PrivatemodeStartProxy();
 
     /* Find the ProxyStartResult class */
     jclass resultClass = (*env)->FindClass(env,

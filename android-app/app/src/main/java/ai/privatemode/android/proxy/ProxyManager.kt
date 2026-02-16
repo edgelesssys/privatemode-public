@@ -68,6 +68,17 @@ class ProxyManager(private val context: Context) {
      * Returns true if successful.
      */
     private fun tryNativeProxy(): Boolean {
+        // Set HOME and XDG_CONFIG_HOME BEFORE loading the Go library.
+        // Go caches the process environment at runtime init (triggered by
+        // System.loadLibrary), so these must be set first.
+        val dataDir = context.filesDir.absolutePath
+        try {
+            android.system.Os.setenv("HOME", dataDir, false)
+            android.system.Os.setenv("XDG_CONFIG_HOME", dataDir, false)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to set env vars: ${e.message}")
+        }
+
         if (!NativeProxy.loadLibrary()) {
             Log.i(TAG, "Native proxy library not available: ${NativeProxy.getLoadError()}")
             return false
