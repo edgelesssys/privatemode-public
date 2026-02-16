@@ -15,6 +15,7 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -36,6 +37,13 @@ class PrivatemodeClient(
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
+        .addInterceptor(Interceptor { chain ->
+            val request = chain.request().newBuilder()
+                .addHeader("Privatemode-Version", "v1.23.0")
+                .addHeader("Privatemode-Client", "App")
+                .build()
+            chain.proceed(request)
+        })
         .build()
 
     suspend fun fetchModels(): List<ApiModel> = withContext(Dispatchers.IO) {
