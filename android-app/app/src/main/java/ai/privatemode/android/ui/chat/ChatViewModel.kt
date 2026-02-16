@@ -2,6 +2,7 @@ package ai.privatemode.android.ui.chat
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -27,6 +28,7 @@ import java.io.FileOutputStream
 class ChatViewModel(
     private val repository: ChatRepository,
 ) : ViewModel() {
+    private val TAG = "ChatViewModel"
 
     val chats: StateFlow<List<Chat>> = repository.chats
     val currentChatId: StateFlow<String?> = repository.currentChatId
@@ -204,6 +206,8 @@ class ChatViewModel(
                     val reasoningEffort = if (_extendedThinking.value) "high" else "medium"
                     val systemPrompt = modelInfo?.systemPrompt
 
+                    Log.i(TAG, "sendMessage: model=$model messages=${messagesToSend.size} reasoning=$reasoningEffort")
+
                     var accumulatedContent = ""
                     var lastUpdate = 0L
                     val updateThrottleMs = 100L
@@ -222,12 +226,14 @@ class ChatViewModel(
                         }
                     }
 
+                    Log.i(TAG, "Stream completed, content length: ${accumulatedContent.length}")
                     // Final update with complete content
                     repository.updateMessage(chatId, assistantMessageId, accumulatedContent)
                 } catch (e: Exception) {
                     if (e is kotlinx.coroutines.CancellationException) {
-                        // User cancelled
+                        Log.i(TAG, "Stream cancelled by user")
                     } else {
+                        Log.e(TAG, "Stream error", e)
                         var errorMessage = "Error: ${e.message ?: "Unknown error"}"
                         if (e is ApiException && e.statusCode == 401) {
                             errorMessage += "\n\nYour API key may be invalid or expired. Please update your API key in settings."

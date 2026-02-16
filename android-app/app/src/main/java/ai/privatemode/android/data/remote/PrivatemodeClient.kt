@@ -1,5 +1,6 @@
 package ai.privatemode.android.data.remote
 
+import android.util.Log
 import ai.privatemode.android.data.model.ApiModel
 import ai.privatemode.android.data.model.Message
 import ai.privatemode.android.data.model.ModelsResponse
@@ -29,6 +30,7 @@ class PrivatemodeClient(
     private val baseUrl: String,
     private val apiKey: String,
 ) {
+    private val TAG = "PrivatemodeClient"
     private val gson = Gson()
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -102,17 +104,24 @@ class PrivatemodeClient(
             .build()
 
         val call = client.newCall(request)
+        Log.i(TAG, "Sending chat completion to $baseUrl/v1/chat/completions model=$model messages=${messages.size}")
 
         call.enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
+                Log.e(TAG, "Chat completion network error", e)
                 close(e)
             }
 
             override fun onResponse(call: Call, response: Response) {
+                Log.i(TAG, "Chat completion response: ${response.code} ${response.message}")
+
                 if (!response.isSuccessful) {
+                    val errorBody = try { response.body?.string() } catch (_: Exception) { null }
+                    Log.e(TAG, "Chat completion failed: ${response.code} body=$errorBody")
                     close(
                         ApiException(
-                            "Chat completion failed: ${response.code} ${response.message}",
+                            "Chat completion failed: ${response.code} ${response.message}" +
+                                if (errorBody != null) "\n$errorBody" else "",
                             response.code
                         )
                     )
@@ -120,6 +129,7 @@ class PrivatemodeClient(
                 }
 
                 val body = response.body ?: run {
+                    Log.e(TAG, "Response body is null")
                     close(ApiException("Response body is null"))
                     return
                 }
@@ -127,10 +137,15 @@ class PrivatemodeClient(
                 try {
                     val reader = BufferedReader(InputStreamReader(body.byteStream()))
                     var line: String?
+                    var chunkCount = 0
 
                     while (reader.readLine().also { line = it } != null) {
                         val trimmed = line?.trim() ?: continue
-                        if (trimmed.isEmpty() || trimmed == "data: [DONE]") continue
+                        if (trimmed.isEmpty()) continue
+                        if (trimmed == "data: [DONE]") {
+                            Log.d(TAG, "SSE stream done after $chunkCount chunks")
+                            continue
+                        }
 
                         if (trimmed.startsWith("data: ")) {
                             val data = trimmed.substring(6)
@@ -142,17 +157,25 @@ class PrivatemodeClient(
                                         .getAsJsonObject("delta")
                                     val content = delta?.get("content")?.asString
                                     if (content != null) {
+                                        chunkCount++
                                         trySend(content)
                                     }
+                                } else if (chunkCount == 0) {
+                                    // Log first non-content chunk to help debug format issues
+                                    Log.w(TAG, "SSE chunk has no choices: $data")
                                 }
-                            } catch (_: Exception) {
-                                // Skip unparseable chunks
+                            } catch (e: Exception) {
+                                Log.e(TAG, "SSE parse error for chunk: $data", e)
                             }
+                        } else {
+                            Log.w(TAG, "SSE unexpected line: $trimmed")
                         }
                     }
 
+                    Log.i(TAG, "SSE stream completed, total chunks: $chunkCount")
                     close()
                 } catch (e: Exception) {
+                    Log.e(TAG, "SSE stream read error", e)
                     close(e)
                 }
             }
