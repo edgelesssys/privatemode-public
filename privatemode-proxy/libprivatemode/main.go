@@ -28,9 +28,18 @@ var (
 )
 
 //export PrivatemodeStartProxy
-func PrivatemodeStartProxy() (int, *C.char) {
+func PrivatemodeStartProxy(dataDir *C.char) (int, *C.char) {
 	log := logging.NewCLILogger("info", os.Stderr)
 	log.Info("Starting privatemode-proxy")
+
+	// Set HOME and XDG_CONFIG_HOME from the caller-provided data directory.
+	// This must happen via os.Setenv (which updates Go's internal env copy)
+	// rather than relying on C's setenv, because Go's c-shared runtime may
+	// not re-read the C environ after init.
+	if dir := C.GoString(dataDir); dir != "" {
+		os.Setenv("HOME", dir)
+		os.Setenv("XDG_CONFIG_HOME", dir)
+	}
 
 	flags, err := flagsFromEnv(log)
 	if err != nil {
