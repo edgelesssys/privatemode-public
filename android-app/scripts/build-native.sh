@@ -87,6 +87,8 @@ for goarch in "${!ARCH_MAP[@]}"; do
     # The contrast_unstable_api tag is required by the Contrast SDK (all its
     # files are gated behind this build constraint). This matches the desktop
     # build (see nix/packages/by-name/privatemode-proxy/package.nix).
+    # The version ldflags must match the Privatemode-Version header sent by the
+    # app — the API enforces a minimum client version during attestation.
     (
         cd "$LIB_SOURCE"
         CGO_ENABLED=1 \
@@ -96,6 +98,7 @@ for goarch in "${!ARCH_MAP[@]}"; do
         CXX="$CXX" \
         go build -buildmode=c-shared \
             -tags contrast_unstable_api \
+            -ldflags "-X 'github.com/edgelesssys/continuum/internal/oss/constants.version=v1.23.0'" \
             -o "$OUTPUT_DIR/libprivatemode_go.so" \
             .
     )

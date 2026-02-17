@@ -27,6 +27,9 @@ object NativeProxy {
     fun loadLibrary(): Boolean {
         if (loaded) return true
         return try {
+            // Load the Go shared library first — Android's linker may not
+            // auto-resolve the NEEDED dependency from the JNI bridge.
+            System.loadLibrary("privatemode_go")
             System.loadLibrary("privatemode")
             loaded = true
             loadError = null
