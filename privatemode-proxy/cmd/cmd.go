@@ -124,7 +124,7 @@ func getPromptCacheSalt() (string, error) {
 	// if cache sharing is enabled, but no salt is set, we now generate a random salt
 	// to keep for the lifetime of the proxy
 	if promptCacheSalt == "" {
-		return openai.RandomPromptCacheSalt()
+		return openai.RandomPromptCacheSalt(), nil
 	}
 
 	return promptCacheSalt, nil

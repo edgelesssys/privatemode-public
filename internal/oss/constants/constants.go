@@ -58,24 +58,28 @@ const (
 	// ManifestDir is the directory where the manifest log is stored.
 	ManifestDir = "manifests"
 
+	// PrivatemodeTargetModel is the header used to pass the name of the model which should process the request.
+	PrivatemodeTargetModel = "Privatemode-Target-Model"
 	// PrivatemodeShardKeyHeader is the key used to decide how to route requests, e.g., to reuse a cache.
 	// Currently used for routing chat completions to reuse the prefix cache.
 	PrivatemodeShardKeyHeader = "Privatemode-Shard-Key"
-	// PrivatemodeVersionHeader is an HTTP header sent by the Privatemode components on every request.
+	// PrivatemodeVersionHeader is a header sent by Privatemode clients with their version, indicating the expected API version.
 	// It is used to check for version compatibility between client and server.
 	PrivatemodeVersionHeader = "Privatemode-Version"
 	// PrivatemodeOSHeader is the OS the Privatemode proxy is running on.
 	PrivatemodeOSHeader = "Privatemode-OS"
 	// PrivatemodeArchitectureHeader is the Platform the Privatemode proxy is running on.
 	PrivatemodeArchitectureHeader = "Privatemode-Architecture"
-	// PrivatemodeClientHeader is the App the Privatemode proxy is running, either "Proxy" or "App".
+	// PrivatemodeClientHeader is the App the Privatemode proxy is running.
 	PrivatemodeClientHeader = "Privatemode-Client"
-	// PrivatemodeClientApp is the PrivatemodeClientHeader value for the Privatemode client app.
+	// PrivatemodeClientApp is the [PrivatemodeClientHeader] value for the Privatemode client app.
 	PrivatemodeClientApp = "App"
-	// PrivatemodeClientProxy is the PrivatemodeClientHeader value for the Privatemode client proxy.
+	// PrivatemodeClientProxy is the [PrivatemodeClientHeader] value for the Privatemode client proxy.
 	PrivatemodeClientProxy = "Proxy"
-	// PrivatemodeClientAPIGateway is the PrivatemodeClientHeader value for the Api Gateway.
+	// PrivatemodeClientAPIGateway is the [PrivatemodeClientHeader] value for the Api Gateway.
 	PrivatemodeClientAPIGateway = "ApiGateway"
+	// PrivatemodeClientSDK is the [PrivatemodeClientHeader] value for the Privatemode SDK client.
+	PrivatemodeClientSDK = "SDK"
 	// RequestIDHeader is the header used to identify requests. It will be set by envoy if not set by the client.
 	// X-Request-ID is mostly standard and also supported by envoy.
 	// cf. https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers#config-http-conn-man-headers-x-request-id
@@ -124,7 +128,16 @@ const (
 	// intentionally includes overhead from hex/base64 encoding, multipart form-data
 	// boundaries, and HTTP framing so that a 50 MiB file plus transport overhead
 	// is still accepted while preventing excessively large requests.
-	MaxFileSizeBytes = 128 * 1024 * 1024
+	MaxFileSizeBytes = 128 * 1024 * 1024 // 128MiB
+	// MaxBodySizeExceededMsg should be presented to the user when [MaxFileSizeBytes] is exceeded.
+	MaxBodySizeExceededMsg = "maximum request size exceeded (max 50MB)"
+
+	// MaxUnstructuredBodySize is the maximum request body size that users may submit to the unstructured API.
+	// The user-facing limit is 25 MiB of file content; this higher value (50 MiB)
+	// intentionally includes overhead, see also [MaxFileSizeBytes].
+	MaxUnstructuredBodySize = 50 * 1024 * 1024 // 50MiB
+	// MaxUnstructuredBodySizeExceededMsg should be presented to the user when [MaxUnstructuredBodySize] is exceeded.
+	MaxUnstructuredBodySizeExceededMsg = "file too large (max 25MB)"
 
 	// MetricsEndpoint is the endpoint where Prometheus metrics are exposed by default.
 	MetricsEndpoint = "/metrics"

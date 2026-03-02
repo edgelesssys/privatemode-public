@@ -209,7 +209,7 @@ func (r *Report) Verify(settings VerificationSettings) error {
 		return fmt.Errorf("nonce mismatch: expected %x, got %x", settings.Nonce, r.SPDMRequest.Nonce)
 	}
 
-	if !slices.Contains(settings.AllowedDriverVersions, strings.ToUpper(r.DriverVersion())) {
+	if !slices.ContainsFunc(settings.AllowedDriverVersions, func(v string) bool { return strings.EqualFold(v, r.DriverVersion()) }) {
 		return fmt.Errorf("driver version mismatch: expected one of %s, got %q", settings.AllowedDriverVersions, r.DriverVersion())
 	}
 
@@ -217,7 +217,7 @@ func (r *Report) Verify(settings VerificationSettings) error {
 	if err != nil {
 		return fmt.Errorf("getting VBIOS version: %w", err)
 	}
-	if !slices.Contains(settings.AllowedVBIOSVersions, strings.ToUpper(vbiosVersion)) {
+	if !slices.ContainsFunc(settings.AllowedVBIOSVersions, func(v string) bool { return strings.EqualFold(v, vbiosVersion) }) {
 		return fmt.Errorf("VBIOS version mismatch: expected one of %s, got %q", settings.AllowedVBIOSVersions, vbiosVersion)
 	}
 

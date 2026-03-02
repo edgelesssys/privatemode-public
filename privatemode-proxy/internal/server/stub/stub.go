@@ -17,16 +17,29 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 )
 
-// OpenAIEchoHandler returns an http.Handler that stubs an OpenAI API completion endpoint.
-func OpenAIEchoHandler(secrets map[string][]byte, log *slog.Logger) http.Handler {
+// EchoHandler stubs our hosted backend (API Gateway + Inference Proxy) and echoes requests in the response.
+func EchoHandler(secrets map[string][]byte, log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/chat/completions", openAIHandler(secrets, log))
+	mux.HandleFunc("POST /v1/chat/completions", openAIChatCompletionsHandler(secrets, log))
+	mux.HandleFunc("POST /v1/completions", openAIChatCompletionsHandler(secrets, log))
+	mux.HandleFunc("POST /v1/embeddings", func(w http.ResponseWriter, _ *http.Request) {
+		// Empty response: strictly speaking invalid, but enough for minimal tests
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("POST /v1/audio/transcriptions", func(w http.ResponseWriter, _ *http.Request) {
+		// Empty response: strictly speaking invalid, but enough for minimal tests
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, _ *http.Request) {
+		// Empty response: strictly speaking invalid, but enough for minimal tests
+		w.WriteHeader(http.StatusOK)
+	})
 	mux.HandleFunc("GET /v1/models", openAIModelsHandler())
 	mux.HandleFunc("OPTIONS /", func(_ http.ResponseWriter, _ *http.Request) {})
 	return mux
 }
 
-func openAIHandler(secrets map[string][]byte, log *slog.Logger) func(w http.ResponseWriter, r *http.Request) {
+func openAIChatCompletionsHandler(secrets map[string][]byte, log *slog.Logger) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		requestMutator, responseMutator := getConnectionMutators(secrets, log)
 		if err := requestMutator(r); err != nil {
@@ -171,12 +184,12 @@ func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (request
 	encrypt, decrypt := GetEncryptionFunctions(secrets)
 
 	requestMutator = forwarder.RequestMutatorChain(
-		forwarder.WithFullJSONRequestMutation(decrypt, openai.PlainCompletionsRequestFields, log),
+		forwarder.WithJSONRequestMutation(decrypt, openai.PlainCompletionsRequestFields, log),
 		openai.CacheSaltValidator(log),
 		openai.SecureImageURLValidator(log),
 	)
 
-	responseMutator = forwarder.WithFullJSONResponseMutation(encrypt, openai.PlainCompletionsResponseFields, false)
+	responseMutator = forwarder.WithJSONResponseMutation(encrypt, openai.PlainCompletionsResponseFields, false)
 	return requestMutator, responseMutator
 }
 

@@ -16,8 +16,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
+	"mime/multipart"
 	"net/url"
 	"strconv"
 	"strings"
@@ -88,13 +90,15 @@ var PlainTranscriptionResponseFields = forwarder.FieldSelector{
 	{"usage"},
 }
 
-// RandomPromptCacheSalt generates a random salt for prompt caching.
-func RandomPromptCacheSalt() (string, error) {
+// RandomPromptCacheSalt generates a random salt for prompt caching and
+// returns it as a base64-encoded string.
+func RandomPromptCacheSalt() string {
 	salt := make([]byte, 32) // 256-bit salt
 	if _, err := rand.Read(salt); err != nil {
-		return "", fmt.Errorf("generating random salt: %w", err)
+		// As per [rand.Read], it never returns an error.
+		panic(fmt.Sprintf("generating random cache salt: %v", err))
 	}
-	return base64.StdEncoding.EncodeToString(salt), nil
+	return base64.StdEncoding.EncodeToString(salt)
 }
 
 // EncryptedChatRequest is the request structure for an OpenAI chat completion call,
@@ -300,21 +304,25 @@ func (a *TranscriptionUsageResponse) UnmarshalJSON(data []byte) error {
 }
 
 // CacheSaltGenerator returns a cache salt for the vLLM prompt cache.
-type CacheSaltGenerator func() (string, error)
+type CacheSaltGenerator func() string
 
 // DefaultRequestMutators is the default set of [forwarder.RequestMutator]s used by the vLLM adapter.
 type DefaultRequestMutators struct {
-	CacheSaltInjector       forwarder.RequestMutator // CacheSaltInjector ensures a vLLM prompt cache salt is set.
-	CacheSaltValidator      forwarder.RequestMutator // CacheSaltValidator validates the vLLM prompt cache set.
-	SecureImageURLValidator forwarder.RequestMutator // SecureImageURLValidator ensures no non-HTTPS image URLs are used in the request.
+	AudioStreamUsageReportingInjector forwarder.RequestMutator // AudioStreamUsageReportingInjector ensures vLLM includes usage stats in streaming audio responses.
+	CacheSaltInjector                 forwarder.RequestMutator // CacheSaltInjector ensures a vLLM prompt cache salt is set.
+	CacheSaltValidator                forwarder.RequestMutator // CacheSaltValidator validates the vLLM prompt cache set.
+	SecureImageURLValidator           forwarder.RequestMutator // SecureImageURLValidator ensures no non-HTTPS image URLs are used in the request.
+	StreamUsageReportingInjector      forwarder.RequestMutator // StreamUsageReportingInjector ensures vLLM includes usage stats in streaming completion responses.
 }
 
 // GetDefaultRequestMutators returns the default set of [forwarder.RequestMutator]s used by the vLLM adapter.
 func GetDefaultRequestMutators(cacheSaltGenerator CacheSaltGenerator, log *slog.Logger) DefaultRequestMutators {
 	return DefaultRequestMutators{
-		CacheSaltInjector:       CacheSaltInjector(cacheSaltGenerator, log),
-		CacheSaltValidator:      CacheSaltValidator(log),
-		SecureImageURLValidator: SecureImageURLValidator(log),
+		AudioStreamUsageReportingInjector: AudioStreamUsageReportingInjector(log),
+		CacheSaltInjector:                 CacheSaltInjector(cacheSaltGenerator, log),
+		CacheSaltValidator:                CacheSaltValidator(log),
+		SecureImageURLValidator:           SecureImageURLValidator(log),
+		StreamUsageReportingInjector:      StreamUsageReportingInjector(log),
 	}
 }
 
@@ -333,17 +341,13 @@ func CacheSaltInjector(cacheSaltGenerator CacheSaltGenerator, log *slog.Logger) 
 			return httpBody, nil
 		}
 
-		salt, err := cacheSaltGenerator()
-		if err != nil {
-			return "", fmt.Errorf("generating cache salt: %w", err)
-		}
-		mutatedBody, err := sjson.Set(httpBody, "cache_salt", salt)
+		mutatedBody, err := sjson.Set(httpBody, "cache_salt", cacheSaltGenerator())
 		if err != nil {
 			return "", fmt.Errorf("injecting cache salt: %w", err)
 		}
 		return mutatedBody, nil
 	}
-	return forwarder.WithFullRequestMutation(injectSalt, log)
+	return forwarder.WithRawRequestMutation(injectSalt, log)
 }
 
 // CacheSaltValidator creates a [forwarder.RequestMutator] that ensures a non-empty cache salt.
@@ -363,7 +367,7 @@ func CacheSaltValidator(log *slog.Logger) forwarder.RequestMutator {
 		return httpBody, nil
 	}
 
-	return forwarder.WithFullRequestMutation(validateSalt, log)
+	return forwarder.WithRawRequestMutation(validateSalt, log)
 }
 
 // SecureImageURLValidator creates a [forwarder.RequestMutator] that
@@ -412,5 +416,97 @@ func SecureImageURLValidator(log *slog.Logger) forwarder.RequestMutator {
 		return httpBody, nil
 	}
 
-	return forwarder.WithFullRequestMutation(validateImageURLs, log)
+	return forwarder.WithRawRequestMutation(validateImageURLs, log)
+}
+
+// StreamUsageReportingInjector creates a [forwarder.RequestMutator] that ensures vLLM includes usage
+// statistics in streaming completion responses. It sets stream_options.include_usage and
+// stream_options.continuous_usage_stats to true.
+func StreamUsageReportingInjector(log *slog.Logger) forwarder.RequestMutator {
+	injectStreamOptions := func(httpBody string) (string, error) {
+		log.Debug("Enabling token tracking for request")
+
+		if !gjson.Valid(httpBody) {
+			return "", fmt.Errorf("request body is not valid json")
+		}
+
+		// stream_options is only relevant for streaming completions.
+		if !gjson.Get(httpBody, "stream").Bool() {
+			return httpBody, nil
+		}
+
+		// Middleware must not unmarshal the request body to a struct and then marshal it back to JSON,
+		// because data loss may occur if the request body contains unknown fields.
+		// Instead, use sjon to safely modify the request body.
+
+		// Always include usage statistics in streaming completions.
+		body, err := sjson.Set(httpBody, "stream_options.include_usage", true)
+		if err != nil {
+			return "", fmt.Errorf("setting stream_options.include_usage: %w", err)
+		}
+		// Always include continuous usage stats to allow early stopping of requests.
+		body, err = sjson.Set(body, "stream_options.continuous_usage_stats", true)
+		if err != nil {
+			return "", fmt.Errorf("setting stream_options.continuous_usage_stats: %w", err)
+		}
+		return body, nil
+	}
+	return forwarder.WithRawRequestMutation(injectStreamOptions, log)
+}
+
+// AudioStreamUsageReportingInjector creates a [forwarder.RequestMutator] that ensures vLLM includes
+// usage statistics in streaming audio transcription responses. It sets stream_include_usage and
+// stream_continuous_usage_stats to true in the request form.
+func AudioStreamUsageReportingInjector(log *slog.Logger) forwarder.RequestMutator {
+	return forwarder.WithRawFormRequestMutation(func(form *multipart.Form, writer *multipart.Writer) (bool, error) {
+		log.Debug("Enabling audio token tracking for request")
+
+		if vs := form.Value["stream"]; len(vs) == 0 || !strings.EqualFold(vs[0], "true") {
+			log.Debug("Non-streaming transcription request, no option modification needed")
+			return false, nil
+		}
+
+		if err := writer.WriteField("stream_include_usage", "true"); err != nil {
+			return false, fmt.Errorf("writing stream_include_usage field: %w", err)
+		}
+		if err := writer.WriteField("stream_continuous_usage_stats", "true"); err != nil {
+			return false, fmt.Errorf("writing stream_continuous_usage_stats field: %w", err)
+		}
+
+		for key, values := range form.Value {
+			if len(values) == 0 {
+				continue
+			}
+			if key == "stream_include_usage" || key == "stream_continuous_usage_stats" {
+				// We already set these fields to enabled, regardless of what the user provided
+				continue
+			}
+			if err := writer.WriteField(key, values[0]); err != nil {
+				return false, fmt.Errorf("writing form field %q: %w", key, err)
+			}
+		}
+		for fileKey, fileHeaders := range form.File {
+			if len(fileHeaders) == 0 {
+				continue
+			}
+			formFile, err := fileHeaders[0].Open()
+			if err != nil {
+				return false, fmt.Errorf("opening form file %q: %w", fileKey, err)
+			}
+			fileWriter, err := writer.CreateFormFile(fileKey, fileKey)
+			if err != nil {
+				_ = formFile.Close()
+				return false, fmt.Errorf("creating form file writer %q: %w", fileKey, err)
+			}
+			if _, err := io.Copy(fileWriter, formFile); err != nil {
+				_ = formFile.Close()
+				return false, fmt.Errorf("copying form file %q: %w", fileKey, err)
+			}
+			if err := formFile.Close(); err != nil {
+				return false, fmt.Errorf("closing form file %q: %w", fileKey, err)
+			}
+		}
+
+		return true, nil
+	}, log)
 }

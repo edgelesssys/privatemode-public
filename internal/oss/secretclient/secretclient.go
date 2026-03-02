@@ -7,13 +7,13 @@ package secretclient
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/hpke"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 
-	"github.com/edgelesssys/continuum/internal/oss/hpke"
 	"github.com/edgelesssys/continuum/internal/oss/httpapi"
 	"github.com/edgelesssys/continuum/internal/oss/secretexchange"
 )

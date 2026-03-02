@@ -2,11 +2,11 @@
 # Instead, one central vendor hash is set here, and all packages inherit it.
 
 {
-  buildGo125Module,
+  buildGo126Module,
   continuum-canonical-go-package,
 }:
 args:
-(buildGo125Module (
+(buildGo126Module (
   {
     # We run tests in CI, so don't run them at build time.
     doCheck = false;

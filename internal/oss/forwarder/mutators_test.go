@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestWithFullRequestMutation(t *testing.T) {
+func TestWithRawRequestMutation(t *testing.T) {
 	testCases := map[string]struct {
 		mutator          stubMutator
 		requestBody      string
@@ -66,7 +66,7 @@ func TestWithFullRequestMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutate := WithFullRequestMutation(tc.mutator.mutate, slog.Default())
+			mutate := WithRawRequestMutation(tc.mutator.mutate, slog.Default())
 
 			request := &http.Request{
 				Header: make(http.Header),
@@ -88,7 +88,7 @@ func TestWithFullRequestMutation(t *testing.T) {
 	}
 }
 
-func TestWithFullJSONRequestMutation(t *testing.T) {
+func TestWithJSONRequestMutation(t *testing.T) {
 	testCases := map[string]struct {
 		mutator          stubMutator
 		skipFields       FieldSelector
@@ -231,7 +231,7 @@ func TestWithFullJSONRequestMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutate := WithFullJSONRequestMutation(tc.mutator.mutate, tc.skipFields, slog.Default())
+			mutate := WithJSONRequestMutation(tc.mutator.mutate, tc.skipFields, slog.Default())
 			request := &http.Request{
 				Body: io.NopCloser(bytes.NewBufferString(tc.requestBody)),
 			}
@@ -275,7 +275,7 @@ func TestNewlinePreservationForStreamEventData(t *testing.T) {
 	assert.Equal(expectedResponse, res.String())
 }
 
-func TestWithSelectResponseMutation(t *testing.T) {
+func TestWithSelectJSONResponseMutation(t *testing.T) {
 	testCases := map[string]struct {
 		mutator          stubMutator
 		responseBody     string
@@ -418,7 +418,7 @@ func TestWithSelectResponseMutation(t *testing.T) {
 	}
 }
 
-func TestWithFullJSONResponseMutation(t *testing.T) {
+func TestWithJSONResponseMutation(t *testing.T) {
 	testCases := map[string]struct {
 		mutator          stubMutator
 		responseBody     string
@@ -506,7 +506,7 @@ func TestWithFullJSONResponseMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutator := WithFullJSONResponseMutation(tc.mutator.mutate, tc.skipFields, false)
+			mutator := WithJSONResponseMutation(tc.mutator.mutate, tc.skipFields, false)
 
 			body, err := mutator.Mutate([]byte(tc.responseBody))
 			if tc.wantErr {
@@ -537,7 +537,7 @@ func TestWithFullJSONResponseMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutator := WithFullJSONResponseMutation(tc.mutator.mutate, nil, false)
+			mutator := WithJSONResponseMutation(tc.mutator.mutate, nil, false)
 
 			msgChan := make(chan string)
 			reader := &fakeReader{
@@ -745,7 +745,7 @@ func TestWithFormRequestMutation(t *testing.T) {
 	}
 }
 
-func TestWithFullResponseMutation(t *testing.T) {
+func TestWithRawResponseMutation(t *testing.T) {
 	testCases := map[string]struct {
 		mutator          stubMutator
 		responseBody     string
@@ -786,7 +786,7 @@ func TestWithFullResponseMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutator := WithFullResponseMutation(tc.mutator.mutate)
+			mutator := WithRawResponseMutation(tc.mutator.mutate)
 
 			body, err := mutator.Mutate([]byte(tc.responseBody))
 			if tc.wantErr {
@@ -832,7 +832,7 @@ func TestWithFullResponseMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutator := WithFullResponseMutation(tc.mutator.mutate)
+			mutator := WithRawResponseMutation(tc.mutator.mutate)
 
 			msgChan := make(chan string)
 			reader := &fakeReader{

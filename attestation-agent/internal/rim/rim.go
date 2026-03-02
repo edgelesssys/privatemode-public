@@ -14,17 +14,8 @@ import (
 	"strings"
 
 	"github.com/beevik/etree"
+	"github.com/edgelesssys/continuum/attestation-agent/internal/gpu"
 	dsig "github.com/russellhaering/goxmldsig"
-)
-
-// GPUArch is the architecture to fetch RIM data for.
-type GPUArch int
-
-const (
-	// GPUArchHopper is the Hopper architecture.
-	GPUArchHopper GPUArch = iota
-	// GPUArchBlackwell is the Blackwell architecture.
-	GPUArchBlackwell
 )
 
 // Client is a client for the Reference Integrity Measurement (RIM) service of NVIDIA.
@@ -44,12 +35,12 @@ func New(baseURL string, log *slog.Logger) *Client {
 }
 
 // FetchDriverRIM fetches reference values for the given GPU architecture and version.
-func (c *Client) FetchDriverRIM(ctx context.Context, gpuArch GPUArch, version string) (*SoftwareIdentity, error) {
+func (c *Client) FetchDriverRIM(ctx context.Context, gpuArch gpu.Architecture, version string) (*SoftwareIdentity, error) {
 	var driverID string
 	switch gpuArch {
-	case GPUArchHopper:
+	case gpu.ArchHopper:
 		driverID = "NV_GPU_DRIVER_GH100_" + version
-	case GPUArchBlackwell:
+	case gpu.ArchBlackwell:
 		driverID = "NV_GPU_CC_DRIVER_GB100_" + version
 	default:
 		return nil, fmt.Errorf("unsupported GPU architecture: %d", gpuArch)

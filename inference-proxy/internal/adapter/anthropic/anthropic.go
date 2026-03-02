@@ -49,8 +49,8 @@ func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request)
 	session := a.Cipher.NewResponseCipher()
 	a.Forwarder.Forward(
 		w, r,
-		forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), anthropic.PlainMessagesRequestFields, a.Log),
-		forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), anthropic.PlainMessagesResponseFields, false),
+		forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), anthropic.PlainMessagesRequestFields, a.Log),
+		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), anthropic.PlainMessagesResponseFields, false),
 		forwarder.NoHeaderMutation,
 	)
 }

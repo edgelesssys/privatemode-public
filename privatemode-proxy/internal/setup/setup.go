@@ -9,13 +9,19 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 
+	"github.com/edgelesssys/continuum/internal/oss/attest"
+	"github.com/edgelesssys/continuum/internal/oss/secretclient"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager/updater"
-	"github.com/edgelesssys/continuum/privatemode-proxy/internal/attest"
-	"github.com/edgelesssys/continuum/privatemode-proxy/internal/secretclient"
 	contrastsdk "github.com/edgelesssys/contrast/sdk"
 	"github.com/spf13/afero"
+)
+
+const (
+	// contrastSubDir is the subdirectory inside the workspace used to cache data related to the Contrast deployment.
+	contrastSubDir = "contrast"
 )
 
 // SecretManager sets up the secret manager for the Contrast deployment.
@@ -30,9 +36,13 @@ func SecretManager(ctx context.Context, flags Flags, log *slog.Logger) (*secretm
 		}
 	}
 
+	contrastClient := contrastsdk.New().
+		WithSlog(log.With("component", "contrast-client")).
+		WithFSStore(afero.NewBasePathFs(afero.NewOsFs(), filepath.Join(flags.Workspace, contrastSubDir)))
+
 	fs := afero.Afero{Fs: afero.NewOsFs()}
 	ssClient := secretclient.New(httpClient, flags.APIEndpoint)
-	caUpdater := attest.NewGetter(httpClient, flags.APIEndpoint, contrastsdk.NewWithSlog(log.With("component", "contrast-client")), flags.Workspace)
+	caUpdater := attest.NewGetter(httpClient, flags.APIEndpoint, contrastClient)
 
 	var caGetter updater.CAGetter
 	var currentManifest func() string

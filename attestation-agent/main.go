@@ -134,7 +134,13 @@ func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOCSP.Stat
 			return nil, fmt.Errorf("verifying GPU report: %w", err)
 		}
 
-		driverRIM, err := rimClient.FetchDriverRIM(ctx, rim.GPUArchHopper, parsedReport.DriverVersion())
+		arch, err := gpuIssuer.Arch()
+		if err != nil {
+			return nil, fmt.Errorf("getting GPU architecture: %w", err)
+		}
+		log.Info("Fetching RIM data for GPU", "architecture", arch)
+
+		driverRIM, err := rimClient.FetchDriverRIM(ctx, arch, parsedReport.DriverVersion())
 		if err != nil {
 			return nil, fmt.Errorf("fetching driver RIM: %w", err)
 		}

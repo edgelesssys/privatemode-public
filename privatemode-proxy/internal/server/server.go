@@ -5,13 +5,10 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -24,12 +21,13 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/middleware"
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/edgelesssys/continuum/internal/oss/persist"
 	"github.com/edgelesssys/continuum/internal/oss/process"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 	"github.com/google/uuid"
-	"github.com/tidwall/gjson"
 )
 
 // Server implements the HTTP server for the API gateway.
@@ -42,7 +40,7 @@ type Server struct {
 	isApp                        bool
 	nvidiaOCSPAllowUnknown       bool
 	nvidiaOCSPRevokedGracePeriod time.Duration
-	DumpRequestsDir              string
+	dumpRequestsDir              string
 }
 
 // Opts are the options for creating a new [Server].
@@ -79,7 +77,7 @@ func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Se
 		isApp:                        opts.IsApp,
 		nvidiaOCSPAllowUnknown:       opts.NvidiaOCSPAllowUnknown,
 		nvidiaOCSPRevokedGracePeriod: opts.NvidiaOCSPRevokedGracePeriod,
-		DumpRequestsDir:              opts.DumpRequestsDir,
+		dumpRequestsDir:              opts.DumpRequestsDir,
 	}
 }
 
@@ -106,8 +104,6 @@ func (s *Server) GetHandler() http.Handler {
 	mux.HandleFunc(openai.TranscriptionsEndpoint, s.transcriptionsHandler)
 	mux.HandleFunc(anthropic.MessagesEndpoint, s.anthropicMessagesHandler)
 
-	mux.HandleFunc("/", http.NotFound) // Reject requests to unknown endpoints
-
 	// If the api key wasn't provided via command line flag, offer the secret manager the API key from the request.
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if apiKey, err := auth.GetAuth(auth.Bearer, r.Header); err == nil {
@@ -122,151 +118,23 @@ func (s *Server) GetHandler() http.Handler {
 	// Only wrap the mux with the dumping middleware when a dump
 	// directory is configured.  If s.DumpRequestsDir == "" we return the
 	// plain mux.
-	if strings.TrimSpace(s.DumpRequestsDir) == "" {
+	if strings.TrimSpace(s.dumpRequestsDir) == "" {
 		return handler
 	}
 
-	return middleware.DumpRequestAndResponse(handler, s.log, s.DumpRequestsDir)
-}
-
-func (s *Server) useRandomCacheSalt() bool {
-	return s.defaultCacheSalt == ""
-}
-
-func (s *Server) cacheSaltInjector() forwarder.RequestMutator {
-	var cacheSaltGenerator func() (string, error)
-	if s.useRandomCacheSalt() {
-		cacheSaltGenerator = openai.RandomPromptCacheSalt
-	} else {
-		cacheSaltGenerator = func() (string, error) {
-			return s.defaultCacheSalt, nil
-		}
-	}
-
-	return openai.CacheSaltInjector(cacheSaltGenerator, s.log)
-}
-
-func (s *Server) generateShardKey(cacheSalt string, content string) (string, error) {
-	cacheSaltHash := sha256.Sum256([]byte(cacheSalt))
-	shardKeyStr := hex.EncodeToString(cacheSaltHash[:])[:constants.CacheSaltHashLength]
-
-	// Estimate number of tokens n as content length // 4
-	n := len(content) / 4
-
-	// Currently, only 1Mio tokens to limit the shard key size. Limiting factors are proxies,
-	// where nginx supports only 4kb. But currently, this only goes to the API Gateway such
-	// that we could also work with headers larger than 4kb. Envoy also supports more. But
-	// could still be a problem for client side proxies.
-	//
-	// For extending this beyond 1Mio token context size we should have a clear plan on how to
-	// support larger keys and/or compress a bit more for large context (e.g., > 100k tokens).
-	if n > 1_000_000 {
-		s.log.Error("Context too large for shard key generation", slog.Int("tokens", n))
-		return "", fmt.Errorf("context too large: ~%d tokens", n)
-	}
-
-	blockSize := constants.ShardKeyFirstBoundaryBlocksPerChar * constants.CacheBlockSizeTokens
-
-	// No caching if n < blockSize
-	// -> return the base shard key immediately
-	if n < blockSize {
-		return shardKeyStr, nil
-	}
-
-	// Iterate over content, starting with step size 16, doubling with each step
-	// using 4 chars to represent 1 token.
-	contentBytes := []byte(content)
-
-	// Use the cache salt as initial hash.
-	var chunkHash [32]byte
-	copy(chunkHash[:], cacheSaltHash[:])
-	shardKeyStr += "-"
-	for i := 0; i+blockSize <= len(contentBytes)/4; {
-		end := i + blockSize
-		chunk := contentBytes[i*4 : end*4]
-
-		// We prefix the chunk with the cache salt to avoid exposing any information
-		// and to make the sequence unique even if there are minor changes not captured by the
-		// 6 bit value extracted below. This also avoids side channel attacks, as the cache
-		// salt is never exposed.
-		chunkHash = sha256.Sum256(append(chunkHash[:], chunk...))
-		last6Bits := chunkHash[len(chunkHash)-1] & 0x3F
-		shardKeyStr += string("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[last6Bits])
-
-		// increase step size
-		// - step = 16 from 16...100k -> 62 chars
-		// - step = 128 from 1k...100k -> 774 chars
-		// - step = 512 from 100k...1M -> 1758 chars
-		i += blockSize
-		switch i {
-		case constants.ShardKeyFirstBoundaryBlocks * constants.CacheBlockSizeTokens:
-			blockSize = constants.ShardKeySecondBoundaryBlocksPerChar * constants.CacheBlockSizeTokens
-		case constants.ShardKeySecondBoundaryBlocks * constants.CacheBlockSizeTokens:
-			blockSize = constants.ShardKeyThirdBoundaryBlocksPerChar * constants.CacheBlockSizeTokens
-		}
-	}
-
-	return shardKeyStr, nil
-}
-
-func (s *Server) shardKeyInjector() forwarder.RequestMutator {
-	// Reads the cache salt and generates a shard key using sha256.
-	// Returns an error if there is no cache salt in the request body.
-	return func(r *http.Request) error {
-		bodyBytes, err := io.ReadAll(r.Body)
-		_ = r.Body.Close()
-		if err != nil {
-			return fmt.Errorf("reading request body: %w", err)
-		}
-
-		httpBody := string(bodyBytes)
-		if len(httpBody) == 0 {
-			return nil
-		}
-		cacheSalt := gjson.Get(httpBody, "cache_salt").String()
-
-		// If there is no explicit cache salt, we use the default cache salt.
-		if cacheSalt == "" && !s.useRandomCacheSalt() {
-			cacheSalt = s.defaultCacheSalt
-		}
-
-		// If there is no cache salt, we use default sharding without a shard key.
-		if cacheSalt != "" {
-			// /chat/completions
-			tools := gjson.Get(httpBody, "tools").String()
-			messages := gjson.Get(httpBody, "messages").String()
-
-			// /completions
-			prompt := gjson.Get(httpBody, "prompt").String()
-			suffix := gjson.Get(httpBody, "suffix").String()
-
-			// NOTE: The order is important and must match the chat template of the model.
-			// For many models, tools are defined first, whithin or after the system message.
-			// This is the case for Llama and DeepSeek. Gemma does not have tools right now.
-			//
-			// Mistral puts tools right before the last user message. Once we use a model
-			// that does not store tools in the beginning, we may want to create a
-			// model-specific shard key to avoid cache misses due to changing tools.
-			// Potentially, we may also adjust the chat template for such models but this
-			// could have a performance impact.
-			content := tools + messages + prompt + suffix
-			shardKey, err := s.generateShardKey(cacheSalt, content)
-			if err != nil {
-				return fmt.Errorf("generating shard key: %w", err)
-			}
-
-			r.Header.Set(constants.PrivatemodeShardKeyHeader, shardKey)
-		}
-		r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
-		return nil
-	}
+	return middleware.DumpRequestAndResponse(handler, s.log, s.dumpRequestsDir)
 }
 
 func (s *Server) inferenceHandler(
-	requestMutator func(*RenewableRequestCipher) forwarder.RequestMutator, responseMutator func(*RenewableRequestCipher) forwarder.ResponseMutator,
+	requestMutator func(*RenewableRequestCipher) forwarder.RequestMutator,
+	responseMutator func(*RenewableRequestCipher) forwarder.ResponseMutator,
 ) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			s.noEncryptionHandler(w, r)
+			return
+		}
+
 		s.setStaticRequestHeaders(r)
 
 		rc, secret, err := NewRenewableRequestCipher(s.sm, r)
@@ -303,38 +171,85 @@ func (s *Server) inferenceHandler(
 }
 
 func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
+	modelExtractor := func(req *http.Request) (string, error) {
+		msg, err := unmarshalJSONBody[openai.ChatRequestPlainData](req)
+		if err != nil {
+			return "", fmt.Errorf("parsing chat request: %w", err)
+		}
+		return msg.Model, nil
+	}
+
 	s.inferenceHandler(
 		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
 			return forwarder.RequestMutatorChain(
-				s.shardKeyInjector(), // we don't want a shard key for random cache salts, so we inject before
-				s.cacheSaltInjector(),
-				forwarder.WithFullJSONRequestMutation(cw.Encrypt, openai.PlainCompletionsRequestFields, s.log),
+				mutators.ShardKeyInjector(s.defaultCacheSalt, s.log), // we don't want a shard key for random cache salts, so we inject before
+				openai.CacheSaltInjector(func() string {
+					if s.defaultCacheSalt == "" {
+						return openai.RandomPromptCacheSalt()
+					}
+					return s.defaultCacheSalt
+				}, s.log),
+				mutators.ModelHeaderInjector(modelExtractor),
+				forwarder.WithJSONRequestMutation(cw.Encrypt, openai.PlainCompletionsRequestFields, s.log),
 			)
 		},
 		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithFullJSONResponseMutation(cw.DecryptResponse, openai.PlainCompletionsResponseFields, false)
+			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, openai.PlainCompletionsResponseFields, false)
 		},
 	)(w, r)
 }
 
 func (s *Server) embeddingsHandler(w http.ResponseWriter, r *http.Request) {
+	modelExtractor := func(req *http.Request) (string, error) {
+		msg, err := unmarshalJSONBody[openai.EmbeddingsRequestPlainData](req)
+		if err != nil {
+			return "", fmt.Errorf("parsing embeddings request: %w", err)
+		}
+		return msg.Model, nil
+	}
+
 	s.inferenceHandler(
 		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-			return forwarder.WithFullJSONRequestMutation(cw.Encrypt, openai.PlainEmbeddingsRequestFields, s.log)
+			return forwarder.RequestMutatorChain(
+				mutators.ModelHeaderInjector(modelExtractor),
+				forwarder.WithJSONRequestMutation(cw.Encrypt, openai.PlainEmbeddingsRequestFields, s.log),
+			)
 		},
 		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithFullJSONResponseMutation(cw.DecryptResponse, openai.PlainEmbeddingsResponseFields, false)
+			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, openai.PlainEmbeddingsResponseFields, false)
 		},
 	)(w, r)
 }
 
 func (s *Server) transcriptionsHandler(w http.ResponseWriter, r *http.Request) {
+	modelExtractor := func(req *http.Request) (string, error) {
+		clonedReq, err := persist.CloneRequestUnlimited(req)
+		if err != nil {
+			return "", fmt.Errorf("reading request: %w", err)
+		}
+
+		if err := clonedReq.ParseMultipartForm(constants.MaxFileSizeBytes); err != nil {
+			return "", fmt.Errorf("parsing multipart form: %w", err)
+		}
+		defer func() { _ = clonedReq.MultipartForm.RemoveAll() }()
+
+		modelName := clonedReq.PostFormValue("model")
+		if len(modelName) == 0 {
+			return "", fmt.Errorf("no model specified in request")
+		}
+
+		return modelName, nil
+	}
+
 	s.inferenceHandler(
 		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-			return forwarder.WithFormRequestMutation(cw.Encrypt, openai.PlainTranscriptionRequestFields, s.log)
+			return forwarder.RequestMutatorChain(
+				mutators.ModelHeaderInjector(modelExtractor),
+				forwarder.WithFormRequestMutation(cw.Encrypt, openai.PlainTranscriptionRequestFields, s.log),
+			)
 		},
 		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithFullJSONResponseMutation(cw.DecryptResponse, openai.PlainTranscriptionResponseFields, false)
+			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, openai.PlainTranscriptionResponseFields, false)
 		},
 	)(w, r)
 }
@@ -342,22 +257,34 @@ func (s *Server) transcriptionsHandler(w http.ResponseWriter, r *http.Request) {
 func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
 	s.inferenceHandler(
 		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-			return forwarder.WithFullRequestMutation(cw.Encrypt, s.log)
+			return forwarder.WithRawRequestMutation(cw.Encrypt, s.log)
 		},
 		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
 			// currently only json response mutation is supported
-			return forwarder.WithFullJSONResponseMutation(cw.DecryptResponse, nil, false)
+			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, nil, false)
 		},
 	)(w, r)
 }
 
 func (s *Server) anthropicMessagesHandler(w http.ResponseWriter, r *http.Request) {
+	modelExtractor := func(req *http.Request) (string, error) {
+		msg, err := unmarshalJSONBody[anthropic.MessagesRequestPlainData](req)
+		if err != nil {
+			return "", fmt.Errorf("parsing messages request: %w", err)
+		}
+		return msg.Model, nil
+	}
+
 	s.inferenceHandler(
 		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-			return forwarder.WithFullJSONRequestMutation(cw.Encrypt, anthropic.PlainMessagesRequestFields, s.log)
+			return forwarder.RequestMutatorChain(
+				mutators.ShardKeyInjector(s.defaultCacheSalt, s.log),
+				mutators.ModelHeaderInjector(modelExtractor),
+				forwarder.WithJSONRequestMutation(cw.Encrypt, anthropic.PlainMessagesRequestFields, s.log),
+			)
 		},
 		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithFullJSONResponseMutation(cw.DecryptResponse, anthropic.PlainMessagesResponseFields, false)
+			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, anthropic.PlainMessagesResponseFields, false)
 		},
 	)(w, r)
 }
@@ -494,4 +421,20 @@ func getOcspHeaders(allowedStatuses []ocspheader.AllowStatus, revocNbf time.Time
 
 func newRequestID() string {
 	return "proxy_" + uuid.New().String()
+}
+
+// unmarshalJSONBody uses [persist.ReadBodyUnlimited] to read r's body and then unmarshals it.
+func unmarshalJSONBody[T any](r *http.Request) (T, error) {
+	var v T
+
+	body, err := persist.ReadBodyUnlimited(r)
+	if err != nil {
+		return v, fmt.Errorf("reading body: %w", err)
+	}
+
+	if err = json.Unmarshal(body, &v); err != nil {
+		return v, fmt.Errorf("decoding JSON: %w", err)
+	}
+
+	return v, nil
 }

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
@@ -33,7 +34,7 @@ const (
 	defaultClientVersion string = "v1.999.0" // greater than any test case
 )
 
-func TestPromptEncryption(t *testing.T) {
+func TestChatCompletionsPromptEncryption(t *testing.T) {
 	apiKey := testAPIKey
 	testCases := map[string]struct {
 		clientVersion    string
@@ -142,7 +143,7 @@ func TestPromptEncryption(t *testing.T) {
 			if tc.clientVersion == "" {
 				tc.clientVersion = defaultClientVersion
 			}
-			stubAuthOpenAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			stubAuthBackendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				token := r.Header.Get("Authorization")
 				if token == "" {
 					forwarder.HTTPError(w, r, http.StatusUnauthorized, "no auth found: expected Authorization header with 'Bearer <auth>'")
@@ -166,14 +167,14 @@ func TestPromptEncryption(t *testing.T) {
 				// must override the version here as the proxy always sets 0.0.0
 				r.Header.Set(constants.PrivatemodeVersionHeader, tc.clientVersion)
 
-				stub.OpenAIEchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
+				stub.EchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
 			}))
-			defer stubAuthOpenAIServer.Close()
+			defer stubAuthBackendServer.Close()
 
-			sut := newTestServer(tc.proxyAPIKey, secret, stubAuthOpenAIServer.Listener.Addr().String(), tc.proxyCacheSalt, tc.isApp)
+			sut := newTestServer(tc.proxyAPIKey, secret, stubAuthBackendServer.Listener.Addr().String(), tc.proxyCacheSalt, tc.isApp)
 
 			// Act
-			req := prepareRequest(t.Context(), require, &tc.prompt, nil, tc.requestCacheSalt)
+			req := prepareChatRequest(t.Context(), require, &tc.prompt, nil, tc.requestCacheSalt)
 			if tc.requestMutator != nil {
 				tc.requestMutator(req)
 			}
@@ -247,7 +248,7 @@ func TestInvalidSecret(t *testing.T) {
 	// - the first fails due to the invalid secret
 	// - the second succeeds with the valid secret
 	numRequests := 0
-	stubAuthOpenAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	stubAuthBackendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		numRequests++
 		token := r.Header.Get("Authorization")
 		if token == "" {
@@ -259,15 +260,15 @@ func TestInvalidSecret(t *testing.T) {
 			return
 		}
 
-		stub.OpenAIEchoHandler(secretValid.Map(), slog.Default()).ServeHTTP(w, r)
+		stub.EchoHandler(secretValid.Map(), slog.Default()).ServeHTTP(w, r)
 	}))
-	defer stubAuthOpenAIServer.Close()
+	defer stubAuthBackendServer.Close()
 
 	sut := Server{
 		apiKey:                       &apiKey,
 		defaultCacheSalt:             "",
 		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secretInvalid, secretValid}},
-		forwarder:                    forwarder.New(http.DefaultClient, stubAuthOpenAIServer.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default()),
+		forwarder:                    forwarder.New(http.DefaultClient, stubAuthBackendServer.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default()),
 		log:                          slog.Default(),
 		isApp:                        false,
 		nvidiaOCSPAllowUnknown:       true,
@@ -275,7 +276,7 @@ func TestInvalidSecret(t *testing.T) {
 	}
 
 	prompt := "Hello"
-	req := prepareRequest(t.Context(), require, &prompt, nil, "")
+	req := prepareChatRequest(t.Context(), require, &prompt, nil, "")
 	resp := httptest.NewRecorder()
 	sut.GetHandler().ServeHTTP(resp, req)
 
@@ -301,16 +302,16 @@ func TestTools(t *testing.T) {
 		Data: bytes.Repeat([]byte{0x42}, 32),
 	}
 
-	stubAuthOpenAIServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		stub.OpenAIEchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
+	stubAuthBackendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stub.EchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
 	}))
 	t.Cleanup(func() {
-		stubAuthOpenAIServer.Close()
+		stubAuthBackendServer.Close()
 	})
 
 	// Create the SUT once (or inside the loop if you prefer)
 	apiKey := testAPIKey
-	sut := newTestServer(&apiKey, secret, stubAuthOpenAIServer.Listener.Addr().String(), "", false)
+	sut := newTestServer(&apiKey, secret, stubAuthBackendServer.Listener.Addr().String(), "", false)
 
 	testFunc1 := `{"type":"function","function":"func1"}`
 	testFunc1Echo := `{"type":"function","function":"func1","test":"echo"}`
@@ -375,7 +376,7 @@ func TestTools(t *testing.T) {
 				tools = append(tools, json.RawMessage(tool))
 			}
 
-			req := prepareRequest(t.Context(), require, tc.prompt, tools, "")
+			req := prepareChatRequest(t.Context(), require, tc.prompt, tools, "")
 			resp := httptest.NewRecorder()
 			sut.GetHandler().ServeHTTP(resp, req)
 			require.Equal(http.StatusOK, resp.Code)
@@ -510,92 +511,6 @@ func TestUnstructuredEncrypted(t *testing.T) {
 	}
 }
 
-func TestShardKeyGeneration(t *testing.T) {
-	server := &Server{log: slog.Default()}
-	cacheSalt := "test-salt"
-
-	// Test different token count ranges to verify k calculation
-	testCases := map[string]struct {
-		contentLength     int
-		contentHashLength int
-		contentKey        string
-		expectError       bool
-	}{
-		"empty":                 {contentLength: 0, contentHashLength: 0},
-		"1->0, block size 16*4": {contentLength: 1, contentHashLength: 0},
-		// 1 block of 16 tokens
-		"63->1, block size 16*4": {contentLength: 16*4 - 1, contentHashLength: 0},
-		"64->1, block size 16*4": {contentLength: 16 * 4, contentHashLength: 1, contentKey: "Q"},
-		// 2 blocks of 16 tokens
-		"127->1, block size 16*4": {contentLength: 32*4 - 1, contentHashLength: 1, contentKey: "Q"},
-		"128->2, block size 16*4": {contentLength: 32 * 4, contentHashLength: 2, contentKey: "QK"},
-		"129->2, block size 16*4": {contentLength: 32*4 + 1, contentHashLength: 2, contentKey: "QK"},
-		// 3 blocks of 16 tokens
-		"191->2, block size 16*4":    {contentLength: 48*4 - 1, contentHashLength: 2, contentKey: "QK"},
-		"192->3, block size 16*4":    {contentLength: 48 * 4, contentHashLength: 3, contentKey: "QKx"},
-		"193->3, block size 16*4":    {contentLength: 48*4 + 1, contentHashLength: 3, contentKey: "QKx"},
-		"4095->63, block size 16*4":  {contentLength: 1024*4 - 1, contentHashLength: 63, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVlj"},
-		"4096->64, block size 128*4": {contentLength: 1024 * 4, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
-		"4097->64, block size 128*4": {contentLength: 1024*4 + 1, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
-		"4607->64, block size 128*4": {contentLength: (1024+128)*4 - 1, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
-		"4224->64, block size 128*4": {contentLength: (1024 + 128) * 4, contentHashLength: 65, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljTI"},
-		"100k-1, block size 128*4":   {contentLength: 100_096*4 - 1, contentHashLength: 64 + 773},
-		"100k, block size 512*4":     {contentLength: 100_096 * 4, contentHashLength: 64 + 774},
-		"100k+1, block size 512*4":   {contentLength: 100_096*4 + 1, contentHashLength: 64 + 774},
-		"1M-1, block size 512*4":     {contentLength: 1_000_000*4 - 1, contentHashLength: 64 + 774 + 1757},
-		"1M, block size 512*4":       {contentLength: 1_000_000 * 4, contentHashLength: 64 + 774 + 1757},
-		"1M+0.75, block size 512*4":  {contentLength: 1_000_000*4 + 3, contentHashLength: 64 + 774 + 1757},
-		"1M+1, error":                {contentLength: 1_000_000*4 + 4, contentHashLength: -1, expectError: true},
-	}
-
-	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			require := require.New(t)
-			assert := assert.New(t)
-			content := string(bytes.Repeat([]byte("a"), tc.contentLength))
-
-			shardKey, err := server.generateShardKey(cacheSalt, content)
-
-			if tc.expectError {
-				require.Error(err)
-				return
-			}
-
-			require.NoError(err)
-
-			// "saltHash-contentHash"
-			shardKeyLength := constants.CacheSaltHashLength + tc.contentHashLength
-			if tc.contentHashLength > 0 {
-				shardKeyLength++ // '-'
-			}
-			assert.Len(shardKey, shardKeyLength)
-
-			if len(tc.contentKey) > 0 {
-				actualContentHash := shardKey[constants.CacheSaltHashLength:]
-				assert.Equal("-"+tc.contentKey, actualContentHash)
-			}
-		})
-	}
-}
-
-func BenchmarkShardKeyGeneration_1M(b *testing.B) {
-	server := &Server{log: slog.Default()}
-	cacheSalt := "test-salt"
-	// 1M tokens -> contentLength: 1_000_000 * 4 (see unit test)
-	content := string(bytes.Repeat([]byte("a"), 1_000_000*4))
-
-	start := time.Now()
-	for b.Loop() {
-		if _, err := server.generateShardKey(cacheSalt, content); err != nil {
-			b.Fatalf("unexpected error: %v", err)
-		}
-	}
-	avg := time.Since(start) / time.Duration(b.N)
-
-	// 1 Mio tokens take about 2.5ms on a Mac M2 and ~20ms in CI; enforce <50ms per op.
-	assert.Less(b, avg, 50*time.Millisecond, "shard key generation too slow")
-}
-
 func TestGetOCSPHeaders(t *testing.T) {
 	testCases := map[string]struct {
 		OCSPAllowedStatuses []ocspheader.AllowStatus
@@ -673,13 +588,132 @@ func TestSetDynamicHeaders(t *testing.T) {
 	}
 }
 
+func TestTargetModelHeader(t *testing.T) {
+	// Random string to check verbatim inclusion in header
+	randomModel := "Cu1pS7yT"
+
+	testCases := map[string]struct {
+		buildRequest  func(t *testing.T, require *require.Assertions) *http.Request
+		expectedModel string
+	}{
+		"chat completions": {
+			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
+				return prepareJSONRequest(t.Context(), require, openai.ChatCompletionsEndpoint, openai.ChatRequest{
+					ChatRequestPlainData: openai.ChatRequestPlainData{
+						Model: randomModel,
+					},
+					Messages: []openai.Message{
+						{
+							Role:    "user",
+							Content: "Hello",
+						},
+					},
+				})
+			},
+			expectedModel: randomModel,
+		},
+		"legacy (chat) completions": {
+			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
+				return prepareJSONRequest(t.Context(), require, openai.LegacyCompletionsEndpoint, openai.ChatRequest{
+					ChatRequestPlainData: openai.ChatRequestPlainData{
+						Model: randomModel,
+					},
+					Messages: []openai.Message{
+						{
+							Role:    "user",
+							Content: "Hello",
+						},
+					},
+				})
+			},
+			expectedModel: randomModel,
+		},
+		"embeddings": {
+			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
+				return prepareJSONRequest(t.Context(), require, openai.EmbeddingsEndpoint, openai.EmbeddingsRequest{
+					EmbeddingsRequestPlainData: openai.EmbeddingsRequestPlainData{
+						Model: randomModel,
+					},
+					Input: []string{"Hello"},
+				})
+			},
+			expectedModel: randomModel,
+		},
+		"transcriptions": {
+			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
+				return prepareMultiPartRequest(t.Context(), require, openai.TranscriptionsEndpoint, func(writer *multipart.Writer) error {
+					if err := writer.WriteField("model", randomModel); err != nil {
+						return err
+					}
+
+					part, err := writer.CreateFormFile("file", "audio.mp3")
+					if err != nil {
+						return err
+					}
+					fakeMP3 := []byte{0x49, 0x44, 0x33, 0x03, 0x00, 0x00} // Start of MP3 header
+					if _, err := part.Write(fakeMP3); err != nil {
+						return err
+					}
+
+					return nil
+				})
+			},
+			expectedModel: randomModel,
+		},
+		"anthropic messages": {
+			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
+				return prepareJSONRequest(t.Context(), require, anthropic.MessagesEndpoint, anthropic.MessagesRequest{
+					MessagesRequestPlainData: anthropic.MessagesRequestPlainData{
+						Model: randomModel,
+					},
+					Messages: []anthropic.Message{
+						{
+							Role:    "user",
+							Content: "Hello",
+						},
+					},
+				})
+			},
+			expectedModel: randomModel,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+
+			secret := secretmanager.Secret{
+				ID:   "123",
+				Data: bytes.Repeat([]byte{0x42}, 32),
+			}
+
+			stubBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(tc.expectedModel, r.Header.Get(constants.PrivatemodeTargetModel))
+
+				stub.EchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
+			}))
+			defer stubBackend.Close()
+
+			apiKey := testAPIKey
+			sut := newTestServer(&apiKey, secret, stubBackend.Listener.Addr().String(), "", false)
+
+			req := tc.buildRequest(t, require)
+
+			resp := httptest.NewRecorder()
+			sut.GetHandler().ServeHTTP(resp, req)
+			assert.Equal(http.StatusOK, resp.Code)
+		})
+	}
+}
+
 // newTestServer returns a stub server for testing.
-func newTestServer(apiKey *string, secret secretmanager.Secret, openAIServerAddr string, defaultCacheSalt string, isApp bool) *Server {
+func newTestServer(apiKey *string, secret secretmanager.Secret, backendAddr string, defaultCacheSalt string, isApp bool) *Server {
 	return &Server{
 		apiKey:                       apiKey,
 		defaultCacheSalt:             defaultCacheSalt,
 		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secret}},
-		forwarder:                    forwarder.New(http.DefaultClient, openAIServerAddr, forwarder.SchemeHTTP, slog.Default()),
+		forwarder:                    forwarder.New(http.DefaultClient, backendAddr, forwarder.SchemeHTTP, slog.Default()),
 		log:                          slog.Default(),
 		isApp:                        isApp,
 		nvidiaOCSPAllowUnknown:       true,
@@ -693,8 +727,8 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 		log := slog.Default()
 
 		// Use JSON request mutation if the request is a JSON request
-		requestMutator := forwarder.WithFullRequestMutation(decrypt, log)
-		responseMutator := forwarder.WithFullJSONResponseMutation(encrypt, nil, false)
+		requestMutator := forwarder.WithRawRequestMutation(decrypt, log)
+		responseMutator := forwarder.WithJSONResponseMutation(encrypt, nil, false)
 
 		if err := requestMutator(r); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -722,11 +756,8 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 	}))
 }
 
-func prepareRequest(ctx context.Context, require *require.Assertions, content any, tools []any, cacheSalt string) *http.Request {
-	baseURL := "http://192.0.2.1:8080" // doesn't matter
-	url := fmt.Sprintf("%s/v1/chat/completions", baseURL)
-
-	payload := openai.ChatRequest{
+func prepareChatRequest(ctx context.Context, require *require.Assertions, content any, tools []any, cacheSalt string) *http.Request {
+	return prepareJSONRequest(ctx, require, openai.ChatCompletionsEndpoint, openai.ChatRequest{
 		ChatRequestPlainData: openai.ChatRequestPlainData{
 			Model: "gpt-oss-120b",
 		},
@@ -738,16 +769,7 @@ func prepareRequest(ctx context.Context, require *require.Assertions, content an
 		},
 		Tools:     tools,
 		CacheSalt: cacheSalt,
-	}
-
-	payloadBytes, err := json.Marshal(payload)
-	require.NoError(err)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payloadBytes))
-	require.NoError(err)
-
-	req.Header.Set("Content-Type", "application/json")
-	return req
+	})
 }
 
 type stubSecretManager struct {
@@ -785,4 +807,37 @@ func makeErrorMsg(message string) string {
 		panic(err)
 	}
 	return string(msgBytes)
+}
+
+func prepareJSONRequest(ctx context.Context, require *require.Assertions, path string, payload any) *http.Request {
+	baseURL := "http://192.0.2.1:8080" // doesn't matter
+	url := fmt.Sprintf("%s%s", baseURL, path)
+
+	payloadBytes, err := json.Marshal(payload)
+	require.NoError(err)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payloadBytes))
+	require.NoError(err)
+
+	req.Header.Set("Content-Type", "application/json")
+
+	return req
+}
+
+func prepareMultiPartRequest(ctx context.Context, require *require.Assertions, path string, payloadFunc func(*multipart.Writer) error) *http.Request {
+	baseURL := "http://192.0.2.1:8080" // doesn't matter
+	url := fmt.Sprintf("%s%s", baseURL, path)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	require.NoError(payloadFunc(writer))
+	require.NoError(writer.Close())
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &body)
+	require.NoError(err)
+
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	return req
 }

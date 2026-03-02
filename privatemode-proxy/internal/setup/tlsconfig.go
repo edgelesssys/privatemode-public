@@ -10,15 +10,14 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/edgelesssys/continuum/internal/oss/privatemode"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/manifestlog"
 	"github.com/spf13/afero"
 )
 
-const manifest = "manifest.json"
-
 // caAdapter updates the mesh CA with the interface for the secretupdater.
 type caAdapter struct {
-	fetcher   contrastDeploymentFetcher
+	fetcher   manifestFetcher
 	mfLogger  mfLogger
 	caUpdater caUpdater
 	log       *slog.Logger
@@ -31,9 +30,16 @@ type caUpdater interface {
 	GetAttestedMeshCA(ctx context.Context, expectedMfBytes []byte, apiKey string) (*x509.Certificate, error)
 }
 
+type manifestFetcher interface {
+	FetchManifest(ctx context.Context) ([]byte, error)
+}
+
 // newCAAdapter creates a new caAdapter.
 func newCAAdapter(cdnBaseURL string, mfLogger mfLogger, caUpdater caUpdater, log *slog.Logger) *caAdapter {
-	fetcher := contrastDeploymentFetcher{cdnBaseURL: cdnBaseURL}
+	fetcher := privatemode.
+		New(""). // API key is not required to just fetch the manifest
+		WithCDNBaseURL(cdnBaseURL)
+
 	return &caAdapter{
 		fetcher:   fetcher,
 		mfLogger:  mfLogger,
@@ -70,14 +76,6 @@ func (c *caAdapter) CurrentManifest() string {
 	c.manifestMu.Lock()
 	defer c.manifestMu.Unlock()
 	return string(c.manifest)
-}
-
-type contrastDeploymentFetcher struct {
-	cdnBaseURL string
-}
-
-func (f contrastDeploymentFetcher) FetchManifest(ctx context.Context) ([]byte, error) {
-	return fetchBodyFromURL(ctx, fmt.Sprintf("%s/%s", f.cdnBaseURL, manifest))
 }
 
 type mfLogger struct {

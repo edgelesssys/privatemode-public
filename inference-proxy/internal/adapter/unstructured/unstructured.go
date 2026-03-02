@@ -47,9 +47,9 @@ func (t *Adapter) forwardRequest(w http.ResponseWriter, r *http.Request) {
 	session := t.cipher.NewResponseCipher()
 	t.forwarder.Forward(
 		w, r,
-		forwarder.WithFullRequestMutation(session.DecryptRequest(r.Context()), t.log),
+		forwarder.WithRawRequestMutation(session.DecryptRequest(r.Context()), t.log),
 		// currently only JSON responses are supported
-		forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), nil, false),
+		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), nil, false),
 		forwarder.NoHeaderMutation,
 	)
 }

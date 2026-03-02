@@ -82,11 +82,6 @@ func flagsFromEnv(log *slog.Logger) (*setup.Flags, error) {
 		return nil, fmt.Errorf("getting user config dir: %w", err)
 	}
 
-	cacheSalt, err := openai.RandomPromptCacheSalt()
-	if err != nil {
-		return nil, fmt.Errorf("generating random prompt cache salt: %w", err)
-	}
-
 	flags := &setup.Flags{
 		Workspace:    filepath.Join(cfgDir, "EdgelessSystems", "privatemode"),
 		ManifestPath: "",
@@ -98,7 +93,7 @@ func flagsFromEnv(log *slog.Logger) (*setup.Flags, error) {
 		InsecureAPIConnection: false,
 		// In the app we always want prompt caching and use a random salt that lives as long as the app.
 		// This may be overridden in the config file to enable cache sharing between users.
-		PromptCacheSalt:              cacheSalt,
+		PromptCacheSalt:              openai.RandomPromptCacheSalt(),
 		NvidiaOCSPAllowUnknown:       true,           // TODO(msanft): make this configurable
 		NvidiaOCSPRevokedGracePeriod: 48 * time.Hour, // TODO(msanft): make this configurable
 	}

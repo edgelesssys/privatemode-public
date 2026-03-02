@@ -14,32 +14,24 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 
 	"github.com/edgelesssys/continuum/internal/oss/httpapi"
 	contrastsdk "github.com/edgelesssys/contrast/sdk"
 )
 
-const (
-	// ContrastSubDir is the subdirectory inside the workspace used to cache data related to the Contrast deployment.
-	ContrastSubDir = "contrast"
-)
-
 // Getter is a client that gets the mesh CA of the Privatemode deployment.
 type Getter struct {
 	httpClient     *http.Client
-	contrastClient contrastsdk.Client
+	contrastClient *contrastsdk.Client
 	endpoint       string
-	workspaceDir   string
 }
 
 // NewGetter creates a new Getter.
-func NewGetter(httpClient *http.Client, endpoint string, contrastClient contrastsdk.Client, workspaceDir string) Getter {
+func NewGetter(httpClient *http.Client, endpoint string, contrastClient *contrastsdk.Client) Getter {
 	return Getter{
 		httpClient:     httpClient,
 		contrastClient: contrastClient,
 		endpoint:       endpoint,
-		workspaceDir:   workspaceDir,
 	}
 }
 
@@ -64,7 +56,7 @@ func (c Getter) GetAttestedMeshCA(ctx context.Context, expectedMfBytes []byte, a
 	}
 
 	// Validate the attestation against the expected manifest
-	coordinatorState, err := c.contrastClient.ValidateAttestation(ctx, filepath.Join(c.workspaceDir, ContrastSubDir), nonce, att.AttestationDoc)
+	coordinatorState, err := c.contrastClient.ValidateAttestation(ctx, nonce, att.AttestationDoc)
 	if err != nil {
 		return nil, fmt.Errorf("validating attestation: %w", err)
 	}

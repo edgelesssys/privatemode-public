@@ -11,10 +11,10 @@ import (
 	"strings"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
+	"github.com/edgelesssys/continuum/internal/compat"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
-	"golang.org/x/mod/semver"
 )
 
 // Adapter implements an InferenceAdapter for OpenAI API.
@@ -82,8 +82,8 @@ func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Reques
 
 	a.Forwarder.Forward(
 		w, r,
-		forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainEmbeddingsRequestFields, a.Log),
-		forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainEmbeddingsResponseFields, false),
+		forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainEmbeddingsRequestFields, a.Log),
+		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainEmbeddingsResponseFields, false),
 		forwarder.NoHeaderMutation,
 	)
 }
@@ -92,15 +92,18 @@ func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Re
 	session := a.Cipher.NewResponseCipher()
 
 	requestFieldSelector := openai.PlainTranscriptionRequestFields
-	responseMutator := forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields, false)
-	if semver.Compare(r.Header.Get(constants.PrivatemodeVersionHeader), "v1.32.9") < 0 {
-		requestFieldSelector = forwarder.FieldSelector{{"model"}}                                  // Clients before v1.33 only have "model" as unencrypted field
-		responseMutator = forwarder.WithFullResponseMutation(session.EncryptResponse(r.Context())) // Clients before v1.33 expect the full response body to be encrypted
+	responseMutator := forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields, false)
+	if !compat.AtLeastMajorMinor(r.Header.Get(constants.PrivatemodeVersionHeader), 1, 33) {
+		requestFieldSelector = forwarder.FieldSelector{{"model"}}                                 // Clients before v1.33 only have "model" as unencrypted field
+		responseMutator = forwarder.WithRawResponseMutation(session.EncryptResponse(r.Context())) // Clients before v1.33 expect the full response body to be encrypted
 	}
 
 	a.Forwarder.Forward(
 		w, r,
-		forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), requestFieldSelector, a.Log),
+		forwarder.RequestMutatorChain(
+			forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), requestFieldSelector, a.Log),
+			a.mutators.AudioStreamUsageReportingInjector,
+		),
 		responseMutator,
 		forwarder.NoHeaderMutation,
 	)
@@ -112,11 +115,12 @@ func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 	a.Forwarder.Forward(
 		w, r,
 		forwarder.RequestMutatorChain(
-			forwarder.WithFullJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, a.Log),
+			forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, a.Log),
 			a.mutators.CacheSaltValidator,
 			a.mutators.SecureImageURLValidator,
+			a.mutators.StreamUsageReportingInjector,
 		),
-		forwarder.WithFullJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainCompletionsResponseFields, false),
+		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainCompletionsResponseFields, false),
 		forwarder.NoHeaderMutation,
 	)
 }

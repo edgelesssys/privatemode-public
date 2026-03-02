@@ -5,6 +5,7 @@ package userapi
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/hpke"
 	"crypto/rand"
 	"crypto/tls"
 	"errors"
@@ -13,7 +14,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/edgelesssys/continuum/internal/oss/hpke"
 	userpb "github.com/edgelesssys/continuum/internal/oss/proto/secret-service/userapi"
 	"github.com/edgelesssys/continuum/internal/oss/secretexchange"
 	"google.golang.org/grpc"

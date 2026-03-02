@@ -5,10 +5,7 @@
 package setup
 
 import (
-	"context"
 	"crypto/tls"
-	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -61,27 +58,4 @@ func NewServer(flags Flags, isApp bool, manager *secretmanager.SecretManager, lo
 	}
 
 	return server.New(client, manager, opts, log)
-}
-
-func fetchBodyFromURL(ctx context.Context, sourceURL string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response body: %w", err)
-	}
-	return body, nil
 }

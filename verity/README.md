@@ -1,5 +1,8 @@
 # Verity protected model disks
 
+This README gives an overview on how to create verity protected model disks.
+For a guide on how to reproduce disk hashes used by Privatemode, please view [the official documentation](https://docs.privatemode.ai/guides/verify-model).
+
 Models deployed in Privatemode are stored on [dm-verity](https://docs.kernel.org/admin-guide/device-mapper/verity.html) protected disks.
 This ensures users can independently verify the integrity and content of a model before sending data to it.
 

@@ -62,3 +62,12 @@ func (i *Issuer) Issue(nonce [32]byte) ([]byte, []*x509.Certificate, error) {
 
 	return report, gpuCertChain, nil
 }
+
+// Arch returns the architecture of the GPU, e.g. Hopper or Blackwell.
+func (i *Issuer) Arch() (gpu.Architecture, error) {
+	info, err := i.device.Info()
+	if err != nil {
+		return -1, err
+	}
+	return info.Architecture, err
+}

@@ -15,7 +15,7 @@ func FuzzMutateAllJSONFields(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		require := require.New(t)
-		out, err := mutateAllJSONFields(data, noMutation, FieldSelector{})
+		out, err := MutateAllJSONFields(data, noMutation, FieldSelector{})
 		require.NoError(err)
 		require.NotNil(out)
 	})

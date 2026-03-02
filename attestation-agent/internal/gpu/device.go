@@ -21,7 +21,7 @@ func (d *Device) ID() string {
 
 // DeviceInfo holds information about the GPU device.
 type DeviceInfo struct {
-	Architecture  nvml.DeviceArchitecture
+	Architecture  Architecture
 	DriverVersion string
 	VBIOSVersion  string
 }
@@ -49,7 +49,7 @@ func (d *Device) Info() (*DeviceInfo, error) {
 	}
 
 	return &DeviceInfo{
-		Architecture:  architecture,
+		Architecture:  Architecture(architecture),
 		DriverVersion: driverVersion,
 		VBIOSVersion:  vbiosVersion,
 	}, nil

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/persist"
 )
 
 const (
@@ -71,6 +72,18 @@ func WithRetryCallback(cb RetryCallback) Opts {
 func WithHost(host string) Opts {
 	return func(o *opts) {
 		o.host = host
+	}
+}
+
+// WithMaxBodyBytes limits the request body to n bytes.
+// Requests with a body exceeding this limit receive a 413 response with msg included. An empty
+// msg string leads to a default message.
+func WithMaxBodyBytes(n int64, msg string) Opts {
+	return func(o *opts) {
+		o.maxBodyBytes = n
+		if msg != "" {
+			o.maxBodyExceededMsg = msg
+		}
 	}
 }
 
@@ -130,17 +143,23 @@ func (f *Forwarder) Forward(
 
 	f.logInfo("Forwarding request", req)
 
+	// Clone a base request reused across forwarding attempts. Also enforces body size limits.
+	baseReq, ok := f.cloneIncomingRequest(w, req, options)
+	if !ok {
+		return
+	}
+
 	// Prepare request for forwarding to server
-	req.RequestURI = ""
-	delHopHeaders(req.Header)
-	updateForwardedHeader(req.Header, req.RemoteAddr)
+	baseReq.RequestURI = ""
+	delHopHeaders(baseReq.Header)
+	updateForwardedHeader(baseReq.Header, baseReq.RemoteAddr)
 
 	// Not setting the host here leads to "no Host in request URL" errors.
-	req.URL.Host = options.host
+	baseReq.URL.Host = options.host
 	// Not setting the scheme here leads to "http: no Host in request URL" errors.
-	req.URL.Scheme = string(f.protocolScheme)
+	baseReq.URL.Scheme = string(f.protocolScheme)
 
-	resp, err := f.sendWithRetry(req, requestMutator, options.retryCallback)
+	resp, err := f.sendWithRetry(baseReq, requestMutator, options.retryCallback)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			f.logWarning("Connection closed by client before request could be fully forwarded", err, req)
@@ -157,7 +176,7 @@ func (f *Forwarder) Forward(
 
 	// Allow caller to mutate headers.
 	// This is necessary in cases where the caller wants to modify a header already present in the response.
-	if err := responseHeaderMutator(resp.Header, req.Header); err != nil {
+	if err := responseHeaderMutator(resp.Header, baseReq.Header); err != nil {
 		f.logError("Failed to mutate header", err, req)
 		HTTPError(w, req, http.StatusInternalServerError, "mutating header: %s", err)
 		return
@@ -275,6 +294,34 @@ func (f *Forwarder) applyBackoffDelay(ctx context.Context, delay time.Duration, 
 	}
 }
 
+// cloneIncomingRequest clones req and persists its body to memory.
+// It enforces [opts.maxBodyBytes] if > 0. For any error, it responds with a HTTP error and returns ok=false.
+func (f *Forwarder) cloneIncomingRequest(w http.ResponseWriter, req *http.Request, options *opts) (baseReq *http.Request, ok bool) {
+	var err error
+	if options.maxBodyBytes > 0 {
+		baseReq, err = persist.CloneRequest(w, req, options.maxBodyBytes)
+		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				f.logWarning("Request body too large", err, req)
+				HTTPError(w, req, http.StatusRequestEntityTooLarge, "%s", options.maxBodyExceededMsg)
+			} else {
+				f.logError("Failed to read request body", err, req)
+				HTTPError(w, req, http.StatusInternalServerError, "reading request body: %s", err)
+			}
+			return nil, false
+		}
+	} else {
+		baseReq, err = persist.CloneRequestUnlimited(req)
+		if err != nil {
+			f.logError("Failed to read request body", err, req)
+			HTTPError(w, req, http.StatusInternalServerError, "reading request body: %s", err)
+			return nil, false
+		}
+	}
+	return baseReq, true
+}
+
 // trySend attempts to send a request and returns whether to retry and any error.
 func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, attempt int, retryCallback RetryCallback) (bool, *http.Response, error) {
 	// Mutate request for this attempt
@@ -310,31 +357,25 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 
 // sendWithRetry handles the retry logic for forwarding requests.
 func (f *Forwarder) sendWithRetry(req *http.Request, requestMutator RequestMutator, retryCallback RetryCallback) (*http.Response, error) {
-	// Shortcut if there is no retry configured to skip copying the body.
+	// Shortcut if there is no retry configured to skip cloning the request.
 	if retryCallback == nil {
 		_, resp, err := f.trySend(req, requestMutator, 1, retryCallback)
 		return resp, err
 	}
 
-	// Read the request body once before the retry loop as the request will invalidate
-	// the body and we have to redo the mutation as the content may change with each
-	// retry (e.g., the encryption).
-	bodyBytes, err := io.ReadAll(req.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading request body: %w", err)
-	}
-	req.Body.Close()
-
-	// Forward request to inference server with retry logic
+	// Forward request to inference server with retry logic.
 	attempt := 0
 
 	for {
 		attempt++
 
-		// Create a fresh copy of the request body for each attempt
-		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		// The req has already been read into memory by Forwarder, so Unlimited is fine here.
+		reqCopy, err := persist.CloneRequestUnlimited(req)
+		if err != nil {
+			return nil, fmt.Errorf("cloning request: %w", err)
+		}
 
-		retry, resp, err := f.trySend(req, requestMutator, attempt, retryCallback)
+		retry, resp, err := f.trySend(reqCopy, requestMutator, attempt, retryCallback)
 		if retry {
 			continue
 		}
@@ -467,14 +508,17 @@ func updateForwardedHeader(header http.Header, remoteAddr string) {
 }
 
 type opts struct {
-	host          string
-	retryCallback RetryCallback
+	host               string
+	retryCallback      RetryCallback
+	maxBodyBytes       int64
+	maxBodyExceededMsg string
 }
 
 func defaultOpts(fw *Forwarder) *opts {
 	return &opts{
-		host:          fw.host,
-		retryCallback: NoRetry,
+		host:               fw.host,
+		retryCallback:      NoRetry,
+		maxBodyExceededMsg: "request body too large",
 	}
 }
 

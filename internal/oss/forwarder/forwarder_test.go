@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func TestForwardStreaming(t *testing.T) {
 	mutator := &stubMutator{
 		mutateResponse: `"plainText"`,
 	}
-	responseMutator := WithFullJSONResponseMutation(mutator.mutate, nil, false)
+	responseMutator := WithJSONResponseMutation(mutator.mutate, nil, false)
 
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -64,7 +65,7 @@ func TestForwardStreamingAborted(t *testing.T) {
 	mutator := &stubMutator{
 		mutateResponse: `"plainText"`,
 	}
-	responseMutator := WithFullJSONResponseMutation(mutator.mutate, nil, false)
+	responseMutator := WithJSONResponseMutation(mutator.mutate, nil, false)
 
 	sentFirstPart := make(chan struct{})
 
@@ -132,7 +133,7 @@ func TestForwardNonStreaming(t *testing.T) {
 	mutator := &stubMutator{
 		mutateResponse: `"plainText"`,
 	}
-	responseMutator := WithFullJSONResponseMutation(mutator.mutate, nil, false)
+	responseMutator := WithJSONResponseMutation(mutator.mutate, nil, false)
 
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -168,7 +169,7 @@ func TestForwardHeaderCopying(t *testing.T) {
 	failingMutator := &stubMutator{
 		mutateErr: assert.AnError,
 	}
-	responseMutator := WithFullJSONResponseMutation(failingMutator.mutate, nil, false)
+	responseMutator := WithJSONResponseMutation(failingMutator.mutate, nil, false)
 
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -260,6 +261,46 @@ func TestHTTPError(t *testing.T) {
 			assert.Equal(t, tt.expectedContentType, resp.Header.Get("Content-Type"), "Content-Type header mismatch")
 
 			assert.Equal(t, tt.expectedBody, bodyString, "Body mismatch")
+		})
+	}
+}
+
+func TestForwardMaxBodyBytes(t *testing.T) {
+	const maxBytes = 10
+
+	testCases := map[string]struct {
+		body               string
+		expectedStatusCode int
+	}{
+		"allowed request": {
+			body:               "small",
+			expectedStatusCode: http.StatusOK,
+		},
+		"too large request": {
+			body:               "this body is way too large",
+			expectedStatusCode: http.StatusRequestEntityTooLarge,
+		},
+	}
+
+	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer stubServer.Close()
+
+	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(tc.body))
+			resp := httptest.NewRecorder()
+
+			fwd.Forward(
+				resp, req,
+				NoRequestMutation, NoResponseMutation{}, NoHeaderMutation,
+				WithMaxBodyBytes(maxBytes, ""),
+			)
+
+			assert.Equal(t, tc.expectedStatusCode, resp.Code)
 		})
 	}
 }

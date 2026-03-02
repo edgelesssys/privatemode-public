@@ -5,11 +5,11 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/hpke"
 	"crypto/rand"
 	"log/slog"
 	"testing"
 
-	"github.com/edgelesssys/continuum/internal/oss/hpke"
 	"github.com/edgelesssys/continuum/internal/oss/proto/secret-service/userapi"
 	"github.com/edgelesssys/continuum/internal/oss/secretexchange"
 	"github.com/stretchr/testify/assert"
