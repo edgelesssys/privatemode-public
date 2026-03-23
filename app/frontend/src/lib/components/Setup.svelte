@@ -48,21 +48,41 @@
 
       <h1>We keep your conversations private.</h1>
       <p class="welcome-text">Welcome to Privatemode!</p>
-      <p class="subtitle">
-        Privatemode keeps your prompts and your data encrypted.
+      <p class="subtitle subtitle-tight">
+        Privatemode keeps your prompts and your data encrypted. To continue, you
+        will need an access key.
+      </p>
+      <p class="subtitle onboarding-note">
+        Don&apos;t have one yet? Create it in the
+        <a
+          href="https://portal.privatemode.ai/access-keys"
+          target="_blank"
+          rel="noopener noreferrer">Privatemode portal</a
+        >.
       </p>
 
-      <button
-        onclick={handleGetStarted}
-        class="submit-btn"
-      >
-        Get started
-        <Icon
-          icon="material-symbols:arrow-forward"
-          width="16"
-          height="16"
-        />
-      </button>
+      <div class="welcome-actions">
+        <button
+          onclick={handleGetStarted}
+          class="submit-btn"
+        >
+          Continue
+          <Icon
+            icon="material-symbols:arrow-forward"
+            width="16"
+            height="16"
+          />
+        </button>
+
+        <a
+          class="secondary-btn"
+          href="https://portal.privatemode.ai/access-keys"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Get access key
+        </a>
+      </div>
     {:else}
       <button
         onclick={handleBack}
@@ -144,7 +164,7 @@
         />
         <p>
           Need help? <a
-            href="https://www.privatemode.ai/contact"
+            href="https://www.privatemode.ai/contact-support"
             target="_blank"
             rel="noopener noreferrer">Contact us</a
           >
@@ -198,6 +218,22 @@
     margin: 12px 0 42px 0;
     text-align: center;
     font-size: 16px;
+  }
+
+  .subtitle-tight {
+    margin-bottom: 12px;
+  }
+
+  .onboarding-note {
+    margin: 0 0 28px 0;
+    font-size: 15px;
+  }
+
+  .welcome-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
   }
 
   .welcome-text {
@@ -280,6 +316,17 @@
 
   .submit-btn:active {
     transform: translateY(0);
+  }
+
+  .secondary-btn {
+    color: #7a49f6;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .secondary-btn:hover {
+    text-decoration: underline;
   }
 
   .help-text {

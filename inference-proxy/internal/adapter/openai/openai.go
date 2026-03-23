@@ -8,13 +8,14 @@ package openai
 import (
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/internal/compat"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // Adapter implements an InferenceAdapter for OpenAI API.
@@ -43,6 +44,7 @@ func (a *Adapter) RegisterRoutes(mux *http.ServeMux) {
 	// List models: https://platform.openai.com/docs/api-reference/models/list
 	// Not wrapped with OCSP verification - used for health checks
 	mux.HandleFunc("GET /v1/models", a.forwardModelsRequest)
+	mux.HandleFunc("GET /v1/models/{model}", a.forwardSpecificModelRequest) // Also handle model details endpoint
 
 	// Create chat completion: https://platform.openai.com/docs/api-reference/chat/create
 	mux.Handle("/v1/chat/completions", a.VerifyOCSP(http.HandlerFunc(a.forwardChatCompletionsRequest)))
@@ -66,13 +68,37 @@ func (a *Adapter) HandlesCatchAll() bool {
 // and augments the response with the task vllm is running with.
 func (a *Adapter) forwardModelsRequest(w http.ResponseWriter, r *http.Request) {
 	mutate := func(request string) (mutatedRequest string, err error) {
-		return request + `,"tasks":["` + strings.Join(a.WorkloadTasks, `","`) + `"]`, nil
-	}
+		result := request
+		data := gjson.Get(request, "data")
+		if !data.Exists() || !data.IsArray() {
+			return request, nil
+		}
 
+		var mutateErr error
+		data.ForEach(func(key, _ gjson.Result) bool {
+			path := "data." + key.String() + ".tasks"
+			result, mutateErr = sjson.Set(result, path, a.WorkloadTasks)
+			return mutateErr == nil // continue if no error
+		})
+
+		return result, mutateErr
+	}
 	a.Forwarder.Forward(
 		w, r,
 		forwarder.NoRequestMutation,
-		forwarder.WithSelectJSONResponseMutation(mutate, forwarder.FieldSelector{{"data", "#", "id"}, {"id"}}), // Mutate both /v1/models and /v1/models/{model}
+		forwarder.WithRawResponseMutation(mutate),
+		forwarder.NoHeaderMutation,
+	)
+}
+
+func (a *Adapter) forwardSpecificModelRequest(w http.ResponseWriter, r *http.Request) {
+	mutate := func(request string) (mutatedRequest string, err error) {
+		return sjson.Set(request, "tasks", a.WorkloadTasks)
+	}
+	a.Forwarder.Forward(
+		w, r,
+		forwarder.NoRequestMutation,
+		forwarder.WithRawResponseMutation(mutate),
 		forwarder.NoHeaderMutation,
 	)
 }
@@ -83,7 +109,7 @@ func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Reques
 	a.Forwarder.Forward(
 		w, r,
 		forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainEmbeddingsRequestFields, a.Log),
-		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainEmbeddingsResponseFields, false),
+		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainEmbeddingsResponseFields),
 		forwarder.NoHeaderMutation,
 	)
 }
@@ -92,7 +118,7 @@ func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Re
 	session := a.Cipher.NewResponseCipher()
 
 	requestFieldSelector := openai.PlainTranscriptionRequestFields
-	responseMutator := forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields, false)
+	responseMutator := forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields)
 	if !compat.AtLeastMajorMinor(r.Header.Get(constants.PrivatemodeVersionHeader), 1, 33) {
 		requestFieldSelector = forwarder.FieldSelector{{"model"}}                                 // Clients before v1.33 only have "model" as unencrypted field
 		responseMutator = forwarder.WithRawResponseMutation(session.EncryptResponse(r.Context())) // Clients before v1.33 expect the full response body to be encrypted
@@ -112,6 +138,11 @@ func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Re
 // forwardChatCompletionsRequest returns a handler to forward chat completions with field mutation using the given selectors.
 func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.Request) {
 	session := a.Cipher.NewResponseCipher()
+
+	// duplicate reasoning field during deprecation
+	// TODO: remove after May 1st
+	responseMutation := forwarder.MutationFuncChain(duplicateReasoningFieldInJSON, session.EncryptResponse(r.Context()))
+
 	a.Forwarder.Forward(
 		w, r,
 		forwarder.RequestMutatorChain(
@@ -120,7 +151,41 @@ func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 			a.mutators.SecureImageURLValidator,
 			a.mutators.StreamUsageReportingInjector,
 		),
-		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainCompletionsResponseFields, false),
+		forwarder.WithJSONResponseMutation(responseMutation, openai.PlainCompletionsResponseFields),
 		forwarder.NoHeaderMutation,
 	)
+}
+
+func duplicateReasoningFieldInJSON(in string) (string, error) {
+	data := []byte(in)
+	if len(data) == 0 || !gjson.ValidBytes(data) {
+		return in, nil
+	}
+
+	result := gjson.ParseBytes(data)
+	if !result.IsArray() {
+		return in, nil
+	}
+
+	var mutateErr error
+	result.ForEach(func(key, _ gjson.Result) bool {
+		for _, field := range []string{"message", "delta"} {
+			reasoningPath := key.String() + "." + field + ".reasoning"
+			reasoning := gjson.GetBytes(data, reasoningPath)
+			if !reasoning.Exists() {
+				continue
+			}
+
+			data, mutateErr = sjson.SetRawBytes(data, key.String()+"."+field+".reasoning_content", []byte(reasoning.Raw))
+			if mutateErr != nil {
+				return false
+			}
+		}
+		return true
+	})
+	if mutateErr != nil {
+		return "", mutateErr
+	}
+
+	return string(data), nil
 }

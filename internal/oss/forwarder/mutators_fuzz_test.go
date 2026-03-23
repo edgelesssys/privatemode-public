@@ -9,25 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func FuzzMutateAllJSONFields(f *testing.F) {
+func FuzzMutateJSONFields(f *testing.F) {
 	f.Add([]byte("{}"))
 	f.Add([]byte("[]"))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		require := require.New(t)
-		out, err := MutateAllJSONFields(data, noMutation, FieldSelector{})
-		require.NoError(err)
-		require.NotNil(out)
-	})
-}
-
-func FuzzMutateSelectJSONFields(f *testing.F) {
-	f.Add([]byte("{}"))
-	f.Add([]byte("[]"))
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		require := require.New(t)
-		out, err := mutateSelectJSONFields(data, noMutation, FieldSelector{})
+		out, err := MutateJSONFields(data, noMutation, FieldSelector{})
 		require.NoError(err)
 		require.NotNil(out)
 	})

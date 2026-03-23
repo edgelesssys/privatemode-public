@@ -116,7 +116,7 @@ func (c *Client) Unstructured(ctx context.Context, files []UnstructuredFile, opt
 		return nil, fmt.Errorf("sending request: %w", err)
 	}
 
-	decrypted, err := forwarder.MutateAllJSONFields(respBody, cipher.DecryptResponse, nil)
+	decrypted, err := forwarder.MutateJSONFields(respBody, cipher.DecryptResponse, nil)
 	if err != nil {
 		return nil, fmt.Errorf("decrypting response: %w", err)
 	}

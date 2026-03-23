@@ -96,13 +96,13 @@ func (s *Server) Serve(ctx context.Context, lis net.Listener, tlsConfig *tls.Con
 // GetHandler returns an HTTP handler that routes requests to the appropriate handler.
 func (s *Server) GetHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc(openai.ChatCompletionsEndpoint, s.chatCompletionsHandler)
-	mux.HandleFunc(openai.LegacyCompletionsEndpoint, s.chatCompletionsHandler) // Reuse the same handler as for /v1/chat/completions since the unencrypted fields are the same
+	mux.HandleFunc(openai.ChatCompletionsEndpoint, s.chatRequestHandler(openai.PlainCompletionsRequestFields, openai.PlainCompletionsResponseFields))
+	mux.HandleFunc(openai.LegacyCompletionsEndpoint, s.chatRequestHandler(openai.PlainCompletionsRequestFields, openai.PlainCompletionsResponseFields))
 	mux.HandleFunc("/unstructured/", s.unstructuredHandler)
 	mux.HandleFunc(openai.ModelsEndpoint, s.noEncryptionHandler)
 	mux.HandleFunc(openai.EmbeddingsEndpoint, s.embeddingsHandler)
 	mux.HandleFunc(openai.TranscriptionsEndpoint, s.transcriptionsHandler)
-	mux.HandleFunc(anthropic.MessagesEndpoint, s.anthropicMessagesHandler)
+	mux.HandleFunc(anthropic.MessagesEndpoint, s.chatRequestHandler(anthropic.PlainMessagesRequestFields, anthropic.PlainMessagesResponseFields))
 
 	// If the api key wasn't provided via command line flag, offer the secret manager the API key from the request.
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -170,53 +170,57 @@ func (s *Server) inferenceHandler(
 	}
 }
 
-func (s *Server) chatCompletionsHandler(w http.ResponseWriter, r *http.Request) {
-	modelExtractor := func(req *http.Request) (string, error) {
-		msg, err := unmarshalJSONBody[openai.ChatRequestPlainData](req)
-		if err != nil {
-			return "", fmt.Errorf("parsing chat request: %w", err)
-		}
-		return msg.Model, nil
+func modelFromRequest(req *http.Request) (string, error) {
+	type modelRequest struct {
+		Model string `json:"model"`
 	}
 
-	s.inferenceHandler(
-		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-			return forwarder.RequestMutatorChain(
-				mutators.ShardKeyInjector(s.defaultCacheSalt, s.log), // we don't want a shard key for random cache salts, so we inject before
-				openai.CacheSaltInjector(func() string {
-					if s.defaultCacheSalt == "" {
-						return openai.RandomPromptCacheSalt()
-					}
-					return s.defaultCacheSalt
-				}, s.log),
-				mutators.ModelHeaderInjector(modelExtractor),
-				forwarder.WithJSONRequestMutation(cw.Encrypt, openai.PlainCompletionsRequestFields, s.log),
-			)
-		},
-		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, openai.PlainCompletionsResponseFields, false)
-		},
-	)(w, r)
+	msg, err := unmarshalJSONBody[modelRequest](req)
+	if err != nil {
+		return "", fmt.Errorf("parsing request: %w", err)
+	}
+	if msg.Model == "" {
+		return "", fmt.Errorf("no model specified in request")
+	}
+
+	return msg.Model, nil
+}
+
+func (s *Server) chatRequestHandler(
+	plainReqFields, plainRespFields forwarder.FieldSelector,
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.inferenceHandler(
+			func(cw *RenewableRequestCipher) forwarder.RequestMutator {
+				return forwarder.RequestMutatorChain(
+					mutators.ShardKeyInjector(s.defaultCacheSalt, s.log), // we don't want a shard key for random cache salts, so we inject before
+					openai.CacheSaltInjector(func() string {
+						if s.defaultCacheSalt == "" {
+							return openai.RandomPromptCacheSalt()
+						}
+						return s.defaultCacheSalt
+					}, s.log),
+					mutators.ModelHeaderInjector(modelFromRequest),
+					forwarder.WithJSONRequestMutation(cw.Encrypt, plainReqFields, s.log),
+				)
+			},
+			func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
+				return forwarder.WithJSONResponseMutation(cw.DecryptResponse, plainRespFields)
+			},
+		)(w, r)
+	}
 }
 
 func (s *Server) embeddingsHandler(w http.ResponseWriter, r *http.Request) {
-	modelExtractor := func(req *http.Request) (string, error) {
-		msg, err := unmarshalJSONBody[openai.EmbeddingsRequestPlainData](req)
-		if err != nil {
-			return "", fmt.Errorf("parsing embeddings request: %w", err)
-		}
-		return msg.Model, nil
-	}
-
 	s.inferenceHandler(
 		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
 			return forwarder.RequestMutatorChain(
-				mutators.ModelHeaderInjector(modelExtractor),
+				mutators.ModelHeaderInjector(modelFromRequest),
 				forwarder.WithJSONRequestMutation(cw.Encrypt, openai.PlainEmbeddingsRequestFields, s.log),
 			)
 		},
 		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, openai.PlainEmbeddingsResponseFields, false)
+			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, openai.PlainEmbeddingsResponseFields)
 		},
 	)(w, r)
 }
@@ -249,7 +253,7 @@ func (s *Server) transcriptionsHandler(w http.ResponseWriter, r *http.Request) {
 			)
 		},
 		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, openai.PlainTranscriptionResponseFields, false)
+			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, openai.PlainTranscriptionResponseFields)
 		},
 	)(w, r)
 }
@@ -261,30 +265,7 @@ func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
 		},
 		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
 			// currently only json response mutation is supported
-			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, nil, false)
-		},
-	)(w, r)
-}
-
-func (s *Server) anthropicMessagesHandler(w http.ResponseWriter, r *http.Request) {
-	modelExtractor := func(req *http.Request) (string, error) {
-		msg, err := unmarshalJSONBody[anthropic.MessagesRequestPlainData](req)
-		if err != nil {
-			return "", fmt.Errorf("parsing messages request: %w", err)
-		}
-		return msg.Model, nil
-	}
-
-	s.inferenceHandler(
-		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-			return forwarder.RequestMutatorChain(
-				mutators.ShardKeyInjector(s.defaultCacheSalt, s.log),
-				mutators.ModelHeaderInjector(modelExtractor),
-				forwarder.WithJSONRequestMutation(cw.Encrypt, anthropic.PlainMessagesRequestFields, s.log),
-			)
-		},
-		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, anthropic.PlainMessagesResponseFields, false)
+			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, nil)
 		},
 	)(w, r)
 }

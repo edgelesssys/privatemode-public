@@ -12,11 +12,13 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/openai"
 )
 
 // Adapter implements an inference adapter for the Anthropic API.
 type Adapter struct {
 	*inference.Adapter
+	cacheSaltValidator forwarder.RequestMutator
 }
 
 // New creates a new [Adapter] for the Anthropic API.
@@ -28,7 +30,8 @@ func New(workloadTasks []string, cipher inference.ResponseCipherCreator, ocspSta
 	}
 
 	return &Adapter{
-		Adapter: baseAdapter,
+		Adapter:            baseAdapter,
+		cacheSaltValidator: openai.CacheSaltValidator(log),
 	}, nil
 }
 
@@ -49,8 +52,11 @@ func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request)
 	session := a.Cipher.NewResponseCipher()
 	a.Forwarder.Forward(
 		w, r,
-		forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), anthropic.PlainMessagesRequestFields, a.Log),
-		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), anthropic.PlainMessagesResponseFields, false),
+		forwarder.RequestMutatorChain(
+			forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), anthropic.PlainMessagesRequestFields, a.Log),
+			a.cacheSaltValidator,
+		),
+		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), anthropic.PlainMessagesResponseFields),
 		forwarder.NoHeaderMutation,
 	)
 }

@@ -56,29 +56,7 @@ func BenchmarkAllJSONFieldMutation(b *testing.B) {
 		key := bytes.Repeat([]byte{byte(b.N % 0xFF)}, 16)
 		rc, err := crypto.NewRequestCipher(key, "testing")
 		require.NoError(err)
-		_, err = MutateAllJSONFields(benchmarkJSONData, rc.Encrypt, selector)
-		require.NoError(err)
-	}
-}
-
-func BenchmarkJSONFieldMutation(b *testing.B) {
-	require := require.New(b)
-
-	selector := FieldSelector{
-		{"test"},
-		{"field1", "field1\\.2"},
-		{"field1", "intValue"},
-		{"field1", "doubleNested", "nestedField2"},
-		{"arrayData"},
-		{"field2"},
-		{"intValue"},
-	}
-
-	for b.Loop() {
-		key := bytes.Repeat([]byte{byte(b.N % 0xFF)}, 16)
-		rc, err := crypto.NewRequestCipher(key, "testing")
-		require.NoError(err)
-		_, err = mutateSelectJSONFields(benchmarkJSONData, rc.Encrypt, selector)
+		_, err = MutateJSONFields(benchmarkJSONData, rc.Encrypt, selector)
 		require.NoError(err)
 	}
 }

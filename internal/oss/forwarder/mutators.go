@@ -77,6 +77,23 @@ func RequestMutatorChain(
 	}
 }
 
+// MutationFuncChain is a chain of [MutationFunc]s.
+func MutationFuncChain(
+	mutators ...MutationFunc,
+) MutationFunc {
+	return func(in string) (string, error) {
+		out := in
+		for _, mutator := range mutators {
+			var err error
+			out, err = mutator(out)
+			if err != nil {
+				return "", fmt.Errorf("mutating data: %w", err)
+			}
+		}
+		return out, nil
+	}
+}
+
 // WithRawRequestMutation returns a [RequestMutator] which performs mutation on the entire request body,
 // regardless of its content-type. It uses the provided MutationFunc to mutate the raw request body.
 func WithRawRequestMutation(mutate MutationFunc, log *slog.Logger) RequestMutator {
@@ -101,7 +118,7 @@ func WithRawRequestMutation(mutate MutationFunc, log *slog.Logger) RequestMutato
 // WithJSONRequestMutation returns a [RequestMutator] which mutates the full request.
 // Mutation order is deterministic based on sorting and is the same as for [WithJSONResponseMutation].
 func WithJSONRequestMutation(mutate MutationFunc, skipFields FieldSelector, log *slog.Logger) RequestMutator {
-	return withJSONRequestMutation(mutate, skipFields, MutateAllJSONFields, log)
+	return withJSONRequestMutation(mutate, skipFields, MutateJSONFields, log)
 }
 
 // WithRawFormRequestMutation mutates the entire body of requests with HTTP form data.
@@ -205,29 +222,15 @@ func WithFormRequestMutation(mutate MutationFunc, skipFields FieldSelector, log 
 	}
 }
 
-// WithSelectJSONResponseMutation returns a [ResponseMutator] which mutates the data read from the given [io.Reader].
-// Mutation order is deterministic based on sorting.
-func WithSelectJSONResponseMutation(mutate MutationFunc, fields FieldSelector) ResponseMutator {
-	return &mutatingReader{
-		scanner:        nil,
-		mutate:         mutate,
-		dataParseFunc:  mutateSelectJSONFields,
-		fields:         fields,
-		leftover:       nil,
-		skipFinalEvent: false,
-	}
-}
-
 // WithJSONResponseMutation returns a [ResponseMutator] which mutates the data read from the given [io.Reader].
 // Mutation order is deterministic based on sorting and is the same as for [WithJSONRequestMutation].
-func WithJSONResponseMutation(mutate MutationFunc, skipFields FieldSelector, backwardsCompatibleMode bool) ResponseMutator {
+func WithJSONResponseMutation(mutate MutationFunc, skipFields FieldSelector) ResponseMutator {
 	return &mutatingReader{
-		scanner:        nil,
-		mutate:         mutate,
-		dataParseFunc:  MutateAllJSONFields,
-		fields:         skipFields,
-		leftover:       nil,
-		skipFinalEvent: backwardsCompatibleMode,
+		scanner:       nil,
+		mutate:        mutate,
+		dataParseFunc: MutateJSONFields,
+		fields:        skipFields,
+		leftover:      nil,
 	}
 }
 
@@ -240,9 +243,8 @@ func WithRawResponseMutation(mutate MutationFunc) ResponseMutator {
 			mutated, err := mutate(string(data))
 			return []byte(mutated), err
 		},
-		fields:         nil,
-		leftover:       nil,
-		skipFinalEvent: false,
+		fields:   nil,
+		leftover: nil,
 	}
 }
 
@@ -279,9 +281,6 @@ func withJSONRequestMutation(
 type mutatingReader struct {
 	scanner  *bufio.Scanner
 	leftover []byte
-
-	// workaround required for backwards compatibility with privatemode-proxy < v1.16
-	skipFinalEvent bool
 
 	fields        FieldSelector
 	mutate        MutationFunc
@@ -405,7 +404,7 @@ func (r *mutatingReader) mutateChunk(b []byte) ([]byte, error) {
 	// Skip SSE "event:" lines (used in Anthropic format) - they don't contain JSON.
 	// Also skip the final "[DONE]" event (used in OpenAI format), since it's not a JSON object we can mutate.
 	isEventLine := found && bytes.Equal(before, []byte("event"))
-	isDoneEvent := bytes.EqualFold(toMutate, []byte("[DONE]")) && !r.skipFinalEvent
+	isDoneEvent := bytes.EqualFold(toMutate, []byte("[DONE]"))
 	if isEventLine || isDoneEvent {
 		mutated = toMutate
 	} else {
@@ -416,55 +415,19 @@ func (r *mutatingReader) mutateChunk(b []byte) ([]byte, error) {
 		}
 	}
 
-	// Add back event stream prefix and append newlines which were removed by the scanner
-	mutated = append(prefix, append(mutated, []byte(eventStreamSuffix)...)...)
-	return mutated, nil
-}
+	// TODO: refactor mutatingReader to parse SSE at the event level (splitting on \n\n) rather
+	// than the line level (splitting on \n), so that event structure is preserved end-to-end
+	// without needing per-field-type heuristics like the one below.
 
-func mutateSelectJSONFields(data []byte, mutate MutationFunc, mutateFields FieldSelector) ([]byte, error) {
-	result := data
-	for _, field := range sortedIndices(data) {
-		var mutateField []string
-		for _, prospectiveField := range mutateFields {
-			if field == prospectiveField[0] {
-				mutateField = prospectiveField
-				break
-			}
-		}
-
-		// Skip if there was no match for the current field in our selector
-		if len(mutateField) == 0 {
-			continue
-		}
-
-		// If we terminated the JSON path, i.e. only one element left in the selector for the current field,
-		// use the mutation function supplied by the caller
-		mutateFunc := mutate
-		// Otherwise recursively call [mutateSelectJSONFields]
-		if len(mutateField) > 1 {
-			subPaths := EvaluateArrayPaths(gjson.GetBytes(result, field), mutateField[1:])
-			mutateFunc = func(data string) (string, error) {
-				mutatedField, err := mutateSelectJSONFields([]byte(data), mutate, subPaths)
-				if err != nil {
-					return "", fmt.Errorf("mutating nested field: %w", err)
-				}
-				return string(mutatedField), nil
-			}
-		}
-
-		// Mutate the field
-		mutatedField, err := mutateFunc(gjson.GetBytes(result, field).Raw)
-		if err != nil {
-			return nil, fmt.Errorf("mutating field %q: %w", field, err)
-		}
-
-		// Use SetRawBytes, as otherwise quotes and data structure characters in the data will be escaped
-		result, err = sjson.SetRawBytes(result, field, []byte(mutatedField))
-		if err != nil {
-			return nil, fmt.Errorf("updating input with mutated field: %w", err)
-		}
+	// Add back event stream prefix and append newlines which were removed by the scanner.
+	// For Anthropic "event:" lines, use a single newline — the following "data:" line is part
+	// of the same event and must not be separated by a blank line.
+	suffix := eventStreamSuffix
+	if isEventLine {
+		suffix = "\n"
 	}
-	return result, nil
+	mutated = append(prefix, append(mutated, []byte(suffix)...)...)
+	return mutated, nil
 }
 
 // isValidJSON returns nil if data is valid JSON or empty, an "incomplete JSON" error if incomplete, or a formatted error otherwise.
@@ -481,8 +444,8 @@ func isValidJSON(data []byte) error {
 	return fmt.Errorf("mutation on invalid JSON data: %w", err)
 }
 
-// MutateAllJSONFields mutates all JSON fields in data, skipping fields matched by skipFields.
-func MutateAllJSONFields(data []byte, mutate MutationFunc, skipFields FieldSelector) ([]byte, error) {
+// MutateJSONFields mutates all JSON fields in data, skipping fields matched by skipFields.
+func MutateJSONFields(data []byte, mutate MutationFunc, skipFields FieldSelector) ([]byte, error) {
 	if err := isValidJSON(data); err != nil {
 		return nil, err
 	}
@@ -515,7 +478,7 @@ func MutateAllJSONFields(data []byte, mutate MutationFunc, skipFields FieldSelec
 		// If a subfield should be skipped, recursively call mutateJSONFields
 		if len(subPaths) > 0 {
 			mutateFunc = func(data string) (string, error) {
-				mutatedField, err := MutateAllJSONFields([]byte(data), mutate, subPaths)
+				mutatedField, err := MutateJSONFields([]byte(data), mutate, subPaths)
 				if err != nil {
 					return "", fmt.Errorf("mutating nested field: %w", err)
 				}

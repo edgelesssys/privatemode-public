@@ -12,6 +12,8 @@
 package anthropic
 
 import (
+	"encoding/json"
+
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 )
 
@@ -48,9 +50,11 @@ type MessagesRequestPlainData struct {
 // Don't send the marshalled type to clients/servers. Read package docs for more info.
 type MessagesRequest struct {
 	MessagesRequestPlainData
-	MaxTokens int       `json:"max_tokens,omitzero"`
-	Messages  []Message `json:"messages"`
-	System    string    `json:"system,omitempty"`
+	MaxTokens int             `json:"max_tokens,omitzero"`
+	Messages  []Message       `json:"messages"`
+	System    string          `json:"system,omitempty"`
+	Tools     json.RawMessage `json:"tools,omitempty"`
+	CacheSalt string          `json:"cache_salt,omitempty"`
 }
 
 // Message is a message in an Anthropic messages call.
@@ -75,12 +79,17 @@ type MessagesResponse struct {
 
 // ContentBlock represents a block of content in an Anthropic response.
 type ContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type  string          `json:"type"`
+	Text  string          `json:"text,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	ID    string          `json:"id,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 // Usage contains the token usage of an Anthropic messages call.
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitzero"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitzero"`
 }

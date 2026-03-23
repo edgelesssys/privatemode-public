@@ -495,7 +495,7 @@ func TestUnstructuredEncrypted(t *testing.T) {
 
 			body, contentType := tc.buildBody(t)
 
-			req := httptest.NewRequest(http.MethodPost, "/unstructured/general/v0/general", body)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/unstructured/general/v0/general", body)
 			req.Header.Set("Content-Type", contentType)
 
 			resp := httptest.NewRecorder()
@@ -571,7 +571,7 @@ func TestSetDynamicHeaders(t *testing.T) {
 
 			server := newTestServer(nil, tc.secret, "", "", false)
 
-			req := httptest.NewRequest(http.MethodGet, "/test", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
 			requestID := newRequestID()
 			attempt := 1
 			err := server.setDynamicHeaders(req, tc.secret, requestID, attempt)
@@ -728,7 +728,7 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 
 		// Use JSON request mutation if the request is a JSON request
 		requestMutator := forwarder.WithRawRequestMutation(decrypt, log)
-		responseMutator := forwarder.WithJSONResponseMutation(encrypt, nil, false)
+		responseMutator := forwarder.WithJSONResponseMutation(encrypt, nil)
 
 		if err := requestMutator(r); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)

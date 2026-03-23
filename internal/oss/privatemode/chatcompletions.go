@@ -46,7 +46,7 @@ func (c *Client) ChatCompletions(ctx context.Context, body []byte) ([]byte, erro
 		return nil, fmt.Errorf("sending request: %w", err)
 	}
 
-	decrypted, err := forwarder.MutateAllJSONFields(respBody, cipher.DecryptResponse, openai.PlainCompletionsResponseFields)
+	decrypted, err := forwarder.MutateJSONFields(respBody, cipher.DecryptResponse, openai.PlainCompletionsResponseFields)
 	if err != nil {
 		return nil, fmt.Errorf("decrypting response: %w", err)
 	}
@@ -79,7 +79,7 @@ func (c *Client) StreamChatCompletions(ctx context.Context, body []byte) (*ChatC
 	return &ChatCompletionsStream{
 		scanner: bufio.NewScanner(resp.Body),
 		decrypt: func(data []byte) ([]byte, error) {
-			return forwarder.MutateAllJSONFields(data, cipher.DecryptResponse, openai.PlainCompletionsResponseFields)
+			return forwarder.MutateJSONFields(data, cipher.DecryptResponse, openai.PlainCompletionsResponseFields)
 		},
 		resp: resp,
 	}, nil

@@ -19,6 +19,14 @@ type persistedBody struct {
 	bytes []byte
 }
 
+func setReplayableBody(r *http.Request, body []byte) {
+	r.ContentLength = int64(len(body))
+	r.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(body)), nil
+	}
+	r.Body = &persistedBody{r: bytes.NewReader(body), bytes: body}
+}
+
 func (p *persistedBody) Read(b []byte) (int, error) {
 	return p.r.Read(b)
 }
@@ -33,6 +41,7 @@ func (p *persistedBody) Close() error {
 func ReadBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, error) {
 	// Fast path: Body is already persisted
 	if persisted, ok := r.Body.(*persistedBody); ok {
+		setReplayableBody(r, persisted.bytes)
 		return persisted.bytes, nil
 	}
 
@@ -43,10 +52,8 @@ func ReadBody(w http.ResponseWriter, r *http.Request, maxBytes int64) ([]byte, e
 		return nil, err
 	}
 
-	persisted := &persistedBody{r: bytes.NewReader(bodyBytes), bytes: bodyBytes}
-	r.Body = persisted
-
-	return persisted.bytes, nil
+	setReplayableBody(r, bodyBytes)
+	return bodyBytes, nil
 }
 
 // CloneRequest performs a deep clone on r including its body via [ReadBody].
@@ -59,8 +66,7 @@ func CloneRequest(w http.ResponseWriter, r *http.Request, maxBytes int64) (*http
 
 	// Clone() clones deeply, except Body
 	cloned := r.Clone(r.Context())
-	// Create a new, independent Reader
-	cloned.Body = &persistedBody{r: bytes.NewReader(body), bytes: body}
+	setReplayableBody(cloned, body)
 
 	return cloned, nil
 }
@@ -71,6 +77,7 @@ func CloneRequest(w http.ResponseWriter, r *http.Request, maxBytes int64) (*http
 func ReadBodyUnlimited(r *http.Request) ([]byte, error) {
 	// Fast path: Body is already persisted
 	if persisted, ok := r.Body.(*persistedBody); ok {
+		setReplayableBody(r, persisted.bytes)
 		return persisted.bytes, nil
 	}
 
@@ -80,9 +87,8 @@ func ReadBodyUnlimited(r *http.Request) ([]byte, error) {
 		return nil, err
 	}
 
-	persisted := &persistedBody{r: bytes.NewReader(bodyBytes), bytes: bodyBytes}
-	r.Body = persisted
-	return persisted.bytes, nil
+	setReplayableBody(r, bodyBytes)
+	return bodyBytes, nil
 }
 
 // CloneRequestUnlimited performs a deep clone on r including its body via [ReadBodyUnlimited].
@@ -95,14 +101,12 @@ func CloneRequestUnlimited(r *http.Request) (*http.Request, error) {
 
 	// Clone() clones deeply, except Body
 	cloned := r.Clone(r.Context())
-	// Create a new, independent Reader
-	cloned.Body = &persistedBody{r: bytes.NewReader(body), bytes: body}
+	setReplayableBody(cloned, body)
 	return cloned, nil
 }
 
 // SetBody changes the [http.Request.Body] of r to body.
 // The body bytes can be extracted again via [ReadBody].
 func SetBody(r *http.Request, body []byte) {
-	r.ContentLength = int64(len(body))
-	r.Body = &persistedBody{r: bytes.NewReader(body), bytes: body}
+	setReplayableBody(r, body)
 }

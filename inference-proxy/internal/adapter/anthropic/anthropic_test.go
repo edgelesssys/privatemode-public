@@ -21,7 +21,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const defaultModel = "claude-3-opus-20240229"
+const (
+	defaultModel  = "claude-3-opus-20240229"
+	testCacheSalt = "dGVzdHNhbHR0ZXN0c2FsdHRlc3RzYWx0dGVzdHNhbHQ=" // 32 bytes base64-encoded
+)
 
 func TestForwardMessagesRequest(t *testing.T) {
 	testCases := map[string]struct {
@@ -39,6 +42,7 @@ func TestForwardMessagesRequest(t *testing.T) {
 					Messages: []anthropic.Message{
 						{Role: "user", Content: "Hello, Claude!"},
 					},
+					CacheSalt: testCacheSalt,
 				})
 				require.NoError(t, err)
 				return string(res)
@@ -71,6 +75,7 @@ func TestForwardMessagesRequest(t *testing.T) {
 					Messages: []anthropic.Message{
 						{Role: "user", Content: "Hello, Claude!"},
 					},
+					CacheSalt: testCacheSalt,
 				})
 				require.NoError(t, err)
 				return string(res)
@@ -98,6 +103,7 @@ func TestForwardMessagesRequest(t *testing.T) {
 					Messages: []anthropic.Message{
 						{Role: "user", Content: "Hello!"},
 					},
+					CacheSalt: testCacheSalt,
 				})
 				require.NoError(t, err)
 				return string(res)
@@ -138,7 +144,7 @@ func TestForwardMessagesRequest(t *testing.T) {
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, log)
 			require.NoError(err)
 
-			request := httptest.NewRequest(http.MethodPost, anthropic.MessagesEndpoint, strings.NewReader(tc.clientRequest))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, anthropic.MessagesEndpoint, strings.NewReader(tc.clientRequest))
 			responseRecorder := httptest.NewRecorder()
 
 			adapter.forwardMessagesRequest(responseRecorder, request)
@@ -196,7 +202,7 @@ func TestRegisterRoutes(t *testing.T) {
 			})
 			adapter.RegisterRoutes(mux)
 
-			request := httptest.NewRequest(tc.method, tc.path, http.NoBody)
+			request := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, http.NoBody)
 			responseRecorder := httptest.NewRecorder()
 
 			mux.ServeHTTP(responseRecorder, request)

@@ -160,7 +160,7 @@ func TestVerifyOCSP(t *testing.T) {
 			})
 			handler := a.VerifyOCSP(innerHandler)
 
-			request := httptest.NewRequest(http.MethodPost, "/test", http.NoBody)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", http.NoBody)
 
 			if tc.acceptedStatus != nil {
 				ocspHeader := ocspheader.NewHeader(tc.acceptedStatus, time.Time{})
@@ -191,7 +191,7 @@ func TestUnsupportedEndpoint(t *testing.T) {
 	}
 
 	responseRecorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/unsupported", http.NoBody)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/unsupported", http.NoBody)
 
 	a.UnsupportedEndpoint(responseRecorder, request)
 

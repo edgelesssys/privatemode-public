@@ -25,7 +25,7 @@ func TestForwardStreaming(t *testing.T) {
 	mutator := &stubMutator{
 		mutateResponse: `"plainText"`,
 	}
-	responseMutator := WithJSONResponseMutation(mutator.mutate, nil, false)
+	responseMutator := WithJSONResponseMutation(mutator.mutate, nil)
 
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -39,7 +39,7 @@ func TestForwardStreaming(t *testing.T) {
 
 	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
 	resp := httptest.NewRecorder()
 
 	forwarder.Forward(
@@ -65,7 +65,7 @@ func TestForwardStreamingAborted(t *testing.T) {
 	mutator := &stubMutator{
 		mutateResponse: `"plainText"`,
 	}
-	responseMutator := WithJSONResponseMutation(mutator.mutate, nil, false)
+	responseMutator := WithJSONResponseMutation(mutator.mutate, nil)
 
 	sentFirstPart := make(chan struct{})
 
@@ -90,7 +90,7 @@ func TestForwardStreamingAborted(t *testing.T) {
 
 	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
 	// Wrap req.Context() in a cancelable context
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
@@ -133,7 +133,7 @@ func TestForwardNonStreaming(t *testing.T) {
 	mutator := &stubMutator{
 		mutateResponse: `"plainText"`,
 	}
-	responseMutator := WithJSONResponseMutation(mutator.mutate, nil, false)
+	responseMutator := WithJSONResponseMutation(mutator.mutate, nil)
 
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -147,7 +147,7 @@ func TestForwardNonStreaming(t *testing.T) {
 
 	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
 	resp := httptest.NewRecorder()
 
 	forwarder.Forward(
@@ -169,7 +169,7 @@ func TestForwardHeaderCopying(t *testing.T) {
 	failingMutator := &stubMutator{
 		mutateErr: assert.AnError,
 	}
-	responseMutator := WithJSONResponseMutation(failingMutator.mutate, nil, false)
+	responseMutator := WithJSONResponseMutation(failingMutator.mutate, nil)
 
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -179,7 +179,7 @@ func TestForwardHeaderCopying(t *testing.T) {
 
 	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
 	resp := httptest.NewRecorder()
 
 	forwarder.Forward(
@@ -245,7 +245,7 @@ func TestHTTPError(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			rr := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 			if tt.acceptHeader != "" {
 				req.Header.Set("Accept", tt.acceptHeader)
 			}
@@ -291,7 +291,7 @@ func TestForwardMaxBodyBytes(t *testing.T) {
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(tc.body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", strings.NewReader(tc.body))
 			resp := httptest.NewRecorder()
 
 			fwd.Forward(
@@ -363,7 +363,7 @@ func TestForwardRetry(t *testing.T) {
 				return shouldRetry, tc.delay
 			}
 
-			req := httptest.NewRequest(http.MethodPost, "/test", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", nil)
 			resp := httptest.NewRecorder()
 
 			startTime := time.Now()

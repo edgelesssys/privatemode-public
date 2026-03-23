@@ -260,11 +260,11 @@ func TestNewlinePreservationForStreamEventData(t *testing.T) {
 	b := bytes.NewBufferString(data)
 	readCloser := io.NopCloser(b)
 
-	responseMutator := WithSelectJSONResponseMutation(
+	responseMutator := WithJSONResponseMutation(
 		stubMutator{
 			mutateResponse: `"encryptedText"`,
 		}.mutate,
-		FieldSelector{{"field1"}},
+		FieldSelector{},
 	)
 	sut := responseMutator.Reader(readCloser)
 
@@ -273,149 +273,6 @@ func TestNewlinePreservationForStreamEventData(t *testing.T) {
 	assert.NoError(err)
 	expectedResponse := fmt.Sprintf(dataFmt, "encryptedText")
 	assert.Equal(expectedResponse, res.String())
-}
-
-func TestWithSelectJSONResponseMutation(t *testing.T) {
-	testCases := map[string]struct {
-		mutator          stubMutator
-		responseBody     string
-		fields           FieldSelector
-		expectedResponse string
-		wantErr          bool
-	}{
-		"single field mutation": {
-			mutator: stubMutator{
-				mutateResponse: `"encryptedText"`,
-			},
-			responseBody:     `{"field1": "plainText"}`,
-			fields:           FieldSelector{{"field1"}},
-			expectedResponse: `{"field1": "encryptedText"}`,
-		},
-		"multiple fields": {
-			mutator: stubMutator{
-				mutateResponse: `"encryptedText"`,
-			},
-			responseBody:     `{"field1": "plainText1", "field2": "plainText2"}`,
-			fields:           FieldSelector{{"field1"}, {"field2"}},
-			expectedResponse: `{"field1": "encryptedText", "field2": "encryptedText"}`,
-		},
-		"missing fields are skipped": {
-			mutator: stubMutator{
-				mutateResponse: `"encryptedText"`,
-			},
-			responseBody:     `{"field1": "plainText"}`,
-			fields:           FieldSelector{{"field2"}},
-			expectedResponse: `{"field1": "plainText"}`,
-		},
-		"not selected fields are skipped": {
-			mutator: stubMutator{
-				mutateResponse: `"encryptedText"`,
-			},
-			responseBody:     `{"field1": "plainText", "field2": "plainText2"}`,
-			fields:           FieldSelector{{"field2"}},
-			expectedResponse: `{"field1": "plainText", "field2": "encryptedText"}`,
-		},
-		"mutate from nested JSON": {
-			mutator: stubMutator{
-				mutateResponse: `"encryptedText"`,
-			},
-			responseBody:     `{"field1": {"nestedField": "plainText"}}`,
-			fields:           FieldSelector{{"field1"}},
-			expectedResponse: `{"field1": "encryptedText"}`,
-		},
-		"mutate to nested JSON": {
-			mutator: stubMutator{
-				mutateResponse: `{"nestedField": "plainText"}`,
-			},
-			responseBody:     `{"field1": "encryptedText"}`,
-			fields:           FieldSelector{{"field1"}},
-			expectedResponse: `{"field1": {"nestedField": "plainText"}}`,
-		},
-		"mutate error": {
-			mutator: stubMutator{
-				mutateErr: assert.AnError,
-			},
-			responseBody: `{"field1": "plainText"}`,
-			fields:       FieldSelector{{"field1"}},
-			wantErr:      true,
-		},
-		"mutate array fields": {
-			mutator: stubMutator{
-				mutateResponse: `"encryptedText"`,
-			},
-			responseBody:     `{"field1": [{"key": "plainText"}, {"key": "plainText"}]}`,
-			fields:           FieldSelector{{"field1", "#", "key"}},
-			expectedResponse: `{"field1": [{"key": "encryptedText"}, {"key": "encryptedText"}]}`,
-		},
-		"mutate deeply nested arrays": {
-			mutator: stubMutator{
-				mutateResponse: `"encryptedText"`,
-			},
-			responseBody:     `{"field1": [{"nested": [{"skip": "plainText", "mutate": "plainText1"}]}, {"nested": [{"skip": "plainText", "mutate": "plainText2"}]}]}`,
-			fields:           FieldSelector{{"field1", "#", "nested", "#", "mutate"}},
-			expectedResponse: `{"field1": [{"nested": [{"skip": "plainText", "mutate": "encryptedText"}]}, {"nested": [{"skip": "plainText", "mutate": "encryptedText"}]}]}`,
-		},
-	}
-	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			assert := assert.New(t)
-
-			mutator := WithSelectJSONResponseMutation(tc.mutator.mutate, tc.fields)
-
-			body, err := mutator.Mutate([]byte(tc.responseBody))
-			if tc.wantErr {
-				assert.Error(err)
-				return
-			}
-
-			assert.NoError(err)
-			assert.JSONEq(tc.expectedResponse, string(body))
-		})
-	}
-
-	streamingCases := map[string]struct {
-		mutator stubMutator
-	}{
-		"streaming mutation": {
-			mutator: stubMutator{
-				mutateResponse: `"encryptedText"`,
-			},
-		},
-		"streaming large field mutation": {
-			mutator: stubMutator{
-				mutateResponse: fmt.Sprintf("\"%s\"", bytes.Repeat([]byte("encryptedText"), 10000)),
-			},
-		},
-	}
-	for name, tc := range streamingCases {
-		t.Run(name, func(t *testing.T) {
-			assert := assert.New(t)
-
-			mutator := WithSelectJSONResponseMutation(tc.mutator.mutate, FieldSelector{{"field1"}})
-
-			msgChan := make(chan string)
-			reader := &fakeReader{
-				msgChan: msgChan,
-			}
-
-			messageParts := 10
-			go func() {
-				for i := range messageParts {
-					msgChan <- fmt.Sprintf(`%d: {"field1": "plainText"}`, i) + "\n\n"
-				}
-				close(msgChan)
-			}()
-
-			response := &bytes.Buffer{}
-			_, err := io.Copy(response, mutator.Reader(reader))
-			assert.NoError(err)
-			responseParts := strings.Split(strings.TrimRight(response.String(), "\n"), "\n\n") // trim the last newline, so that we don't get an empty final part
-			assert.Len(responseParts, messageParts)
-			for i, part := range responseParts {
-				assert.Equal(fmt.Sprintf(`%d: {"field1": %s}`, i, tc.mutator.mutateResponse), part)
-			}
-		})
-	}
 }
 
 func TestWithJSONResponseMutation(t *testing.T) {
@@ -506,7 +363,7 @@ func TestWithJSONResponseMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutator := WithJSONResponseMutation(tc.mutator.mutate, tc.skipFields, false)
+			mutator := WithJSONResponseMutation(tc.mutator.mutate, tc.skipFields)
 
 			body, err := mutator.Mutate([]byte(tc.responseBody))
 			if tc.wantErr {
@@ -537,7 +394,7 @@ func TestWithJSONResponseMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutator := WithJSONResponseMutation(tc.mutator.mutate, nil, false)
+			mutator := WithJSONResponseMutation(tc.mutator.mutate, nil)
 
 			msgChan := make(chan string)
 			reader := &fakeReader{
@@ -562,6 +419,79 @@ func TestWithJSONResponseMutation(t *testing.T) {
 				assert.Equal(fmt.Sprintf(`%d: {"field1": %s}`, i, tc.mutator.mutateResponse), responseParts[i])
 			}
 			assert.Equal("data: [DONE]", responseParts[messageParts]) // assert the event stream message is not mutated
+		})
+	}
+
+	// Anthropic SSE format: each event has an "event:" line followed by a "data:" line.
+	// The "event:" and "data:" lines must remain in the same event block (separated by \n, not \n\n).
+	t.Run("streaming anthropic event lines not separated by blank line", func(t *testing.T) {
+		assert := assert.New(t)
+
+		mutator := WithJSONResponseMutation(func(s string) (string, error) { return s, nil }, nil)
+
+		msgChan := make(chan string)
+		reader := &fakeReader{msgChan: msgChan}
+
+		go func() {
+			msgChan <- "event: message_start\ndata: {\"type\":\"message_start\"}\n\n"
+			msgChan <- "event: message_delta\ndata: {\"type\":\"message_delta\"}\n\n"
+			msgChan <- "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+			close(msgChan)
+		}()
+
+		response := &bytes.Buffer{}
+		_, err := io.Copy(response, mutator.Reader(reader))
+		assert.NoError(err)
+
+		events := strings.Split(strings.TrimRight(response.String(), "\n"), "\n\n")
+		assert.Len(events, 3)
+		for _, event := range events {
+			lines := strings.Split(event, "\n")
+			assert.Len(lines, 2, "each Anthropic event must have exactly two lines (event: and data:), got: %q", event)
+			assert.True(strings.HasPrefix(lines[0], "event:"), "first line must be event:, got: %q", lines[0])
+			assert.True(strings.HasPrefix(lines[1], "data:"), "second line must be data:, got: %q", lines[1])
+		}
+	})
+}
+
+func TestMutationFuncChain(t *testing.T) {
+	testCases := map[string]struct {
+		mutators []MutationFunc
+		input    string
+		want     string
+		wantErr  bool
+	}{
+		"chains mutators in order": {
+			mutators: []MutationFunc{
+				func(in string) (string, error) { return in + "-first", nil },
+				func(in string) (string, error) { return in + "-second", nil },
+			},
+			input: "value",
+			want:  "value-first-second",
+		},
+		"returns wrapped error": {
+			mutators: []MutationFunc{
+				func(in string) (string, error) { return in, nil },
+				func(string) (string, error) { return "", assert.AnError },
+			},
+			input:   "value",
+			wantErr: true,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+
+			mutate := MutationFuncChain(tc.mutators...)
+			got, err := mutate(tc.input)
+			if tc.wantErr {
+				assert.Error(err)
+				return
+			}
+
+			assert.NoError(err)
+			assert.Equal(tc.want, got)
 		})
 	}
 }

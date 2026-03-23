@@ -84,27 +84,6 @@ func TestForwardModelsRequest(t *testing.T) {
 				return string(res)
 			}(),
 		},
-		"retrieve model": {
-			workloadTasks: []string{constants.WorkloadTaskGenerate},
-			path:          fmt.Sprintf("/v1/models/%s", defaultModel),
-			serverResponse: func() string {
-				res, err := json.Marshal(openai.Model{
-					ID:     defaultModel,
-					Object: "model",
-				})
-				require.NoError(t, err)
-				return string(res)
-			}(),
-			wantResponse: func() string {
-				res, err := json.Marshal(openai.Model{
-					ID:     defaultModel,
-					Object: "model",
-					Tasks:  []string{constants.WorkloadTaskGenerate},
-				})
-				require.NoError(t, err)
-				return string(res)
-			}(),
-		},
 		"list models with multiple tasks": {
 			workloadTasks: []string{constants.WorkloadTaskGenerate, "custom-task"},
 			path:          "/v1/models",
@@ -140,6 +119,66 @@ func TestForwardModelsRequest(t *testing.T) {
 							Tasks:  []string{constants.WorkloadTaskGenerate, "custom-task"},
 						},
 					},
+				})
+				require.NoError(t, err)
+				return string(res)
+			}(),
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+			require := require.New(t)
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.serverResponse))
+			}))
+			defer srv.Close()
+
+			ocspStatus, err := json.Marshal([]ocsp.StatusInfo{{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}})
+			require.NoError(err)
+			ocspFile := filepath.Join(t.TempDir(), "ocsp.json")
+			require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
+
+			log := slog.Default()
+			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
+			adapter, err := New(tc.workloadTasks, nil, ocspFile, forwarder, log)
+			require.NoError(err)
+
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
+			responseRecorder := httptest.NewRecorder()
+
+			adapter.forwardModelsRequest(responseRecorder, request)
+			t.Log(responseRecorder.Body.String())
+			assert.JSONEq(tc.wantResponse, responseRecorder.Body.String())
+		})
+	}
+}
+
+func TestForwardSpecificModelRequest(t *testing.T) {
+	testCases := map[string]struct {
+		workloadTasks  []string
+		path           string
+		serverResponse string
+		wantResponse   string
+	}{
+		"retrieve model": {
+			workloadTasks: []string{constants.WorkloadTaskGenerate},
+			path:          fmt.Sprintf("/v1/models/%s", defaultModel),
+			serverResponse: func() string {
+				res, err := json.Marshal(openai.Model{
+					ID:     defaultModel,
+					Object: "model",
+				})
+				require.NoError(t, err)
+				return string(res)
+			}(),
+			wantResponse: func() string {
+				res, err := json.Marshal(openai.Model{
+					ID:     defaultModel,
+					Object: "model",
+					Tasks:  []string{constants.WorkloadTaskGenerate},
 				})
 				require.NoError(t, err)
 				return string(res)
@@ -188,10 +227,10 @@ func TestForwardModelsRequest(t *testing.T) {
 			adapter, err := New(tc.workloadTasks, nil, ocspFile, forwarder, log)
 			require.NoError(err)
 
-			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
 			responseRecorder := httptest.NewRecorder()
 
-			adapter.forwardModelsRequest(responseRecorder, request)
+			adapter.forwardSpecificModelRequest(responseRecorder, request)
 			t.Log(responseRecorder.Body.String())
 			assert.JSONEq(tc.wantResponse, responseRecorder.Body.String())
 		})
@@ -323,11 +362,73 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, forwarder, log)
 			require.NoError(err)
 
-			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(tc.clientRequest))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(tc.clientRequest))
 			responseRecorder := httptest.NewRecorder()
 
 			adapter.forwardChatCompletionsRequest(responseRecorder, request)
 			tc.validateResponse(assert, responseRecorder)
+		})
+	}
+}
+
+func TestForwardChatCompletionsRequestDuplicatesReasoningContent(t *testing.T) {
+	testCases := map[string]struct {
+		serverBody   string
+		assertBody   func(*testing.T, string)
+		serverHeader func(http.Header)
+	}{
+		"non-streaming": {
+			serverBody: `{"id":"chatcmpl-123","choices":[{"index":0,"message":{"role":"assistant","content":"answer","reasoning":"because"}}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`,
+			assertBody: func(t *testing.T, body string) {
+				assert.JSONEq(t, `{"id":"chatcmpl-123","choices":[{"index":0,"message":{"role":"assistant","content":"answer","reasoning":"because","reasoning_content":"because"}}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`, body)
+			},
+		},
+		"streaming": {
+			serverBody: strings.Join([]string{
+				`data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"content":"answer","reasoning":"because"}}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`,
+				``,
+				`data: [DONE]`,
+				``,
+			}, "\n"),
+			serverHeader: func(header http.Header) {
+				header.Set("Content-Type", "text/event-stream")
+			},
+			assertBody: func(t *testing.T, body string) {
+				assert.Contains(t, body, `"reasoning":"because"`)
+				assert.Contains(t, body, `"reasoning_content":"because"`)
+				assert.Contains(t, body, `data: [DONE]`)
+			},
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.serverHeader != nil {
+					tc.serverHeader(w.Header())
+				}
+				_, _ = w.Write([]byte(tc.serverBody))
+			}))
+			defer srv.Close()
+
+			ocspStatus, err := json.Marshal([]ocsp.StatusInfo{{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}})
+			require.NoError(err)
+			ocspFile := filepath.Join(t.TempDir(), "ocsp.json")
+			require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
+
+			log := slog.Default()
+			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, forwarder, log)
+			require.NoError(err)
+
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"some-model","messages":[{"role":"user","content":"hello"}],"cache_salt":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
+			responseRecorder := httptest.NewRecorder()
+
+			adapter.forwardChatCompletionsRequest(responseRecorder, request)
+			require.Equal(http.StatusOK, responseRecorder.Code)
+			tc.assertBody(t, responseRecorder.Body.String())
 		})
 	}
 }
@@ -358,13 +459,13 @@ func TestModelsEndpointExcludedFromOCSP(t *testing.T) {
 	a.RegisterRoutes(mux)
 
 	// Models endpoint should succeed despite bad OCSP status (not wrapped with OCSP middleware)
-	request := httptest.NewRequest(http.MethodGet, openai.ModelsEndpoint, http.NoBody)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, openai.ModelsEndpoint, http.NoBody)
 	responseRecorder := httptest.NewRecorder()
 	mux.ServeHTTP(responseRecorder, request)
 	assert.Equal(http.StatusOK, responseRecorder.Code)
 
 	// Other endpoints should fail with bad OCSP status (wrapped with OCSP middleware)
-	request = httptest.NewRequest(http.MethodPost, openai.ChatCompletionsEndpoint, http.NoBody)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, openai.ChatCompletionsEndpoint, http.NoBody)
 	responseRecorder = httptest.NewRecorder()
 	mux.ServeHTTP(responseRecorder, request)
 	assert.Equal(http.StatusInternalServerError, responseRecorder.Code)

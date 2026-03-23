@@ -34,28 +34,6 @@
           overlays = [
             (_final: prev: (import ./nix/packages { inherit (prev) lib callPackage; }))
             (_final: prev: { lib = prev.lib // (import ./nix/lib { inherit (prev) lib callPackage; }); })
-            # Workaround for Darwin renovate build (libtool), remove when fixed upstream.
-            (
-              _final: prev:
-              if prev ? renovate then
-                {
-                  renovate = prev.renovate.overrideAttrs (
-                    old:
-                    let
-                      darwinLibtool = if prev.stdenv.isDarwin then [ prev.darwin.cctools ] else [ ];
-                    in
-                    {
-                      nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ darwinLibtool;
-                    }
-                    // prev.lib.optionalAttrs prev.stdenv.isDarwin {
-                      LIBTOOL = "${prev.darwin.cctools}/bin/libtool";
-                    }
-                  );
-                }
-              else
-                {
-                }
-            )
           ];
         };
 

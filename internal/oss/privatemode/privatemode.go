@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/attest"
 	"github.com/edgelesssys/continuum/internal/oss/auth"
@@ -117,7 +118,9 @@ func (c *Client) WithHTTPClient(httpClient *http.Client) *Client {
 
 // FetchManifest fetches the manifest from the CDN.
 func (c *Client) FetchManifest(ctx context.Context) ([]byte, error) {
-	manifestURL := c.cdnBaseURL + "/manifest.json"
+	// Random query parameter is required to circumvent browser caching when called from the web app.
+	// TODO(msanft): Consider disabling browser caching via response headers in S3 instead.
+	manifestURL := c.cdnBaseURL + "/manifest.json?t=" + fmt.Sprint(time.Now().UnixMilli())
 	c.log.Debug("Fetching manifest from CDN", "url", manifestURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
 	if err != nil {
@@ -195,9 +198,40 @@ func (c *Client) UpdateSecret(ctx context.Context) error {
 	return nil
 }
 
-// CurrentSecret returns the current secret in use by the client.
-func (c *Client) CurrentSecret() secretmanager.Secret {
-	return c.currentSecret
+// ExportSecret returns the current secret. It returns an error if no
+// secret is set.
+func (c *Client) ExportSecret() (secretmanager.Secret, error) {
+	s := c.currentSecret
+	if s.ID == "" {
+		return secretmanager.Secret{}, fmt.Errorf("no secret set")
+	}
+	return s, nil
+}
+
+// ImportSecret imports a secret into the [Client].
+// It returns an error if the ID or data is empty, or if the secret
+// has already expired.
+func (c *Client) ImportSecret(s secretmanager.Secret) error {
+	if s.ID == "" {
+		return fmt.Errorf("secret ID must not be empty")
+	}
+	if len(s.Data) == 0 {
+		return fmt.Errorf("secret data must not be empty")
+	}
+	if !time.Now().Before(s.ExpirationDate) {
+		return fmt.Errorf("secret has already expired (expiration: %v)", s.ExpirationDate)
+	}
+	c.currentSecret = s
+	return nil
+}
+
+// ListModels fetches the list of available models from the API.
+func (c *Client) ListModels(ctx context.Context) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBaseURL+"/v1/models", nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	return c.doAPIRequestAndReadBody(req)
 }
 
 // doAPIRequestAndReadBody sets common Privatemode headers on req,

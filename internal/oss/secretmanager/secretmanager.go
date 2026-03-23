@@ -35,7 +35,7 @@ type SecretManager struct {
 type Secret struct {
 	ID             string
 	Data           []byte
-	expirationDate time.Time
+	ExpirationDate time.Time
 }
 
 // Map returns the secret as a map.
@@ -67,7 +67,7 @@ func (sm *SecretManager) LatestSecret(ctx context.Context) (Secret, error) {
 	}
 
 	now := sm.clock.Now()
-	if sm.secret == nil || !now.Before(sm.secret.expirationDate) { // should trigger on expiration date and not after
+	if sm.secret == nil || !now.Before(sm.secret.ExpirationDate) { // should trigger on expiration date and not after
 		if err := sm.updateSecret(ctx, now, sm.apiKey); err != nil {
 			return Secret{}, err
 		}
@@ -125,7 +125,7 @@ func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
 		case <-ctx.Done():
 			log.Info("Context cancelled, stopping loop")
 			return nil
-		case <-sm.clock.After(secret.expirationDate.Sub(sm.clock.Now())):
+		case <-sm.clock.After(secret.ExpirationDate.Sub(sm.clock.Now())):
 		}
 	}
 }
@@ -146,7 +146,7 @@ func (sm *SecretManager) updateSecret(ctx context.Context, now time.Time, apiKey
 		// to sleep. This leads to expiration time comparison failure after sleep.
 		// To prevent this, we must remove the monotonic part using Round(0).
 		// Cf. https://pkg.go.dev/time#hdr-Monotonic_Clocks
-		expirationDate: now.Round(0).Add(secretLifetime - secretRefreshBuffer),
+		ExpirationDate: now.Round(0).Add(secretLifetime - secretRefreshBuffer),
 	}
 	return nil
 }

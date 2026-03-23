@@ -32,6 +32,15 @@ func TestReadBody(t *testing.T) {
 		bodyBytes, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		assert.Equal(t, testBody, bodyBytes)
+
+		replayedBody, err := r.GetBody()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, replayedBody.Close()) })
+
+		replayedBytes, err := io.ReadAll(replayedBody)
+		require.NoError(t, err)
+		assert.Equal(t, testBody, replayedBytes)
+		assert.Equal(t, int64(len(testBody)), r.ContentLength)
 	})
 
 	t.Run("respects maxBytes limit", func(t *testing.T) {
@@ -58,6 +67,14 @@ func TestSetBody(t *testing.T) {
 		bodyBytes, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		assert.Equal(t, replacement, bodyBytes)
+
+		replayedBody, err := r.GetBody()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, replayedBody.Close()) })
+
+		replayedBytes, err := io.ReadAll(replayedBody)
+		require.NoError(t, err)
+		assert.Equal(t, replacement, replayedBytes)
 	})
 }
 
@@ -76,10 +93,63 @@ func TestCloneRequest(t *testing.T) {
 		origBody, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		assert.Equal(t, testBody, origBody)
+
+		clonedReplayBody, err := cloned.GetBody()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, clonedReplayBody.Close()) })
+
+		clonedReplayBytes, err := io.ReadAll(clonedReplayBody)
+		require.NoError(t, err)
+		assert.Equal(t, testBody, clonedReplayBytes)
+		assert.Equal(t, int64(len(testBody)), cloned.ContentLength)
+
+		origReplayBody, err := r.GetBody()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, origReplayBody.Close()) })
+
+		origReplayBytes, err := io.ReadAll(origReplayBody)
+		require.NoError(t, err)
+		assert.Equal(t, testBody, origReplayBytes)
+		assert.Equal(t, int64(len(testBody)), r.ContentLength)
+	})
+}
+
+func TestCloneRequestUnlimited(t *testing.T) {
+	t.Run("clone and original are replayable", func(t *testing.T) {
+		r := newRequest(t, testBody)
+
+		cloned, err := CloneRequestUnlimited(r)
+		require.NoError(t, err)
+
+		clonedBody, err := io.ReadAll(cloned.Body)
+		require.NoError(t, err)
+		assert.Equal(t, testBody, clonedBody)
+
+		origBody, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.Equal(t, testBody, origBody)
+
+		clonedReplayBody, err := cloned.GetBody()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, clonedReplayBody.Close()) })
+
+		clonedReplayBytes, err := io.ReadAll(clonedReplayBody)
+		require.NoError(t, err)
+		assert.Equal(t, testBody, clonedReplayBytes)
+		assert.Equal(t, int64(len(testBody)), cloned.ContentLength)
+
+		origReplayBody, err := r.GetBody()
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, origReplayBody.Close()) })
+
+		origReplayBytes, err := io.ReadAll(origReplayBody)
+		require.NoError(t, err)
+		assert.Equal(t, testBody, origReplayBytes)
+		assert.Equal(t, int64(len(testBody)), r.ContentLength)
 	})
 }
 
 func newRequest(t *testing.T, body []byte) *http.Request {
 	t.Helper()
-	return httptest.NewRequest(http.MethodPost, "/v1/test", bytes.NewReader(bytes.Clone(body)))
+	return httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/test", bytes.NewReader(bytes.Clone(body)))
 }

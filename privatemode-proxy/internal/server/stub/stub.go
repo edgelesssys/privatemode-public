@@ -189,7 +189,7 @@ func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (request
 		openai.SecureImageURLValidator(log),
 	)
 
-	responseMutator = forwarder.WithJSONResponseMutation(encrypt, openai.PlainCompletionsResponseFields, false)
+	responseMutator = forwarder.WithJSONResponseMutation(encrypt, openai.PlainCompletionsResponseFields)
 	return requestMutator, responseMutator
 }
 
