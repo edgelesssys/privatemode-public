@@ -4,7 +4,6 @@
 package privatemode
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -15,11 +14,13 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/crypto"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/persist"
+	"github.com/edgelesssys/continuum/internal/oss/sse"
 )
 
 // ChatCompletionsStream is a stream of decrypted chat completion
@@ -28,9 +29,10 @@ import (
 // Use [Client.StreamChatCompletions] to create one.
 // The stream must be closed after use.
 type ChatCompletionsStream struct {
-	scanner *bufio.Scanner
+	reader  *sse.Reader
 	decrypt func([]byte) ([]byte, error)
 	resp    *http.Response
+	done    bool
 }
 
 // ChatCompletions sends an encrypted chat completions request and
@@ -77,7 +79,7 @@ func (c *Client) StreamChatCompletions(ctx context.Context, body []byte) (*ChatC
 	}
 
 	return &ChatCompletionsStream{
-		scanner: bufio.NewScanner(resp.Body),
+		reader: sse.NewReader(resp.Body, constants.MaxSSELineBytes),
 		decrypt: func(data []byte) ([]byte, error) {
 			return forwarder.MutateJSONFields(data, cipher.DecryptResponse, openai.PlainCompletionsResponseFields)
 		},
@@ -131,50 +133,41 @@ func (c *Client) prepareChatCompletionsRequest(ctx context.Context, body []byte)
 // Next returns the next decrypted chunk from the stream.
 // Returns [io.EOF] when the stream is complete.
 func (s *ChatCompletionsStream) Next() ([]byte, error) {
-	for s.scanner.Scan() {
-		line := s.scanner.Bytes()
+	if s.done {
+		return nil, io.EOF
+	}
 
-		// Skip empty lines (SSE event boundaries).
-		if len(line) == 0 {
-			continue
-		}
-
-		// SSE comments start with ':'. We don't expect any from vLLM.
-		if line[0] == ':' {
-			return nil, fmt.Errorf("unexpected SSE comment: %q", line)
-		}
-
-		// Parse SSE field: "field: value".
-		field, value, found := bytes.Cut(line, []byte(":"))
-		if !found {
-			return nil, fmt.Errorf("invalid SSE line (no colon): %q", line)
-		}
-
-		// Strip optional leading space from value per SSE spec.
-		value = bytes.TrimPrefix(value, []byte(" "))
-
-		// We only expect "data" fields.
-		if !bytes.Equal(field, []byte("data")) {
-			return nil, fmt.Errorf("unexpected SSE field %q", field)
-		}
-
-		// [DONE] signals end of stream.
-		if bytes.Equal(value, []byte("[DONE]")) {
-			return nil, io.EOF
-		}
-
-		decrypted, err := s.decrypt(value)
+	for {
+		line, err := s.reader.Next()
 		if err != nil {
-			return nil, fmt.Errorf("decrypting chunk: %w", err)
+			if errors.Is(err, io.EOF) {
+				return nil, io.ErrUnexpectedEOF
+			}
+			return nil, err
 		}
 
-		return decrypted, nil
-	}
+		switch line.Type {
+		case sse.LineEnd, sse.LineComment:
+			continue
+		case sse.LineField:
+			// We only expect "data" fields.
+			if !line.IsField(sse.FieldData) {
+				return nil, fmt.Errorf("unexpected SSE field %q", line.Name)
+			}
 
-	if err := s.scanner.Err(); err != nil {
-		return nil, err
+			if openai.IsStreamDone(line.Value) {
+				s.done = true
+				return nil, io.EOF
+			}
+
+			decrypted, err := s.decrypt(line.Value)
+			if err != nil {
+				return nil, fmt.Errorf("decrypting chunk: %w", err)
+			}
+
+			return decrypted, nil
+		}
 	}
-	return nil, io.EOF
 }
 
 // All returns an iterator over all decrypted chunks in the stream.

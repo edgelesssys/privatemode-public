@@ -13,21 +13,21 @@
     "lint": "eslint ."
   },
   "devDependencies": {
-    "@eslint/compat": "2.0.3",
+    "@eslint/compat": "2.0.5",
     "@eslint/js": "9.39.4",
     "@iconify/svelte": "5.2.1",
     "@sveltejs/adapter-static": "3.0.10",
-    "@sveltejs/kit": "2.55.0",
+    "@sveltejs/kit": "2.57.1",
     "@sveltejs/vite-plugin-svelte": "7.0.0",
     "@types/node": "24",
     "eslint": "9.39.4",
-    "eslint-plugin-svelte": "3.15.2",
-    "globals": "17.4.0",
-    "svelte": "5.54.0",
-    "svelte-check": "4.4.5",
-    "typescript": "5.9.3",
-    "typescript-eslint": "8.57.1",
-    "vite": "8.0.1"
+    "eslint-plugin-svelte": "3.17.0",
+    "globals": "17.5.0",
+    "svelte": "5.55.4",
+    "svelte-check": "4.4.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.58.2",
+    "vite": "8.0.8"
   },
   "overrides": {
     "cookie": "1.1.1",

@@ -149,30 +149,28 @@ func (c *Client) FetchManifest(ctx context.Context) ([]byte, error) {
 // up a secret for the client.
 //
 // This needs to be called before any crypto-requiring operations, such
-// as inference requests.
+// as inference requests, and may be called again to re-initialize the client with a new manifest.
 func (c *Client) Initialize(ctx context.Context, expectedManifest []byte) error {
 	c.log.Debug("Initializing Privatemode client")
-	if c.secretManager == nil {
-		c.log.Debug("No secret manager configured, initializing for the first time")
 
-		apiURL, err := url.Parse(c.apiBaseURL)
-		if err != nil {
-			return fmt.Errorf("parsing API base URL: %w", err)
-		}
-		apiHost := apiURL.Host
-
-		contrastClient := contrastsdk.New().WithSlog(c.log.WithGroup("contrast-sdk"))
-		meshCAGetter := attest.NewGetter(c.httpClient, apiHost, contrastClient)
-		meshCAAdapter := attestedMeshCAAdapter{meshCAGetter, expectedManifest}
-		secretClient := secretclient.New(c.httpClient, apiHost)
-		secretUpdater := updater.New(secretClient, meshCAAdapter, c.log.WithGroup("secret-updater"))
-
-		// Creating a [Client] already requires an API key, so there's
-		// no need to drop it on unauthorized errors.
-		apiKeyDropOnUnauthorized := false
-
-		c.secretManager = secretmanager.New(secretUpdater.UpdateSecret, apiKeyDropOnUnauthorized)
+	apiURL, err := url.Parse(c.apiBaseURL)
+	if err != nil {
+		return fmt.Errorf("parsing API base URL: %w", err)
 	}
+	apiHost := apiURL.Host
+
+	contrastClient := contrastsdk.New().WithSlog(c.log.WithGroup("contrast-sdk"))
+	meshCAGetter := attest.NewGetter(c.httpClient, apiHost, contrastClient)
+	meshCAAdapter := attestedMeshCAAdapter{meshCAGetter, expectedManifest}
+	secretClient := secretclient.New(c.httpClient, apiHost)
+	secretUpdater := updater.New(secretClient, meshCAAdapter, c.log.WithGroup("secret-updater"))
+
+	// Creating a [Client] already requires an API key, so there's
+	// no need to drop it on unauthorized errors.
+	apiKeyDropOnUnauthorized := false
+
+	c.secretManager = secretmanager.New(secretUpdater.UpdateSecret, apiKeyDropOnUnauthorized)
+
 	c.log.Debug("Offering API key")
 	if err := c.secretManager.OfferAPIKey(ctx, c.apiKey); err != nil {
 		return fmt.Errorf("offering API key to secret manager: %w", err)

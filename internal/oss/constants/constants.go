@@ -139,6 +139,14 @@ const (
 	// MaxUnstructuredBodySizeExceededMsg should be presented to the user when [MaxUnstructuredBodySize] is exceeded.
 	MaxUnstructuredBodySizeExceededMsg = "file too large (max 25MB)"
 
+	// MaxUnaryResponseBodyBytes is the maximum size of an upstream unary response body that the
+	// forwarder will buffer into memory. Streaming responses are not subject to this limit.
+	MaxUnaryResponseBodyBytes = 128 * 1024 * 1024 // 128MiB
+
+	// MaxSSELineBytes is the maximum allowed length of a single SSE (Server-Sent Events) line
+	// when reading streaming inference responses.
+	MaxSSELineBytes = 256 * 1024 // 256 KiB
+
 	// MetricsEndpoint is the endpoint where Prometheus metrics are exposed by default.
 	MetricsEndpoint = "/metrics"
 )

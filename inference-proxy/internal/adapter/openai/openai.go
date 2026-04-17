@@ -86,8 +86,7 @@ func (a *Adapter) forwardModelsRequest(w http.ResponseWriter, r *http.Request) {
 	a.Forwarder.Forward(
 		w, r,
 		forwarder.NoRequestMutation,
-		forwarder.WithRawResponseMutation(mutate),
-		forwarder.NoHeaderMutation,
+		forwarder.RawResponseMapper(mutate),
 	)
 }
 
@@ -98,8 +97,7 @@ func (a *Adapter) forwardSpecificModelRequest(w http.ResponseWriter, r *http.Req
 	a.Forwarder.Forward(
 		w, r,
 		forwarder.NoRequestMutation,
-		forwarder.WithRawResponseMutation(mutate),
-		forwarder.NoHeaderMutation,
+		forwarder.RawResponseMapper(mutate),
 	)
 }
 
@@ -109,8 +107,7 @@ func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Reques
 	a.Forwarder.Forward(
 		w, r,
 		forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainEmbeddingsRequestFields, a.Log),
-		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainEmbeddingsResponseFields),
-		forwarder.NoHeaderMutation,
+		forwarder.JSONResponseMapper(session.EncryptResponse(r.Context()), openai.PlainEmbeddingsResponseFields),
 	)
 }
 
@@ -118,10 +115,10 @@ func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Re
 	session := a.Cipher.NewResponseCipher()
 
 	requestFieldSelector := openai.PlainTranscriptionRequestFields
-	responseMutator := forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields)
+	responseMapper := forwarder.JSONResponseMapper(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields)
 	if !compat.AtLeastMajorMinor(r.Header.Get(constants.PrivatemodeVersionHeader), 1, 33) {
-		requestFieldSelector = forwarder.FieldSelector{{"model"}}                                 // Clients before v1.33 only have "model" as unencrypted field
-		responseMutator = forwarder.WithRawResponseMutation(session.EncryptResponse(r.Context())) // Clients before v1.33 expect the full response body to be encrypted
+		requestFieldSelector = forwarder.FieldSelector{{"model"}}                          // Clients before v1.33 only have "model" as unencrypted field
+		responseMapper = forwarder.RawResponseMapper(session.EncryptResponse(r.Context())) // Clients before v1.33 expect the full response body to be encrypted
 	}
 
 	a.Forwarder.Forward(
@@ -130,8 +127,7 @@ func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Re
 			forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), requestFieldSelector, a.Log),
 			a.mutators.AudioStreamUsageReportingInjector,
 		),
-		responseMutator,
-		forwarder.NoHeaderMutation,
+		responseMapper,
 	)
 }
 
@@ -148,11 +144,10 @@ func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 		forwarder.RequestMutatorChain(
 			forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, a.Log),
 			a.mutators.CacheSaltValidator,
-			a.mutators.SecureImageURLValidator,
+			a.mutators.MediaContentValidator,
 			a.mutators.StreamUsageReportingInjector,
 		),
-		forwarder.WithJSONResponseMutation(responseMutation, openai.PlainCompletionsResponseFields),
-		forwarder.NoHeaderMutation,
+		forwarder.JSONResponseMapper(responseMutation, openai.PlainCompletionsResponseFields),
 	)
 }
 

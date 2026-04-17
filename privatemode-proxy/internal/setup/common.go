@@ -5,12 +5,12 @@
 package setup
 
 import (
-	"crypto/tls"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/httputil"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/server"
 )
@@ -38,12 +38,7 @@ type ContrastFlags struct {
 func NewServer(flags Flags, isApp bool, manager *secretmanager.SecretManager, log *slog.Logger) *server.Server {
 	client := http.DefaultClient
 	if flags.InsecureAPIConnection {
-		client = &http.Client{
-			Transport: &http.Transport{
-				Proxy:           http.ProxyFromEnvironment,
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+		client = httputil.InsecureNewSkipVerifyClient()
 	}
 
 	opts := server.Opts{

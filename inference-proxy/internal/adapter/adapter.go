@@ -78,7 +78,7 @@ type InferenceAdapter interface {
 }
 
 type mutatingForwarder interface {
-	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator, ...forwarder.Opts)
+	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts)
 }
 
 // UnsupportedEndpoint returns 501 Not Implemented.

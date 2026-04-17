@@ -58,8 +58,8 @@ type Opts struct {
 type apiForwarder interface {
 	Forward(
 		w http.ResponseWriter, req *http.Request,
-		requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator,
-		headerMutator forwarder.HeaderMutator, opts ...forwarder.Opts,
+		requestMutator forwarder.RequestMutator, responseMapper forwarder.ResponseMapper,
+		opts ...forwarder.Opts,
 	)
 }
 
@@ -104,30 +104,36 @@ func (s *Server) GetHandler() http.Handler {
 	mux.HandleFunc(openai.TranscriptionsEndpoint, s.transcriptionsHandler)
 	mux.HandleFunc(anthropic.MessagesEndpoint, s.chatRequestHandler(anthropic.PlainMessagesRequestFields, anthropic.PlainMessagesResponseFields))
 
-	// If the api key wasn't provided via command line flag, offer the secret manager the API key from the request.
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Apply middlewares below, handler holds the chain entrypoint
+	var handler http.Handler = mux
+
+	handler = passAuthToSecretManagerMiddleware(handler, s.sm)
+
+	// Only apply dumping middleware when a dump directory is configured.
+	if strings.TrimSpace(s.dumpRequestsDir) != "" {
+		handler = middleware.DumpRequestAndResponse(handler, s.log, s.dumpRequestsDir)
+	}
+
+	return handler
+}
+
+// passAuthToSecretManagerMiddleware extracts the bearer token from the request and passes it to
+// the secret manager.
+func passAuthToSecretManagerMiddleware(next http.Handler, sm secretManager) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if apiKey, err := auth.GetAuth(auth.Bearer, r.Header); err == nil {
-			if err := s.sm.OfferAPIKey(r.Context(), apiKey); err != nil {
+			if err := sm.OfferAPIKey(r.Context(), apiKey); err != nil {
 				forwarder.HTTPError(w, r, http.StatusUnauthorized, "trying API key: %s", err)
 				return
 			}
 		}
-		mux.ServeHTTP(w, r)
+		next.ServeHTTP(w, r)
 	})
-
-	// Only wrap the mux with the dumping middleware when a dump
-	// directory is configured.  If s.DumpRequestsDir == "" we return the
-	// plain mux.
-	if strings.TrimSpace(s.dumpRequestsDir) == "" {
-		return handler
-	}
-
-	return middleware.DumpRequestAndResponse(handler, s.log, s.dumpRequestsDir)
 }
 
 func (s *Server) inferenceHandler(
 	requestMutator func(*RenewableRequestCipher) forwarder.RequestMutator,
-	responseMutator func(*RenewableRequestCipher) forwarder.ResponseMutator,
+	responseMapper func(*RenewableRequestCipher) forwarder.ResponseMapper,
 ) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodOptions {
@@ -163,8 +169,7 @@ func (s *Server) inferenceHandler(
 		s.forwarder.Forward(
 			w, r,
 			requestMutator(rc),
-			responseMutator(rc),
-			allowDesktopApp,
+			withAllowDesktopApp(responseMapper(rc), r),
 			forwarder.WithRetryCallback(retryCallback),
 		)
 	}
@@ -204,8 +209,8 @@ func (s *Server) chatRequestHandler(
 					forwarder.WithJSONRequestMutation(cw.Encrypt, plainReqFields, s.log),
 				)
 			},
-			func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-				return forwarder.WithJSONResponseMutation(cw.DecryptResponse, plainRespFields)
+			func(cw *RenewableRequestCipher) forwarder.ResponseMapper {
+				return forwarder.JSONResponseMapper(cw.DecryptResponse, plainRespFields)
 			},
 		)(w, r)
 	}
@@ -219,8 +224,8 @@ func (s *Server) embeddingsHandler(w http.ResponseWriter, r *http.Request) {
 				forwarder.WithJSONRequestMutation(cw.Encrypt, openai.PlainEmbeddingsRequestFields, s.log),
 			)
 		},
-		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, openai.PlainEmbeddingsResponseFields)
+		func(cw *RenewableRequestCipher) forwarder.ResponseMapper {
+			return forwarder.JSONResponseMapper(cw.DecryptResponse, openai.PlainEmbeddingsResponseFields)
 		},
 	)(w, r)
 }
@@ -252,8 +257,8 @@ func (s *Server) transcriptionsHandler(w http.ResponseWriter, r *http.Request) {
 				forwarder.WithFormRequestMutation(cw.Encrypt, openai.PlainTranscriptionRequestFields, s.log),
 			)
 		},
-		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
-			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, openai.PlainTranscriptionResponseFields)
+		func(cw *RenewableRequestCipher) forwarder.ResponseMapper {
+			return forwarder.JSONResponseMapper(cw.DecryptResponse, openai.PlainTranscriptionResponseFields)
 		},
 	)(w, r)
 }
@@ -263,9 +268,9 @@ func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
 		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
 			return forwarder.WithRawRequestMutation(cw.Encrypt, s.log)
 		},
-		func(cw *RenewableRequestCipher) forwarder.ResponseMutator {
+		func(cw *RenewableRequestCipher) forwarder.ResponseMapper {
 			// currently only json response mutation is supported
-			return forwarder.WithJSONResponseMutation(cw.DecryptResponse, nil)
+			return forwarder.JSONResponseMapper(cw.DecryptResponse, nil)
 		},
 	)(w, r)
 }
@@ -277,8 +282,7 @@ func (s *Server) noEncryptionHandler(w http.ResponseWriter, r *http.Request) {
 	s.forwarder.Forward(
 		w, r,
 		forwarder.NoRequestMutation,
-		forwarder.NoResponseMutation{},
-		allowDesktopApp,
+		withAllowDesktopApp(forwarder.PassthroughResponseMapper, r),
 	)
 }
 
@@ -302,13 +306,24 @@ func (s *Server) setStaticRequestHeaders(r *http.Request) {
 	r.Header.Set(constants.PrivatemodeClientHeader, s.getClientHeader())
 }
 
-// allowDesktopApp allows requests from the desktop app.
-func allowDesktopApp(resp http.Header, req http.Header) error {
-	origin := req.Get("Origin")
-	if strings.HasPrefix(origin, "app://") {
-		resp.Set("Access-Control-Allow-Origin", origin)
+// withAllowDesktopApp wraps a base mapper and adds CORS headers for desktop app origins (app://).
+// Handling CORS headers inside the mapper is required because upstream CORS headers are applied
+// after the middlewares and overwrite the values we want. Ideally, only relevant upstream headers
+// would be copied by the mapper, and CORS would be applied via a middleware.
+func withAllowDesktopApp(mapper forwarder.ResponseMapper, req *http.Request) forwarder.ResponseMapper {
+	return func(ur *http.Response) (forwarder.Response, error) {
+		dr, err := mapper(ur)
+		if err != nil {
+			return nil, err
+		}
+
+		origin := req.Header.Get("Origin")
+		if strings.HasPrefix(origin, "app://") {
+			dr.GetHeader().Set("Access-Control-Allow-Origin", origin)
+		}
+
+		return dr, nil
 	}
-	return nil
 }
 
 // setDynamicHeaders sets the dynamic headers for the request.

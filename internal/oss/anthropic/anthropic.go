@@ -13,8 +13,13 @@ package anthropic
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/url"
+	"strings"
 
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -92,4 +97,60 @@ type Usage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitzero"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitzero"`
+}
+
+// MediaContentValidator creates a [forwarder.RequestMutator] that enforces policy on media content
+// blocks in the request. Image URLs must use https or data schemes via [validateImageURL].
+func MediaContentValidator(log *slog.Logger) forwarder.RequestMutator {
+	validate := func(httpBody string) (mutatedRequest string, err error) {
+		// Skip empty body, e.g., for OPTIONS requests
+		if len(httpBody) == 0 {
+			return httpBody, nil
+		}
+
+		// Images with URL source
+		if err := validateStringQueryResults(httpBody, []string{
+			// Images in message content:
+			`messages.#.content.#(type=="image")#.source.url|@flatten`,
+			// Images embedded in tool result content:
+			`messages.#.content.#(type=="tool_result")#.content.#(type=="image")#.source.url|@flatten|@flatten`,
+		}, validateImageURL); err != nil {
+			return "", fmt.Errorf("validating image URLs: %w", err)
+		}
+
+		// Images may also be passed as type base64 and this is allowed:
+		// "source": { "type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo..." }
+
+		return httpBody, nil
+	}
+
+	return forwarder.WithRawRequestMutation(validate, log)
+}
+
+func validateStringQueryResults(document string, queries []string, validate func(string) error) error {
+	for _, query := range queries {
+		var retErr error
+		gjson.Get(document, query).ForEach(func(_, res gjson.Result) bool {
+			if res.Type == gjson.String {
+				retErr = validate(res.String())
+			}
+			return retErr == nil
+		})
+		if retErr != nil {
+			return retErr
+		}
+	}
+	return nil
+}
+
+func validateImageURL(rawURL string) error {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("parsing image URL: %w", err)
+	}
+
+	if !strings.EqualFold(parsedURL.Scheme, "https") && !strings.EqualFold(parsedURL.Scheme, "data") {
+		return fmt.Errorf("non-HTTPS and non-data image URL %q is insecure", parsedURL.String())
+	}
+	return nil
 }

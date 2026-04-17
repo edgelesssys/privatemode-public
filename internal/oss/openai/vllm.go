@@ -12,6 +12,7 @@
 package openai
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -48,6 +49,16 @@ const (
 	// TranscriptionsEndpoint is the endpoint for audio transcriptions.
 	TranscriptionsEndpoint = "/v1/audio/transcriptions"
 )
+
+// StreamDone is the SSE data value that signals the end of a streaming
+// response in the OpenAI-compatible API (e.g. "data: [DONE]").
+var StreamDone = []byte("[DONE]")
+
+// IsStreamDone reports whether value is the "[DONE]" marker that signals
+// the end of an OpenAI-compatible streaming response.
+func IsStreamDone(value []byte) bool {
+	return bytes.Equal(value, StreamDone)
+}
 
 // PlainCompletionsRequestFields is a field selector for all fields in an OpenAI chat completions request that are not encrypted.
 var PlainCompletionsRequestFields = forwarder.FieldSelector{
@@ -271,6 +282,27 @@ type AudioUsage struct {
 	CompletionTokens int    `json:"completion_tokens,omitzero"`
 }
 
+// APIErrorResponse represents the error response returned by the /v1/chat/completions endpoint.
+//
+// Occurrence:
+//
+//   - Non-streaming: Returned as the body with an HTTP error status.
+//   - Streaming (pre-stream): Same as non-streaming, returned with content-type application/json.
+//   - Streaming (mid-stream): Returned as the "data: {...}" of an SSE event. Not standardized.
+type APIErrorResponse struct {
+	Error APIError `json:"error"`
+}
+
+// APIError contains error details.
+type APIError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+	Param   string `json:"param,omitzero"`
+	// Code is a machine-readable identifier, but is encoded inconsistently. It is a string code
+	// for OpenAI but an int (HTTP status code) in vLLM.
+	Code json.RawMessage `json:"code,omitzero"`
+}
+
 // MarshalJSON implements custom JSON marshalling for AudioUsage to serialize Duration as a string.
 func (a *TranscriptionUsageResponse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
@@ -311,7 +343,7 @@ type DefaultRequestMutators struct {
 	AudioStreamUsageReportingInjector forwarder.RequestMutator // AudioStreamUsageReportingInjector ensures vLLM includes usage stats in streaming audio responses.
 	CacheSaltInjector                 forwarder.RequestMutator // CacheSaltInjector ensures a vLLM prompt cache salt is set.
 	CacheSaltValidator                forwarder.RequestMutator // CacheSaltValidator validates the vLLM prompt cache set.
-	SecureImageURLValidator           forwarder.RequestMutator // SecureImageURLValidator ensures no non-HTTPS image URLs are used in the request.
+	MediaContentValidator             forwarder.RequestMutator // MediaContentValidator enforces the policy on media content blocks in the request.
 	StreamUsageReportingInjector      forwarder.RequestMutator // StreamUsageReportingInjector ensures vLLM includes usage stats in streaming completion responses.
 }
 
@@ -321,7 +353,7 @@ func GetDefaultRequestMutators(cacheSaltGenerator CacheSaltGenerator, log *slog.
 		AudioStreamUsageReportingInjector: AudioStreamUsageReportingInjector(log),
 		CacheSaltInjector:                 CacheSaltInjector(cacheSaltGenerator, log),
 		CacheSaltValidator:                CacheSaltValidator(log),
-		SecureImageURLValidator:           SecureImageURLValidator(log),
+		MediaContentValidator:             MediaContentValidator(log),
 		StreamUsageReportingInjector:      StreamUsageReportingInjector(log),
 	}
 }
@@ -370,10 +402,11 @@ func CacheSaltValidator(log *slog.Logger) forwarder.RequestMutator {
 	return forwarder.WithRawRequestMutation(validateSalt, log)
 }
 
-// SecureImageURLValidator creates a [forwarder.RequestMutator] that
-// ensures no non-HTTPS image URLs are used in the request.
-func SecureImageURLValidator(log *slog.Logger) forwarder.RequestMutator {
-	validateImageURLs := func(httpBody string) (mutatedRequest string, err error) {
+// MediaContentValidator creates a [forwarder.RequestMutator] that enforces policy on media
+// content blocks in the request. Image URLs must use https or data schemes via [validateImageURL]
+// and audio via [validateAudioURL] and video via [validateVideoURL] content is not allowed.
+func MediaContentValidator(log *slog.Logger) forwarder.RequestMutator {
+	validate := func(httpBody string) (mutatedRequest string, err error) {
 		// Skip empty body, e.g., for OPTIONS requests
 		if len(httpBody) == 0 {
 			return httpBody, nil
@@ -382,41 +415,80 @@ func SecureImageURLValidator(log *slog.Logger) forwarder.RequestMutator {
 		messages := gjson.Get(httpBody, "messages")
 		if !messages.Exists() {
 			// If we don't have the 'messages' field, we're in the legacy completions endpoint,
-			// which doesn't support image URLs at all.
+			// which doesn't support multi-media blocks at all.
 			return httpBody, nil
 		}
 
-		var retErr error
-		messages.ForEach(func(_, message gjson.Result) bool {
-			content := message.Get("content")
-			if !content.IsArray() {
-				return true
-			}
-			content.ForEach(func(_, part gjson.Result) bool {
-				if part.Get("type").String() == "input_image" {
-					imageURL, err := url.Parse(part.Get("image_url").String())
-					if err != nil {
-						retErr = fmt.Errorf("parsing image URL: %w", err)
-						return false
-					}
+		// Images
+		if err := validateStringQueryResults(httpBody, []string{
+			// Images in message content:
+			// #(type=="image_url") on the content block element is usually present, but optional for vLLM
+			`messages.#.content.#.image_url.url|@flatten`,
+			`messages.#.content.#.image_url|@flatten`,
+		}, validateImageURL); err != nil {
+			return "", fmt.Errorf("validating image URLs: %w", err)
+		}
 
-					if !strings.EqualFold(imageURL.Scheme, "https") && !strings.EqualFold(imageURL.Scheme, "data") {
-						retErr = fmt.Errorf("non-HTTPS and non-data image URL %q is insecure", imageURL.String())
-						return false
-					}
-				}
-				return true
-			})
-			return retErr == nil // If we didn't find a non-HTTPS URL yet (or ran into another error), keep iterating
-		})
-		if retErr != nil {
-			return "", fmt.Errorf("validating image URLs: %w", retErr)
+		// Audio
+		if err := validateStringQueryResults(httpBody, []string{
+			// Audio in message content:
+			// #(type=="audio_url") on the content block element is usually present, but optional for vLLM
+			`messages.#.content.#.audio_url.url|@flatten`,
+			`messages.#.content.#.audio_url|@flatten`,
+		}, validateAudioURL); err != nil {
+			return "", fmt.Errorf("validating audio URLs: %w", err)
+		}
+
+		// Videos
+		if err := validateStringQueryResults(httpBody, []string{
+			// Video in message content:
+			// #(type=="video_url") on the content block element is usually present, but optional for vLLM
+			`messages.#.content.#.video_url.url|@flatten`,
+			`messages.#.content.#.video_url|@flatten`,
+		}, validateVideoURL); err != nil {
+			return "", fmt.Errorf("validating video URLs: %w", err)
 		}
 
 		return httpBody, nil
 	}
 
-	return forwarder.WithRawRequestMutation(validateImageURLs, log)
+	return forwarder.WithRawRequestMutation(validate, log)
+}
+
+func validateStringQueryResults(document string, queries []string, validate func(string) error) error {
+	for _, query := range queries {
+		var retErr error
+		gjson.Get(document, query).ForEach(func(_, res gjson.Result) bool {
+			if res.Type == gjson.String {
+				retErr = validate(res.String())
+			}
+			return retErr == nil
+		})
+		if retErr != nil {
+			return retErr
+		}
+	}
+	return nil
+}
+
+func validateImageURL(rawURL string) error {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("parsing image URL: %w", err)
+	}
+
+	if !strings.EqualFold(parsedURL.Scheme, "https") && !strings.EqualFold(parsedURL.Scheme, "data") {
+		return fmt.Errorf("non-HTTPS and non-data image URL %q is insecure", parsedURL.String())
+	}
+	return nil
+}
+
+func validateAudioURL(rawURL string) error {
+	return fmt.Errorf("audio URLs are not allowed: %q", rawURL)
+}
+
+func validateVideoURL(rawURL string) error {
+	return fmt.Errorf("video URLs are not allowed: %q", rawURL)
 }
 
 // StreamUsageReportingInjector creates a [forwarder.RequestMutator] that ensures vLLM includes usage

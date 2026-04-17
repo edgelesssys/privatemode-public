@@ -6,6 +6,11 @@ set -euo pipefail
 
 manifest=$1
 
+### SNP
+
+# remove bloat introduced in Contrast 1.19
+yq eval -i '.ReferenceValues.snp |= map(select(.CPUs == 1))' "$manifest"
+
 # set TCB versions and mitigation vector
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.BootloaderVersion=10' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.TEEVersion=0' "$manifest"
@@ -25,6 +30,14 @@ yq eval -i '.ReferenceValues.snp[].AllowedChipIDs=[
 "5050718946CB028EAB9D7BB648468B4807F25229C3EE639B70F1D80251EF19CC18D3E47A991178A1A841112461D297E522F4E9C166EB20E612AB35F60E29FB1C",
 "8DCEB46E7C5645F2B347D167616CE387CA071E37F04B909186A0C93A26DFBC50B3FA20F08DF69FEF42722A6BF42BF25B39E660754E899410D917EED08142CE53"
 ]' "$manifest"
+
+### TDX
+
+yq eval -i '.ReferenceValues.tdx[].MinTCBEvaluationDataNumber=21' "$manifest"
+yq eval -i '.ReferenceValues.tdx[].MrSeam="489e585f1c54bc5a02066c8c6ec21619ff0334ec6f21e07e2a35202c59183789c8057e7d97dd591bb08314b185819e72"' "$manifest"
+yq eval -i '.ReferenceValues.tdx[].AllowedPIIDs=["0c47f6f7587ddb0cfbb0fed9e4537ea7", "6454aa54f4f7490d2b946b6a3c20742c"]' "$manifest"
+
+### Policies
 
 # add required SAN for secret-service mesh cert.
 yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) += [env(SECRET_SERVICE_K8S_INTERNAL_DOMAIN)]' "$manifest"

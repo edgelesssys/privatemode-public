@@ -13,7 +13,7 @@ import (
 )
 
 type mutatingForwarder interface {
-	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator, ...forwarder.Opts)
+	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts)
 }
 
 // Adapter forwards requests without encryption.
@@ -42,5 +42,5 @@ func (t *Adapter) HandlesCatchAll() bool {
 }
 
 func (t *Adapter) forwardRequest(w http.ResponseWriter, r *http.Request) {
-	t.forwarder.Forward(w, r, forwarder.NoRequestMutation, forwarder.NoResponseMutation{}, forwarder.NoHeaderMutation)
+	t.forwarder.Forward(w, r, forwarder.NoRequestMutation, forwarder.PassthroughResponseMapper)
 }

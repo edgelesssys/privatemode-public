@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v5"
+	"github.com/edgelesssys/continuum/internal/oss/attest"
 )
 
 // Updater implements how to update prompt secrets when the underlying Privatemode deployment is updated. It is not thread-safe.
@@ -34,7 +35,14 @@ type CAGetter interface {
 
 // New returns a new secret updater.
 func New(ssClient ssClient, caGetter CAGetter, log *slog.Logger) *Updater {
-	retryOpts := []retry.Option{retry.Delay(1 * time.Second), retry.Attempts(3)}
+	retryOpts := []retry.Option{
+		retry.Delay(1 * time.Second),
+		retry.Attempts(3),
+		// Immediately abort if we get manifest mismatch errors
+		// These can't be retried without also updating the manifest,
+		// which has to be done by the caller
+		retry.AttemptsForError(1, attest.ErrManifestMismatch),
+	}
 	return &Updater{
 		ssClient:  ssClient,
 		caGetter:  caGetter,

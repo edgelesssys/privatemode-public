@@ -18,7 +18,8 @@ import (
 // Adapter implements an inference adapter for the Anthropic API.
 type Adapter struct {
 	*inference.Adapter
-	cacheSaltValidator forwarder.RequestMutator
+	cacheSaltValidator    forwarder.RequestMutator
+	mediaContentValidator forwarder.RequestMutator
 }
 
 // New creates a new [Adapter] for the Anthropic API.
@@ -30,8 +31,9 @@ func New(workloadTasks []string, cipher inference.ResponseCipherCreator, ocspSta
 	}
 
 	return &Adapter{
-		Adapter:            baseAdapter,
-		cacheSaltValidator: openai.CacheSaltValidator(log),
+		Adapter:               baseAdapter,
+		cacheSaltValidator:    openai.CacheSaltValidator(log),
+		mediaContentValidator: anthropic.MediaContentValidator(log),
 	}, nil
 }
 
@@ -55,8 +57,8 @@ func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request)
 		forwarder.RequestMutatorChain(
 			forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), anthropic.PlainMessagesRequestFields, a.Log),
 			a.cacheSaltValidator,
+			a.mediaContentValidator,
 		),
-		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), anthropic.PlainMessagesResponseFields),
-		forwarder.NoHeaderMutation,
+		forwarder.JSONResponseMapper(session.EncryptResponse(r.Context()), anthropic.PlainMessagesResponseFields),
 	)
 }

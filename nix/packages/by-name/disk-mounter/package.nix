@@ -1,56 +1,26 @@
 {
   lib,
   bash,
-  buildContinuumGoModule,
   buildEnv,
   coreutils,
   cryptsetup,
   dockerTools,
-  makeWrapper,
   util-linux,
+  writeShellApplication,
 }:
 rec {
-  bin = buildContinuumGoModule {
-    version = lib.continuumVersion;
+  bin = writeShellApplication {
+    name = "disk-mounter";
 
-    pname = "disk-mounter";
-
-    src = lib.continuumRepoRootSrc [
-      "go.mod"
-      "go.sum"
-      "internal/oss/constants"
-      "internal/oss/logging"
-      "internal/oss/process"
-      "disk-mounter"
+    runtimeInputs = [
+      util-linux
+      cryptsetup
+      coreutils
     ];
 
-    nativeBuildInputs = [
-      makeWrapper
-    ];
-
-    subPackages = [ "disk-mounter" ];
-
-    ldflags = [
-      "-extldflags=-Wl,-z,lazy"
-      "-X 'github.com/edgelesssys/continuum/internal/oss/constants.version=${lib.continuumVersion}'"
-    ];
-
-    postFixup = ''
-      wrapProgram $out/bin/disk-mounter \
-        --set PATH ${
-          lib.makeBinPath [
-            # for veritysetup
-            cryptsetup
-            # for mount, lsblk
-            util-linux
-            # for mknod
-            coreutils
-          ]
-        }
-    '';
-
-    meta.mainProgram = "disk-mounter";
+    text = builtins.readFile ./disk-mounter.sh;
   };
+
   image = dockerTools.buildLayeredImage {
     name = "disk-mounter";
     tag = lib.continuumVersion;
@@ -62,8 +32,8 @@ rec {
       paths = [
         bin
         bash
-        util-linux
       ];
+      pathsToLink = [ "/bin" ];
     };
 
     config = {

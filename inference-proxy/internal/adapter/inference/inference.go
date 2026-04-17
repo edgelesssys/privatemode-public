@@ -34,7 +34,7 @@ type ResponseCipherCreator interface {
 
 // MutatingForwarder forwards requests with mutation support.
 type MutatingForwarder interface {
-	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator, ...forwarder.Opts)
+	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts)
 }
 
 // Adapter contains common functionality shared by all inference API adapters.

@@ -2,27 +2,15 @@
   linkFarmFromDrvs,
   writeShellScriptBin,
   writeShellApplication,
-  contrast,
-  attestation-agent,
-  disk-mounter,
-  inference-proxy,
-  privatemode-proxy,
-  secret-service,
   pkgsCross,
   crane,
   mkMultiplatformOCIImage,
   toOciImage,
   replaceVars,
-
-  # Optional inputs - these are not available in the OSS build.
-  apigateway ? null,
-  availability-test ? null,
-  fake-workload ? null,
-  gpu-injector ? null,
-  rim-cache ? null,
+  linuxPkgs,
 }:
 let
-  privatemode-proxy-amd64 = privatemode-proxy.image.overrideAttrs (_: {
+  privatemode-proxy-amd64 = linuxPkgs.privatemode-proxy.image.overrideAttrs (_: {
     name = "privatemode-proxy-amd64.tar.gz";
   });
 
@@ -47,26 +35,26 @@ let
   };
 
   oss-images = [
-    attestation-agent.image
-    disk-mounter.image
-    inference-proxy.image
-    secret-service.image
+    linuxPkgs.attestation-agent.image
+    linuxPkgs.disk-mounter.image
+    linuxPkgs.inference-proxy.image
+    linuxPkgs.secret-service.image
   ];
 
   images = oss-images ++ [
-    apigateway.image
-    gpu-injector.image
-    fake-workload.image
-    rim-cache.image
-    contrast.image
-    availability-test.image
+    linuxPkgs.apigateway.image
+    linuxPkgs.disk-daemon.image
+    linuxPkgs.fake-workload.image
+    linuxPkgs.rim-cache.image
+    linuxPkgs.contrast.image
+    linuxPkgs.availability-test.image
   ];
 
   docker-images = linkFarmFromDrvs "privatemode-docker-images" (
     images
     ++ [
       privatemode-proxy-amd64
-      contrast.image
+      linuxPkgs.contrast.image
     ]
   );
 

@@ -6,14 +6,12 @@ package forwarder
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -250,32 +248,7 @@ func TestWithJSONRequestMutation(t *testing.T) {
 	}
 }
 
-func TestNewlinePreservationForStreamEventData(t *testing.T) {
-	assert := assert.New(t)
-
-	// http streaming separates events with double newlines
-	dataFmt := `data: {"field1": "%s"}` + "\n\n"
-
-	data := fmt.Sprintf(dataFmt, "plainText")
-	b := bytes.NewBufferString(data)
-	readCloser := io.NopCloser(b)
-
-	responseMutator := WithJSONResponseMutation(
-		stubMutator{
-			mutateResponse: `"encryptedText"`,
-		}.mutate,
-		FieldSelector{},
-	)
-	sut := responseMutator.Reader(readCloser)
-
-	res := &bytes.Buffer{}
-	_, err := io.Copy(res, sut)
-	assert.NoError(err)
-	expectedResponse := fmt.Sprintf(dataFmt, "encryptedText")
-	assert.Equal(expectedResponse, res.String())
-}
-
-func TestWithJSONResponseMutation(t *testing.T) {
+func TestMutateJSONFields(t *testing.T) {
 	testCases := map[string]struct {
 		mutator          stubMutator
 		responseBody     string
@@ -363,9 +336,7 @@ func TestWithJSONResponseMutation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			mutator := WithJSONResponseMutation(tc.mutator.mutate, tc.skipFields)
-
-			body, err := mutator.Mutate([]byte(tc.responseBody))
+			body, err := MutateJSONFields([]byte(tc.responseBody), tc.mutator.mutate, tc.skipFields)
 			if tc.wantErr {
 				assert.Error(err)
 				return
@@ -375,83 +346,6 @@ func TestWithJSONResponseMutation(t *testing.T) {
 			assert.JSONEq(tc.expectedResponse, string(body))
 		})
 	}
-
-	streamingCases := map[string]struct {
-		mutator stubMutator
-	}{
-		"streaming mutation": {
-			mutator: stubMutator{
-				mutateResponse: `"encryptedText"`,
-			},
-		},
-		"streaming large field mutation": {
-			mutator: stubMutator{
-				mutateResponse: fmt.Sprintf("\"%s\"", bytes.Repeat([]byte("encryptedText"), 10000)),
-			},
-		},
-	}
-	for name, tc := range streamingCases {
-		t.Run(name, func(t *testing.T) {
-			assert := assert.New(t)
-
-			mutator := WithJSONResponseMutation(tc.mutator.mutate, nil)
-
-			msgChan := make(chan string)
-			reader := &fakeReader{
-				msgChan: msgChan,
-			}
-
-			messageParts := 10
-			go func() {
-				for i := range messageParts {
-					msgChan <- fmt.Sprintf(`%d: {"field1": "plainText"}`, i) + "\n\n"
-				}
-				msgChan <- "data: [DONE]\n\n"
-				close(msgChan)
-			}()
-
-			response := &bytes.Buffer{}
-			_, err := io.Copy(response, mutator.Reader(reader))
-			assert.NoError(err)
-			responseParts := strings.Split(strings.TrimRight(response.String(), "\n"), "\n\n") // trim the last newline, so that we don't get an empty final part
-			assert.Len(responseParts, messageParts+1)
-			for i := range messageParts {
-				assert.Equal(fmt.Sprintf(`%d: {"field1": %s}`, i, tc.mutator.mutateResponse), responseParts[i])
-			}
-			assert.Equal("data: [DONE]", responseParts[messageParts]) // assert the event stream message is not mutated
-		})
-	}
-
-	// Anthropic SSE format: each event has an "event:" line followed by a "data:" line.
-	// The "event:" and "data:" lines must remain in the same event block (separated by \n, not \n\n).
-	t.Run("streaming anthropic event lines not separated by blank line", func(t *testing.T) {
-		assert := assert.New(t)
-
-		mutator := WithJSONResponseMutation(func(s string) (string, error) { return s, nil }, nil)
-
-		msgChan := make(chan string)
-		reader := &fakeReader{msgChan: msgChan}
-
-		go func() {
-			msgChan <- "event: message_start\ndata: {\"type\":\"message_start\"}\n\n"
-			msgChan <- "event: message_delta\ndata: {\"type\":\"message_delta\"}\n\n"
-			msgChan <- "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
-			close(msgChan)
-		}()
-
-		response := &bytes.Buffer{}
-		_, err := io.Copy(response, mutator.Reader(reader))
-		assert.NoError(err)
-
-		events := strings.Split(strings.TrimRight(response.String(), "\n"), "\n\n")
-		assert.Len(events, 3)
-		for _, event := range events {
-			lines := strings.Split(event, "\n")
-			assert.Len(lines, 2, "each Anthropic event must have exactly two lines (event: and data:), got: %q", event)
-			assert.True(strings.HasPrefix(lines[0], "event:"), "first line must be event:, got: %q", lines[0])
-			assert.True(strings.HasPrefix(lines[1], "data:"), "second line must be data:, got: %q", lines[1])
-		}
-	})
 }
 
 func TestMutationFuncChain(t *testing.T) {
@@ -673,139 +567,6 @@ func TestWithFormRequestMutation(t *testing.T) {
 			assert.Equal(http.StatusOK, res.StatusCode)
 		})
 	}
-}
-
-func TestWithRawResponseMutation(t *testing.T) {
-	testCases := map[string]struct {
-		mutator          stubMutator
-		responseBody     string
-		expectedResponse string
-		wantErr          bool
-	}{
-		"plain text mutation": {
-			mutator: stubMutator{
-				mutateResponse: "encryptedText",
-			},
-			responseBody:     "original text",
-			expectedResponse: "encryptedText",
-		},
-		"JSON body mutation": {
-			mutator: stubMutator{
-				mutateResponse: "encryptedText",
-			},
-			responseBody:     `{"field": "original"}`,
-			expectedResponse: "encryptedText",
-		},
-		"empty body": {
-			mutator: stubMutator{
-				mutateResponse: "",
-			},
-			responseBody:     "",
-			expectedResponse: "",
-		},
-		"mutation error": {
-			mutator: stubMutator{
-				mutateErr: assert.AnError,
-			},
-			responseBody: "original text",
-			wantErr:      true,
-		},
-	}
-
-	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			assert := assert.New(t)
-
-			mutator := WithRawResponseMutation(tc.mutator.mutate)
-
-			body, err := mutator.Mutate([]byte(tc.responseBody))
-			if tc.wantErr {
-				assert.Error(err)
-				return
-			}
-
-			assert.NoError(err)
-			assert.Equal(tc.expectedResponse, string(body))
-		})
-	}
-
-	streamingCases := map[string]struct {
-		mutator      stubMutator
-		responseBody string
-	}{
-		"streaming JSON mutation": {
-			mutator: stubMutator{
-				mutateResponse: "encryptedText",
-			},
-			responseBody: `{"field1": "plainText"}`,
-		},
-		"streaming JSON large field mutation": {
-			mutator: stubMutator{
-				mutateResponse: string(bytes.Repeat([]byte("encryptedText"), 10000)),
-			},
-			responseBody: `{"field1": "plainText"}`,
-		},
-		"streaming text data mutation": {
-			mutator: stubMutator{
-				mutateResponse: "encryptedText",
-			},
-			responseBody: "plainText",
-		},
-		"streaming text data large field mutation": {
-			mutator: stubMutator{
-				mutateResponse: string(bytes.Repeat([]byte("encryptedText"), 10000)),
-			},
-			responseBody: "plainText",
-		},
-	}
-	for name, tc := range streamingCases {
-		t.Run(name, func(t *testing.T) {
-			assert := assert.New(t)
-
-			mutator := WithRawResponseMutation(tc.mutator.mutate)
-
-			msgChan := make(chan string)
-			reader := &fakeReader{
-				msgChan: msgChan,
-			}
-
-			messageParts := 10
-			go func() {
-				for i := range messageParts {
-					msgChan <- fmt.Sprintf("%d: %s", i, tc.responseBody) + "\n\n"
-				}
-				close(msgChan)
-			}()
-
-			response := &bytes.Buffer{}
-			_, err := io.Copy(response, mutator.Reader(reader))
-			assert.NoError(err)
-			responseParts := strings.Split(strings.TrimRight(response.String(), "\n"), "\n\n") // trim the last newline, so that we don't get an empty final part
-			assert.Len(responseParts, messageParts)
-			for i, part := range responseParts {
-				assert.Equal(fmt.Sprintf("%d: %s", i, tc.mutator.mutateResponse), part)
-			}
-		})
-	}
-}
-
-type fakeReader struct {
-	msgChan chan string
-}
-
-func (f *fakeReader) Read(p []byte) (n int, err error) {
-	msg, ok := <-f.msgChan
-	if !ok {
-		return 0, io.EOF
-	}
-	return copy(p, []byte(msg)), nil
-}
-
-func (f *fakeReader) Close() error {
-	if _, ok := <-f.msgChan; ok {
-		close(f.msgChan)
-	}
-	return nil
 }
 
 type stubMutator struct {

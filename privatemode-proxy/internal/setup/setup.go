@@ -5,13 +5,13 @@ package setup
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 
 	"github.com/edgelesssys/continuum/internal/oss/attest"
+	"github.com/edgelesssys/continuum/internal/oss/httputil"
 	"github.com/edgelesssys/continuum/internal/oss/secretclient"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager/updater"
@@ -28,12 +28,7 @@ const (
 func SecretManager(ctx context.Context, flags Flags, log *slog.Logger) (*secretmanager.SecretManager, func() string, error) {
 	httpClient := http.DefaultClient
 	if flags.InsecureAPIConnection {
-		httpClient = &http.Client{
-			Transport: &http.Transport{
-				Proxy:           http.ProxyFromEnvironment,
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+		httpClient = httputil.InsecureNewSkipVerifyClient()
 	}
 
 	contrastClient := contrastsdk.New().

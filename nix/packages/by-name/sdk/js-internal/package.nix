@@ -1,0 +1,49 @@
+{
+  lib,
+  stdenv,
+  nodejs,
+  pnpm_10,
+  pnpmConfigHook,
+  fetchPnpmDeps,
+}:
+stdenv.mkDerivation (finalAttrs: {
+  pname = "privatemode-internal-js-sdk";
+  version = lib.continuumVersion;
+
+  src = lib.continuumRepoRootSrc [
+    "sdk/js"
+  ];
+  pnpmRoot = "sdk/js";
+
+  pnpmDeps = fetchPnpmDeps {
+    inherit (finalAttrs) pname version src;
+    fetcherVersion = 3;
+    sourceRoot = "${finalAttrs.src.name}/sdk/js";
+    hash = "sha256-Fm9zIt+1k5KXjIPMojqb5kJ6kNaLNIoYFkYA7tl8zUk=";
+  };
+
+  nativeBuildInputs = [
+    nodejs
+    pnpmConfigHook
+    pnpm_10
+  ];
+
+  buildPhase = ''
+    runHook preBuild
+
+    pnpm --dir sdk/js run build
+
+    runHook postBuild
+  '';
+
+  installPhase = ''
+    runHook preInstall
+
+    mkdir -p $out/share/
+    cp -r sdk/js/dist/* $out/share/
+
+    # TODO(msanft): Bundle the SDK here?
+
+    runHook postInstall
+  '';
+})

@@ -274,10 +274,10 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 					Messages: []openai.Message{
 						{
 							Role: "user",
-							Content: []map[string]string{
+							Content: []map[string]any{
 								{
-									"type":      "input_image",
-									"image_url": "https://example.com/image.jpg",
+									"type":      "image_url",
+									"image_url": map[string]string{"url": "https://example.com/image.jpg"},
 								},
 							},
 						},
@@ -298,10 +298,10 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 					Messages: []openai.Message{
 						{
 							Role: "user",
-							Content: []map[string]string{
+							Content: []map[string]any{
 								{
-									"type":      "input_image",
-									"image_url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYa",
+									"type":      "image_url",
+									"image_url": map[string]string{"url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYa"},
 								},
 							},
 						},
@@ -322,10 +322,10 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 					Messages: []openai.Message{
 						{
 							Role: "user",
-							Content: []map[string]string{
+							Content: []map[string]any{
 								{
-									"type":      "input_image",
-									"image_url": "http://example.com/image.jpg",
+									"type":      "image_url",
+									"image_url": map[string]string{"url": "http://example.com/image.jpg"},
 								},
 							},
 						},
@@ -448,9 +448,9 @@ func TestModelsEndpointExcludedFromOCSP(t *testing.T) {
 			OCSPStatus:    []ocsp.StatusInfo{{GPU: ocsp.StatusUnknown, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}},
 		},
 		mutators: openai.DefaultRequestMutators{
-			CacheSaltInjector:       stubRequestMutator,
-			CacheSaltValidator:      stubRequestMutator,
-			SecureImageURLValidator: stubRequestMutator,
+			CacheSaltInjector:     stubRequestMutator,
+			CacheSaltValidator:    stubRequestMutator,
+			MediaContentValidator: stubRequestMutator,
 		},
 	}
 
@@ -497,7 +497,7 @@ func (c *stubCipher) EncryptResponse(context.Context) func(plainData string) (st
 
 type stubForwarder struct{}
 
-func (f *stubForwarder) Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator, ...forwarder.Opts) {
+func (f *stubForwarder) Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts) {
 }
 
 func stubRequestMutator(_ *http.Request) error { return nil }

@@ -728,8 +728,6 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 
 		// Use JSON request mutation if the request is a JSON request
 		requestMutator := forwarder.WithRawRequestMutation(decrypt, log)
-		responseMutator := forwarder.WithJSONResponseMutation(encrypt, nil)
-
 		if err := requestMutator(r); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -748,8 +746,14 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 			return
 		}
 
+		mutatedJSON, err := forwarder.MutateJSONFields(responseJSON, encrypt, nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		if _, err := io.Copy(w, responseMutator.Reader(bytes.NewReader(responseJSON))); err != nil {
+		if _, err := w.Write(mutatedJSON); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -799,10 +803,9 @@ func toPtr(s string) *string {
 }
 
 func makeErrorMsg(message string) string {
-	errObj := forwarder.APIError{
+	msgBytes, err := json.Marshal(openai.APIErrorResponse{Error: openai.APIError{
 		Message: message,
-	}
-	msgBytes, err := json.Marshal(forwarder.ErrorMessage{Error: errObj})
+	}})
 	if err != nil {
 		panic(err)
 	}

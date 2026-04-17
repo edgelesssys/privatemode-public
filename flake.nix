@@ -30,9 +30,21 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          config.allowUnfree = true;
+          config = {
+            allowUnfree = true;
+            permittedInsecurePackages = [
+              "electron-38.8.4" # TODO(msanft): Remove once native app is removed.
+            ];
+          };
           overlays = [
+            # Cross-platform packages that may also be built for and run on MacOS.
+            # Examples: Dev tools, Client-side software such as the PM proxy.
             (_final: prev: (import ./nix/packages { inherit (prev) lib callPackage; }))
+            # Linux-specific packages. These will always be built for and run on Linux.
+            # If no Linux (remote) builder is available, these packages will fail to build on MacOS.
+            # Examples: Server-side software such as the API gateway.
+            (_final: _prev: { linuxPkgs = self.legacyPackages.x86_64-linux; })
+            # Custom Nix library functions and utilities.
             (_final: prev: { lib = prev.lib // (import ./nix/lib { inherit (prev) lib callPackage; }); })
           ];
         };

@@ -33,7 +33,7 @@ func Do(ctx context.Context, client *http.Client, method, url string, reqBody []
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, ErrUnauthorized
+		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, respBody)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %v: %s", resp.Status, respBody)

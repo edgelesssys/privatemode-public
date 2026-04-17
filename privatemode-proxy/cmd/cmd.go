@@ -151,9 +151,8 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 
 	var apiKey *string
 	if cmd.Flags().Changed("apiKey") {
-		if strings.HasPrefix(apiKeyStr, "@") {
-			// Trim '@' and read file contents
-			path := strings.TrimPrefix(apiKeyStr, "@")
+		// Trim '@' and read file contents
+		if path, ok := strings.CutPrefix(apiKeyStr, "@"); ok {
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return fmt.Errorf("failed to read API key file %q: %w", path, err)
@@ -210,23 +209,19 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		loopLog := log.With("component", "secret-loop")
 		if err := manager.Loop(cmd.Context(), loopLog); err != nil {
 			loopLog.Error("Secret update loop exited", "error", err)
 			// do not exit because the server will still keep the secrets up-to-date through incoming requests
 		}
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		err = setup.
 			NewServer(flags, isApp, manager, log).
 			Serve(cmd.Context(), lis, tlsConfig)
-	}()
+	})
 
 	wg.Wait()
 	return err

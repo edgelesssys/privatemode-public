@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-disks
+  namespace: continuum-infra
+data:
+  boboliu-qwen3-embedding-4b-w4a16-g128: |-
+    {
+      "model_source": "https://huggingface.co/boboliu/Qwen3-Embedding-4B-W4A16-G128",
+      "commit_hash": "9da6cb71a6870e7400988f01ad95d326e8c98097",
+      "excluded_files": "",
+      "root_hash": "d61585d7bb515608adbf2e7d2fa84dec126f05955026a53175d109bd26772924",
+      "hash_offset": "2666340352",
+      "erofs_version": "1.9",
+      "veritysetup_version": "2.8.4",
+      "file_hash_sha256": "d4ad28fca8e652d3af378fb7caa3fa87dd63b753951bca67a45db9b1000f8b0c"
+    }
+  facebook-opt-125m: |-
+    {
+      "model_source": "https://huggingface.co/facebook/opt-125m",
+      "commit_hash": "27dcfa74d334bc871f3234de431e71c6eeba5dd6",
+      "excluded_files": "",
+      "root_hash": "08da1ef4dfc95438a13d964d565a341c0e5de32a5d65c28dcb1414a3a7c675dc",
+      "hash_offset": "753115136",
+      "erofs_version": "1.9",
+      "veritysetup_version": "2.8.4",
+      "file_hash_sha256": "3120af8ed8a63429b96bb35abf74e0bffa280849ab4e01e312d85f889191262f"
+    }
+  leon-se-gemma-3-27b-it-fp8-dynamic: |-
+    {
+      "model_source": "https://huggingface.co/leon-se/gemma-3-27b-it-FP8-Dynamic",
+      "commit_hash": "2e4fc5ed3246ba970ac6692918b616163bd23fb7",
+      "excluded_files": "",
+      "root_hash": "e3fff8605ef065e2584ac54e855e5425fa35ede40d62927d73826ca7aa6325bc",
+      "hash_offset": "29313785856",
+      "erofs_version": "1.9",
+      "veritysetup_version": "2.8.4",
+      "file_hash_sha256": "81b1a44226e31434d3a2d23a8b676fc47211bc208b474a6363d0017db931b7b1"
+    }
+  mistralai-voxtral-mini-3b-2507: |-
+    {
+      "model_source": "https://huggingface.co/mistralai/Voxtral-Mini-3B-2507",
+      "commit_hash": "3060fe34b35ba5d44202ce9ff3c097642914f8f3",
+      "excluded_files": "model-00001-of-00002.safetensors,model-00002-of-00002.safetensors",
+      "root_hash": "ceaf8460e24811dfd96beba0aa482409b896a0053c404dede582ce5425c4cc9d",
+      "hash_offset": "9363795968",
+      "erofs_version": "1.9",
+      "veritysetup_version": "2.8.4",
+      "file_hash_sha256": "f6a655ccbcb231e789dfe33f84cbee813c35067000e47ce02d1ec04819da5751"
+    }
+  openai-gpt-oss-120b: |-
+    {
+      "model_source": "https://huggingface.co/openai/gpt-oss-120b",
+      "commit_hash": "b5c939de8f754692c1647ca79fbf85e8c1e70f8a",
+      "excluded_files": "original,metal",
+      "root_hash": "a19e31d4c7da198b4905539ac00e55b93f377ecc4048e287810b2cf3a197cb29",
+      "hash_offset": "65276874752",
+      "erofs_version": "1.9",
+      "veritysetup_version": "2.8.4",
+      "file_hash_sha256": "74cb2e9482e611d895c24b2b5e9187f3aa8002df8b2c7fda7ebacb924dc748e8"
+    }
+  openai-whisper-large-v3: |-
+    {
+      "model_source": "https://huggingface.co/openai/whisper-large-v3",
+      "commit_hash": "06f233fe06e710322aca913c1bc4249a0d71fce1",
+      "excluded_files": "flax_model.msgpack,pytorch_model.*",
+      "root_hash": "68eb8a67f4319201fa22bc0686bdeff6f7e242d29a37c665d559ce362a98728d",
+      "hash_offset": "9265782784",
+      "erofs_version": "1.9",
+      "veritysetup_version": "2.8.4",
+      "file_hash_sha256": "ac1b25abaa8c4dbdb5ba1065bbcbff1eedba9a24632277f1215a87d9467a35d3"
+    }
+  stelterlab-qwen3-coder-30b-a3b-instruct-awq: |-
+    {
+      "model_source": "https://huggingface.co/stelterlab/Qwen3-Coder-30B-A3B-Instruct-AWQ",
+      "commit_hash": "c28643ed0902d6cefd8f49068fec9623d153e54e",
+      "excluded_files": "",
+      "root_hash": "4372027feda20edb608174f6a7eb66259c83c61dce814f9e3f0d54de88deb235",
+      "hash_offset": "16714424320",
+      "erofs_version": "1.9",
+      "veritysetup_version": "2.8.4",
+      "file_hash_sha256": "8d01af78b5df6b251ba6a091917ee9dc1ecbd8d15412abd2a681a9bfdf950384"
+    }
+  nvidia-kimi-k2-5-nvfp4: |-
+    {
+      "model_source": "https://huggingface.co/nvidia/Kimi-K2.5-NVFP4",
+      "commit_hash": "c0285e649c34d4386b01e38abca642c06cbe014e",
+      "excluded_files": "",
+      "root_hash": "ed52d8702466cf59b43f5b28f3c7223d4abf16a884e8fe83b91a921258d3c6b4",
+      "hash_offset": "590851039232",
+      "erofs_version": "1.9",
+      "veritysetup_version": "2.8.4",
+      "file_hash_sha256": "8dd2fd2371cb7676a771c0b24802e95126b15aa480693afb695d200950eedb4a"
+    }

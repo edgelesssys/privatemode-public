@@ -12,7 +12,7 @@ import (
 )
 
 type mutatingForwarder interface {
-	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator, ...forwarder.Opts)
+	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts)
 }
 
 // Adapter forwards requests with encryption.
@@ -49,8 +49,7 @@ func (t *Adapter) forwardRequest(w http.ResponseWriter, r *http.Request) {
 		w, r,
 		forwarder.WithRawRequestMutation(session.DecryptRequest(r.Context()), t.log),
 		// currently only JSON responses are supported
-		forwarder.WithJSONResponseMutation(session.EncryptResponse(r.Context()), nil),
-		forwarder.NoHeaderMutation,
+		forwarder.JSONResponseMapper(session.EncryptResponse(r.Context()), nil),
 	)
 }
 
@@ -58,7 +57,6 @@ func (t *Adapter) forwardHealthcheckRequest(w http.ResponseWriter, r *http.Reque
 	t.forwarder.Forward(
 		w, r,
 		forwarder.NoRequestMutation,
-		forwarder.NoResponseMutation{},
-		forwarder.NoHeaderMutation,
+		forwarder.PassthroughResponseMapper,
 	)
 }

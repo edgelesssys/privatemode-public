@@ -225,5 +225,5 @@ func (c *stubCipher) EncryptResponse(context.Context) func(plainData string) (st
 
 type stubForwarder struct{}
 
-func (f *stubForwarder) Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMutator, forwarder.HeaderMutator, ...forwarder.Opts) {
+func (f *stubForwarder) Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts) {
 }

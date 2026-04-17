@@ -1,0 +1,135 @@
+:root {
+    /* Text */
+    --color-text-primary: #011C22;
+    --color-text-secondary: #6b7280;
+    --color-text-tertiary: #9ca3af;
+    --color-text-heading: #1a1a1a;
+    --color-text-muted: #666;
+    --color-text-inverse: #ffffff;
+    --color-text-on-user-bubble: #232323;
+
+    /* Backgrounds */
+    --color-bg-page: #ffffff;
+    --color-bg-surface: #ffffff;
+    --color-bg-surface-secondary: #f9fafb;
+    --color-bg-surface-tertiary: #f5f5f5;
+    --color-bg-surface-muted: #f3f4f6;
+    --color-bg-hover: #f3f4f6;
+    --color-bg-active: #E7F4ED;
+    --color-bg-tooltip: #232323;
+    --color-bg-code-block: #1e1e1e;
+
+    /* Borders */
+    --color-border: #e5e7eb;
+    --color-border-secondary: #D1D5DB;
+    --color-border-light: #E0E0E0;
+
+    /* Accent */
+    --color-accent: #00748F;
+    --color-accent-green: #226644;
+    --color-accent-green-check: #22c55e;
+
+    /* Status / semantic */
+    --color-danger: #ff4444;
+    --color-danger-dark: #dd3333;
+    --color-danger-bg: #fff5f5;
+    --color-danger-border: #ffe0e0;
+    --color-danger-text: #dc2626;
+    --color-error: #ef4444;
+    --color-warning-bg: #fef3c7;
+    --color-warning-text: #92400e;
+    --color-warning-border: #fbbf24;
+    --color-warning-bg-hover: #fde68a;
+    --color-warning-border-hover: #f59e0b;
+    --color-danger-indicator-bg: #fee2e2;
+    --color-success-bg: #f0fdf4;
+    --color-success-border: rgba(34, 197, 94, 0.3);
+
+    /* Banner */
+    --color-banner-bg: #fef3c7;
+    --color-banner-text: #92400e;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+    --shadow-md: 0 0 12px rgba(0, 0, 0, 0.4);
+
+    /* Scrollbar */
+    --color-scrollbar: rgba(0, 0, 0, 0.2);
+    --color-scrollbar-dark: rgba(255, 255, 255, 0.3);
+
+    /* Model picker dropdown (dark panel) */
+    --color-dropdown-bg: #232323;
+    --color-dropdown-text: #ffffff;
+    --color-dropdown-hover: #535353;
+    --color-dropdown-border: #535353;
+    --color-dropdown-muted: #9ca3af;
+    --color-dropdown-accent: #22b8cf;
+}
+
+[data-theme="dark"] {
+    /* Text */
+    --color-text-primary: #e4e4e7;
+    --color-text-secondary: #a1a1aa;
+    --color-text-tertiary: #71717a;
+    --color-text-heading: #f4f4f5;
+    --color-text-muted: #a1a1aa;
+    --color-text-inverse: #18181b;
+    --color-text-on-user-bubble: #e4e4e7;
+
+    /* Backgrounds */
+    --color-bg-page: #18181b;
+    --color-bg-surface: #27272a;
+    --color-bg-surface-secondary: #1e1e22;
+    --color-bg-surface-tertiary: #2a2a2e;
+    --color-bg-surface-muted: #2a2a2e;
+    --color-bg-hover: #3f3f46;
+    --color-bg-active: #1a3a2a;
+    --color-bg-tooltip: #3f3f46;
+    --color-bg-code-block: #1e1e1e;
+
+    /* Borders */
+    --color-border: #3f3f46;
+    --color-border-secondary: #52525b;
+    --color-border-light: #3f3f46;
+
+    /* Accent */
+    --color-accent: #22b8cf;
+    --color-accent-green: #4ade80;
+    --color-accent-green-check: #22c55e;
+
+    /* Status / semantic */
+    --color-danger: #f87171;
+    --color-danger-dark: #ef4444;
+    --color-danger-bg: #3b1515;
+    --color-danger-border: #7f1d1d;
+    --color-danger-text: #fca5a5;
+    --color-error: #f87171;
+    --color-warning-bg: #422006;
+    --color-warning-text: #fbbf24;
+    --color-warning-border: #92400e;
+    --color-warning-bg-hover: #4a2606;
+    --color-warning-border-hover: #b45309;
+    --color-danger-indicator-bg: #450a0a;
+    --color-success-bg: #052e16;
+    --color-success-border: rgba(34, 197, 94, 0.3);
+
+    /* Banner */
+    --color-banner-bg: #422006;
+    --color-banner-text: #fbbf24;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 0 12px rgba(0, 0, 0, 0.6);
+
+    /* Scrollbar */
+    --color-scrollbar: rgba(255, 255, 255, 0.15);
+    --color-scrollbar-dark: rgba(255, 255, 255, 0.3);
+
+    /* Model picker dropdown (dark panel) */
+    --color-dropdown-bg: #3f3f46;
+    --color-dropdown-text: #f4f4f5;
+    --color-dropdown-hover: #52525b;
+    --color-dropdown-border: #52525b;
+    --color-dropdown-muted: #a1a1aa;
+    --color-dropdown-accent: #22b8cf;
+}

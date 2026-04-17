@@ -51,17 +51,12 @@ type FieldSelector [][]string
 
 // MutationFunc mutates data.
 // It is used by [WithJSONRequestMutation] to mutate data read from an [*http.Request],
-// and by [WithJSONResponseMutation] to mutate data read from an [io.Reader].
+// and by [JSONResponseMapper] to mutate data read from an [io.Reader].
 // It may be called multiple times for a single request to mutate data.
 type MutationFunc func(in string) (out string, err error)
 
 // RequestMutator mutates an [*http.Request].
 type RequestMutator func(request *http.Request) error
-
-// HeaderMutator mutates a [http.Header].
-// response is the header object of the response. Writes should usually go here.
-// request is the header object of the request.
-type HeaderMutator func(response http.Header, request http.Header) error
 
 // RequestMutatorChain is a chain of [RequestMutator]s.
 func RequestMutatorChain(
@@ -116,7 +111,7 @@ func WithRawRequestMutation(mutate MutationFunc, log *slog.Logger) RequestMutato
 }
 
 // WithJSONRequestMutation returns a [RequestMutator] which mutates the full request.
-// Mutation order is deterministic based on sorting and is the same as for [WithJSONResponseMutation].
+// Mutation order is deterministic based on sorting and is the same as for [JSONResponseMapper].
 func WithJSONRequestMutation(mutate MutationFunc, skipFields FieldSelector, log *slog.Logger) RequestMutator {
 	return withJSONRequestMutation(mutate, skipFields, MutateJSONFields, log)
 }
@@ -222,32 +217,6 @@ func WithFormRequestMutation(mutate MutationFunc, skipFields FieldSelector, log 
 	}
 }
 
-// WithJSONResponseMutation returns a [ResponseMutator] which mutates the data read from the given [io.Reader].
-// Mutation order is deterministic based on sorting and is the same as for [WithJSONRequestMutation].
-func WithJSONResponseMutation(mutate MutationFunc, skipFields FieldSelector) ResponseMutator {
-	return &mutatingReader{
-		scanner:       nil,
-		mutate:        mutate,
-		dataParseFunc: MutateJSONFields,
-		fields:        skipFields,
-		leftover:      nil,
-	}
-}
-
-// WithRawResponseMutation returns a [ResponseMutator] which mutates the whole body of the data from the given [io.Reader].
-func WithRawResponseMutation(mutate MutationFunc) ResponseMutator {
-	return &mutatingReader{
-		scanner: nil,
-		mutate:  mutate,
-		dataParseFunc: func(data []byte, mutate MutationFunc, _ FieldSelector) ([]byte, error) {
-			mutated, err := mutate(string(data))
-			return []byte(mutated), err
-		},
-		fields:   nil,
-		leftover: nil,
-	}
-}
-
 func withJSONRequestMutation(
 	mutate MutationFunc, fields FieldSelector,
 	mutateFunc func([]byte, MutationFunc, FieldSelector) ([]byte, error),
@@ -281,21 +250,23 @@ func withJSONRequestMutation(
 type mutatingReader struct {
 	scanner  *bufio.Scanner
 	leftover []byte
+	closer   io.Closer
 
 	fields        FieldSelector
 	mutate        MutationFunc
 	dataParseFunc func(data []byte, mutate MutationFunc, fields FieldSelector) ([]byte, error)
 }
 
-// Reader returns a mutating [io.Reader].
-func (r *mutatingReader) Reader(reader io.Reader) io.Reader {
+// Reader returns a mutating [io.Reader]. Close cascades to the wrapped reader.
+func (r *mutatingReader) Reader(reader io.ReadCloser) io.ReadCloser {
 	r.scanner = bufio.NewScanner(reader)
+	r.closer = reader
 	return r
 }
 
-// Mutate performs mutation on the given data.
-func (r *mutatingReader) Mutate(body []byte) ([]byte, error) {
-	return r.dataParseFunc(body, r.mutate, r.fields)
+// Close closes the wrapped reader.
+func (r *mutatingReader) Close() error {
+	return r.closer.Close()
 }
 
 // Read reads from the underlying reader, performs mutation on the data chunks, and returns the mutated data.

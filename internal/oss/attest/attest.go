@@ -19,6 +19,10 @@ import (
 	contrastsdk "github.com/edgelesssys/contrast/sdk"
 )
 
+// ErrManifestMismatch is returned when the manifest obtained from Coordinator attestation
+// does not match the expected manifest.
+var ErrManifestMismatch = errors.New("active manifest does not match expected manifest")
+
 // Getter is a client that gets the mesh CA of the Privatemode deployment.
 type Getter struct {
 	httpClient     *http.Client
@@ -64,7 +68,7 @@ func (c Getter) GetAttestedMeshCA(ctx context.Context, expectedMfBytes []byte, a
 		return nil, errors.New("expected exactly one manifest")
 	}
 	if !bytes.Equal(coordinatorState.Manifests[0], expectedMfBytes) {
-		return nil, errors.New("active manifest does not match expected manifest")
+		return nil, ErrManifestMismatch
 	}
 
 	// Parse the certificate

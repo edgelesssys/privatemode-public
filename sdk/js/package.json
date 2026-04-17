@@ -1,0 +1,48 @@
+{
+  "name": "privatemode-ai",
+  "version": "0.0.1",
+  "description": "SDK for https://privatemode.ai",
+  "homepage": "https://github.com/edgelesssys/privatemode-public#readme",
+  "bugs": {
+    "url": "https://github.com/edgelesssys/privatemode-public/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/edgelesssys/privatemode-public.git"
+  },
+  "license": "MIT",
+  "author": "Edgeless Systems GmbH",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && cp src/wasm_exec.js dist/wasm_exec.js",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "prepublishOnly": "npm run build",
+    "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.4",
+    "@types/node": "25.6.0",
+    "@vitest/browser-playwright": "4.1.4",
+    "eslint": "9.39.4",
+    "globals": "17.5.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.58.2",
+    "vitest": "4.1.4"
+  }
+}

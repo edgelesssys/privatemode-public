@@ -1,45 +1,35 @@
 #!/usr/bin/env bash
 
-set -exo pipefail
+set -eo pipefail
 
-device="${1}"
-model_src="${2}"
-commit="${3}"
+model_src="${1}"
+commit="${2}"
 
-if [[ -z ${device} ]] || [[ -z ${model_src} ]] || [[ -z ${commit} ]]; then
-  echo "Usage: $0 <device> <model_source_url> <commit_hash>"
+if [[ -z ${model_src} ]] || [[ -z ${commit} ]]; then
+  echo "Usage: $0 <model_source_url> <commit_hash>"
   exit 1
 fi
 
-# Verify needed tools are installed
-required_tools=("git" "git-lfs" "systemd-repart" "sgdisk" "mount")
-for tool in "${required_tools[@]}"; do
-  if ! command -v "$tool" &>/dev/null; then
-    echo "$tool is not installed"
-    exit 1
-  fi
-done
-
-git_dns_name=$(echo "${model_src}" | cut -d/ -f3)
-echo "machine ${git_dns_name} login api password ${GIT_PAT}" >"${HOME}/.netrc"
+if [[ -n ${GIT_PAT} ]]; then
+  git_dns_name=$(echo "${model_src}" | cut -d/ -f3)
+  echo "machine ${git_dns_name} login api password ${GIT_PAT}" >"${HOME}/.netrc"
+else
+  echo "Warning: no git access token set, repository cloning may fail or be subject to rate limits"
+fi
 
 git lfs install
-
-# Ensure we have access to everything under /dev
-mount -t devtmpfs none /dev
-
-TMPDIR="${TMPDIR:-/tmp}"
-export TMPDIR
-mkdir -p "${TMPDIR}"
-tmp_repo=$(mktemp -d)
 
 excluded_files=()
 if [[ -n ${EXCLUDE_GIT_FILES} ]]; then
   readarray -t excluded_files <<<"$(echo "${EXCLUDE_GIT_FILES}" | tr ',' '\n')"
 fi
 
-GIT_LFS_SKIP_SMUDGE=1 git clone "${model_src}" "${tmp_repo}"
-pushd "${tmp_repo}" || exit 1
+cd "${TMPDIR:-/tmp}" || exit 1
+
+umask 22
+repo_name="model_repo"
+GIT_LFS_SKIP_SMUDGE=1 git clone "${model_src}" "${repo_name}"
+pushd "${repo_name}" || exit 1
 git checkout "${commit}"
 
 # Configure git-lfs to exclude specific files if they follow patterns
@@ -57,25 +47,43 @@ if [[ ${#excluded_files[@]} -gt 0 ]]; then
 fi
 
 git lfs pull
-find . -exec touch -d @0 {} +
+rm -r .git
+shopt -s nullglob
+# shellcheck disable=SC2068 # We want globbing and splitting
+rm -rf ${excluded_files[@]}
+shopt -u nullglob
+
 popd || exit 1
 
-extra_exclude_directives=()
-for file in "${excluded_files[@]}"; do
-  file_glob="${tmp_repo}/${file}"
-  shopt -s nullglob
-  # shellcheck disable=SC2206 # We want globbing and splitting
-  absolute_paths=(${file_glob})
-  shopt -u nullglob
-  extra_exclude_directives+=("ExcludeFiles=${absolute_paths[*]}\n")
-done
+staging_path="${TMPDIR:-/tmp}"
+if [[ -n ${STAGING_PATH} ]]; then
+  staging_path="${STAGING_PATH}"
+fi
 
-sed -e "s|@@SOURCE_REPO@@|${tmp_repo}|g" \
-  -e "s|@@EXTRA_EXCLUDED_FILES@@|$(printf '%s' "${extra_exclude_directives[@]}")|g" \
-  /repart/00-repart.conf.template >/repart/00-repart.conf
+model_name="$(normalize-model-name.sh "${model_src}")"
+temp_disk="${staging_path}/${model_name}.tmp"
 
-constant_uuid="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-sgdisk --zap-all "${device}"
-sgdisk --disk-guid=${constant_uuid} "${device}"
+mkfs.erofs -T0 -x-1 --all-root -U00000000-0000-0000-0000-000000000000 "${temp_disk}" "${repo_name}"
+hash_offset=$(stat -c%s "${temp_disk}")
+verity_output=$(veritysetup format --uuid=00000000-0000-0000-0000-000000000000 --salt=00 --hash-offset="${hash_offset}" "${temp_disk}" "${temp_disk}")
+echo "${verity_output}"
+root_hash=$(echo "${verity_output}" | awk '/Root hash:/ {print $NF}')
 
-SOURCE_DATE_EPOCH=0 systemd-repart --definitions=/repart/ --seed="${constant_uuid}" "${device}" --dry-run=no --json=pretty | tee repart.json
+disk_name="${staging_path}/${model_name}/${root_hash}"
+mkdir -p "${staging_path}/${model_name}"
+mv "${temp_disk}" "${disk_name}"
+
+file_hash=$(sha256sum "${disk_name}" | awk '{print $1}')
+
+cat <<EOF >"${disk_name}.json"
+{
+  "model_source": "${model_src}",
+  "commit_hash": "${commit}",
+  "excluded_files": "${EXCLUDE_GIT_FILES}",
+  "root_hash": "${root_hash}",
+  "hash_offset": "${hash_offset}",
+  "erofs_version": "$(mkfs.erofs --version | head -n1 | awk '{print $NF}')",
+  "veritysetup_version": "$(veritysetup --version | awk '{print $2}')",
+  "file_hash_sha256": "${file_hash}"
+}
+EOF

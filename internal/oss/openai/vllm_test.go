@@ -19,10 +19,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSecureImageURLValidator(t *testing.T) {
-	newRequest := func(body any) *http.Request {
+func TestMediaContentValidator(t *testing.T) {
+	newRequest := func(content []map[string]any) *http.Request {
 		t.Helper()
-		data, err := json.Marshal(body)
+		data, err := json.Marshal(ChatRequest{
+			Messages: []Message{
+				{Role: "user", Content: content},
+			},
+		})
 		if err != nil {
 			panic(err)
 		}
@@ -38,55 +42,123 @@ func TestSecureImageURLValidator(t *testing.T) {
 		request     *http.Request
 		validateErr func(error) bool
 	}{
-		"https url": {
-			request: newRequest(ChatRequest{
-				Messages: []Message{
-					{
-						Role: "user",
-						Content: []map[string]string{
-							{
-								"type":      "input_image",
-								"image_url": "https://example.com/image.jpg",
-							},
-						},
-					},
+		"image/https url": {
+			request: newRequest([]map[string]any{
+				{
+					"type":      "image_url",
+					"image_url": map[string]string{"url": "https://example.com/image.jpg"},
 				},
 			}),
 			validateErr: func(err error) bool { return err == nil },
 		},
-		"http url": {
-			request: newRequest(ChatRequest{
-				Messages: []Message{
-					{
-						Role: "user",
-						Content: []map[string]string{
-							{
-								"type":      "input_image",
-								"image_url": "http://example.com/image.jpg",
-							},
-						},
-					},
+		"image/http url": {
+			request: newRequest([]map[string]any{
+				{
+					"type":      "image_url",
+					"image_url": map[string]string{"url": "http://example.com/image.jpg"},
 				},
 			}),
 			validateErr: func(err error) bool {
 				return err != nil && strings.Contains(err.Error(), "insecure")
 			},
 		},
-		"data url": {
-			request: newRequest(ChatRequest{
-				Messages: []Message{
-					{
-						Role: "user",
-						Content: []map[string]string{
-							{
-								"type":      "input_image",
-								"image_url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYa",
-							},
-						},
-					},
+		"image/file url": {
+			request: newRequest([]map[string]any{
+				{
+					"type":      "image_url",
+					"image_url": map[string]string{"url": "file:///var/lib/image.png"},
+				},
+			}),
+			validateErr: func(err error) bool {
+				return err != nil && strings.Contains(err.Error(), "insecure")
+			},
+		},
+		"image/data url": {
+			request: newRequest([]map[string]any{
+				{
+					"type":      "image_url",
+					"image_url": map[string]string{"url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYa"},
 				},
 			}),
 			validateErr: func(err error) bool { return err == nil },
+		},
+		"image/http url as second content block": {
+			request: newRequest([]map[string]any{
+				{
+					"type":      "image_url",
+					"image_url": map[string]string{"url": "https://example.com/image.jpg"},
+				},
+				{
+					"type":      "image_url",
+					"image_url": map[string]string{"url": "http://example.com/image.jpg"},
+				},
+			}),
+			validateErr: func(err error) bool {
+				return err != nil && strings.Contains(err.Error(), "insecure")
+			},
+		},
+		"image/http url without type": {
+			request: newRequest([]map[string]any{
+				{
+					"image_url": map[string]string{"url": "http://example.com/image.jpg"},
+				},
+			}),
+			validateErr: func(err error) bool {
+				return err != nil && strings.Contains(err.Error(), "insecure")
+			},
+		},
+		"image/http url without type in concise schema": {
+			request: newRequest([]map[string]any{
+				{
+					"image_url": "http://example.com/image.jpg",
+				},
+			}),
+			validateErr: func(err error) bool {
+				return err != nil && strings.Contains(err.Error(), "insecure")
+			},
+		},
+		"video": {
+			request: newRequest([]map[string]any{
+				{
+					"type":      "video_url",
+					"video_url": map[string]string{"url": "https://example.com/video.mp4"},
+				},
+			}),
+			validateErr: func(err error) bool {
+				return err != nil && strings.Contains(err.Error(), "not allowed")
+			},
+		},
+		"video without type in concise schema": {
+			request: newRequest([]map[string]any{
+				{
+					"video_url": "https://example.com/video.mp4",
+				},
+			}),
+			validateErr: func(err error) bool {
+				return err != nil && strings.Contains(err.Error(), "not allowed")
+			},
+		},
+		"audio": {
+			request: newRequest([]map[string]any{
+				{
+					"type":      "audio_url",
+					"audio_url": map[string]string{"url": "https://example.com/audio.mp3"},
+				},
+			}),
+			validateErr: func(err error) bool {
+				return err != nil && strings.Contains(err.Error(), "not allowed")
+			},
+		},
+		"audio without type in concise schema": {
+			request: newRequest([]map[string]any{
+				{
+					"type":      "audio_url",
+					"audio_url": "https://example.com/audio.mp3",
+				},
+			}),
+			validateErr: func(err error) bool {
+				return err != nil && strings.Contains(err.Error(), "not allowed")
+			},
 		},
 	}
 
@@ -95,7 +167,7 @@ func TestSecureImageURLValidator(t *testing.T) {
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			require := require.New(t)
-			mutator := SecureImageURLValidator(logger)
+			mutator := MediaContentValidator(logger)
 
 			err := mutator(tc.request)
 			require.True(tc.validateErr(err))

@@ -41,10 +41,16 @@ spec:
             - "--tlsCertPath=/etc/tls/tls.crt"
             - "--tlsKeyPath=/etc/tls/tls.key"
             {{- end }}
+          {{- if or .Values.config.customCA.enabled .Values.config.extraEnv }}
           env:
+            {{- if .Values.config.customCA.enabled }}
+            - name: SSL_CERT_FILE
+              value: "/etc/ssl/certs/custom-ca-bundle.crt"
+            {{- end }}
             {{- with .Values.config.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- end }}
           volumeMounts:
             {{- if .Values.config.workspace.enabled }}
             - name: workspace
@@ -64,6 +70,12 @@ spec:
             {{- if .Values.config.apiKey.enabled }}
             - name: apikey
               mountPath: /etc/apiKey
+              readOnly: true
+            {{- end }}
+            {{- if .Values.config.customCA.enabled }}
+            - name: custom-ca
+              mountPath: /etc/ssl/certs/custom-ca-bundle.crt
+              subPath: {{ .Values.config.customCA.fileName }}
               readOnly: true
             {{- end }}
           resources:
@@ -88,6 +100,11 @@ spec:
         - name: apikey
           secret:
             secretName: {{ .Values.config.apiKey.apiKeySecretName }}
+        {{- end }}
+        {{- if .Values.config.customCA.enabled }}
+        - name: custom-ca
+          secret:
+            secretName: {{ .Values.config.customCA.secretName }}
         {{- end }}
       nodeSelector:
         {{- toYaml .Values.nodeSelector | nindent 8 }}

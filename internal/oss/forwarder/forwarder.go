@@ -1,7 +1,11 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: MIT
 
-// Package forwarder is used to forward http requests to a unix socket.
+// Package forwarder is used to forward HTTP requests to another server.
+//
+// A forwarder is a proxy which receives input requests from a downstream client and sends
+// a derived request to an upstream server. Similarly, a downstream response is derived from the
+// upstream response and sent back to the downstream client.
 package forwarder
 
 import (
@@ -39,25 +43,6 @@ const (
 // ProtocolScheme is the protocol scheme used for the forwarding.
 type ProtocolScheme string
 
-// ResponseMutator performs mutations on the given [io.Reader].
-type ResponseMutator interface {
-	Reader(reader io.Reader) io.Reader
-	Mutate(body []byte) ([]byte, error)
-}
-
-// ErrorMessage represents an error response in the OpenAI API format for v1/chat/completions.
-type ErrorMessage struct {
-	Error APIError `json:"error"`
-}
-
-// APIError is the error for the OpenAI error format.
-type APIError struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Param   string `json:"param"`
-	Code    string `json:"code"`
-}
-
 // Opts applies options to a [Forwarder.Forward] call.
 type Opts func(*opts)
 
@@ -90,18 +75,6 @@ func WithMaxBodyBytes(n int64, msg string) Opts {
 // NoRequestMutation skips any mutation on the [*http.Request].
 func NoRequestMutation(*http.Request) error { return nil }
 
-// NoHeaderMutation skips any mutation on the [*http.Header].
-func NoHeaderMutation(http.Header, http.Header) error { return nil }
-
-// NoResponseMutation skips any mutation of the given [io.ReadCloser].
-type NoResponseMutation struct{}
-
-// Reader returns the given [io.Reader] without any mutation.
-func (NoResponseMutation) Reader(rc io.Reader) io.Reader { return rc }
-
-// Mutate returns the given byte slice without any mutation.
-func (NoResponseMutation) Mutate(body []byte) ([]byte, error) { return body, nil }
-
 // RetryCallback determines whether a request should be retried based on status code and attempt number.
 // attempt is the number of requests made / the index of the next attempt, i.e., starting from 1.
 // Returns (shouldRetry, delay) where shouldRetry indicates if retry should happen and delay is the backoff duration.
@@ -128,12 +101,12 @@ func New(client *http.Client, address string, scheme ProtocolScheme, log *slog.L
 	}
 }
 
-// Forward mutates a request with the given mutator and forwards it to a different endpoint.
-// It also mutates the response with the given responseMutator and responseHeaderMutator before
-// writing it back to the client.
+// Forward forwards a downstream request req to an upstream and relays the response back to the downstream through w.
+// It applies the mutators and mappers, which are translating input to output request and response.
+// The upstream address is controlled with [New] or [Opts]. Retry behaviour is controlled with [Opts].
 func (f *Forwarder) Forward(
 	w http.ResponseWriter, req *http.Request,
-	requestMutator RequestMutator, responseMutator ResponseMutator, responseHeaderMutator HeaderMutator,
+	requestMutator RequestMutator, responseMapper ResponseMapper,
 	opts ...Opts,
 ) {
 	options := defaultOpts(f)
@@ -149,7 +122,7 @@ func (f *Forwarder) Forward(
 		return
 	}
 
-	// Prepare request for forwarding to server
+	// Prepare request for forwarding to upstream server
 	baseReq.RequestURI = ""
 	delHopHeaders(baseReq.Header)
 	updateForwardedHeader(baseReq.Header, baseReq.RemoteAddr)
@@ -169,90 +142,46 @@ func (f *Forwarder) Forward(
 		HTTPError(w, req, http.StatusInternalServerError, "forwarding request: %s", err)
 		return
 	}
-	defer resp.Body.Close()
+	// Response body closing happens below, dependent on the mapper.
 
-	// Sanitize response to forward to client
-	delHopHeaders(resp.Header)
+	// Produce the downstream response from the upstream response.
+	dsResp, err := responseMapper(resp)
+	if err != nil {
+		_ = resp.Body.Close()
+		f.logError("Failed to map upstream response to downstream response", err, req)
+		HTTPError(w, req, http.StatusInternalServerError, "mapping response: %s", err)
+		return
+	}
+	switch r := dsResp.(type) {
+	case *StreamingResponse:
+		// Wrapped body must be closed after sending, cascades down to the http.Response
+		defer r.Body.Close()
+	case *UnaryResponse:
+		// Body already fully read: Close right away
+		resp.Body.Close()
+	default:
+		// Unexpected type! Close http.Response after sending at least
+		f.logWarning(fmt.Sprintf("Unexpected type of mapped response %T", dsResp), nil, req)
+		defer resp.Body.Close()
+	}
 
-	// Allow caller to mutate headers.
-	// This is necessary in cases where the caller wants to modify a header already present in the response.
-	if err := responseHeaderMutator(resp.Header, baseReq.Header); err != nil {
-		f.logError("Failed to mutate header", err, req)
-		HTTPError(w, req, http.StatusInternalServerError, "mutating header: %s", err)
+	if err := SendResponse(w, dsResp); err != nil {
+		if errors.Is(err, context.Canceled) || req.Context().Err() == context.Canceled {
+			f.logWarning("Connection closed by client before forwarding finished", err, req)
+		} else {
+			f.logError("Failed sending response to downstream client", err, req)
+		}
 		return
 	}
 
-	// Copy headers to response towards client.
-	for headerName, headerValues := range resp.Header {
-		// Skip Content-Length header since we might change the length in the following mutation.
-		if headerName == "Content-Length" {
-			continue
+	// Log error status codes
+	statusCode := dsResp.GetStatusCode()
+	if statusCode := statusCode; statusCode >= 400 {
+		logger := f.log.Warn
+		if statusCode >= 500 {
+			logger = f.log.Error
 		}
-		for _, headerValue := range headerValues {
-			w.Header().Add(headerName, headerValue)
-		}
-	}
-
-	if resp.Header.Get(privateModeEncryptedHeader) == "false" {
-		responseMutator = NoResponseMutation{}
-	}
-
-	if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
-		// Wrap the ResponseWriter with a flushing writer to force immediate sending after each event.
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			f.logError("ResponseWriter does not support flushing", nil, req)
-			HTTPError(w, req, http.StatusInternalServerError, "ResponseWriter does not support flushing")
-		}
-		flushingWriter := &flushingWriter{w: w, flusher: flusher}
-
-		// Copy headers before streaming the body, as this calls WriteHeader(200) otherwise.
-		// No further calls to WriteHeader, e.g. through [HTTPError], may be made after this.
-		w.WriteHeader(resp.StatusCode)
-
-		// Write response to client using a small buffer to ensure smooth streaming.
-		if _, err := io.CopyBuffer(flushingWriter, responseMutator.Reader(resp.Body), make([]byte, copyBufferSize)); err != nil {
-			if errors.Is(err, context.Canceled) || req.Context().Err() == context.Canceled {
-				f.logWarning("Connection closed by client before forwarding finished", err, req)
-			} else {
-				f.logError("Failed creating new body for forwarded message", err, req)
-			}
-			return
-		}
-	} else {
-		// Read the entire response body, mutate it and write it to the client.
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			f.logError("Failed reading response body", err, req)
-			HTTPError(w, req, http.StatusInternalServerError, "reading response body: %s", err)
-			return
-		}
-		responseBody, err := responseMutator.Mutate(body)
-		if err != nil {
-			f.logError("Failed mutating response body", err, req)
-			HTTPError(w, req, http.StatusInternalServerError, "mutating response body: %s", err)
-			return
-		}
-
-		// Copy headers before writing the body, as this implicitly calls WriteHeader(200) otherwise.
-		// No further calls to WriteHeader, e.g. through [HTTPError], may be made after this.
-		w.WriteHeader(resp.StatusCode)
-
-		if resp.StatusCode >= 400 {
-			logger := f.log.Warn
-			if resp.StatusCode >= 500 {
-				logger = f.log.Error
-			}
-			f.logMsg(logger, "Forwarded request returned an error status code", nil, req, "statusCode", resp.StatusCode)
-		}
-		if _, err := w.Write(responseBody); err != nil {
-			if errors.Is(err, context.Canceled) {
-				f.logWarning("Connection closed by client before forwarding finished", err, req)
-			} else {
-				f.logError("Failed creating new body for forwarded message", err, req)
-			}
-			return
-		}
+		f.logMsg(logger, "Upstream returned an error status code", nil, req, "statusCode", statusCode)
 	}
 
 	// If a shard key is present we append it (trimmed) to the log entry.
@@ -264,14 +193,14 @@ func (f *Forwarder) Forward(
 		}
 		f.log.Info("Forwarding finished successfully",
 			"requestID", req.Header.Get(constants.RequestIDHeader),
-			"responseStatus", resp.StatusCode,
+			"responseStatus", statusCode,
 			"shardKey", shardKey,
 		)
 	} else {
 		// No shard key present
 		f.log.Info("Forwarding finished successfully",
 			"requestID", req.Header.Get(constants.RequestIDHeader),
-			"responseStatus", resp.StatusCode,
+			"responseStatus", statusCode,
 		)
 	}
 }
@@ -410,16 +339,31 @@ func (f *Forwarder) shouldRetry(
 	return true, nil
 }
 
+// openAIAPIErrorResponse represents the error response returned by the /v1/chat/completions endpoint.
+// It is a copy internal/oss/openai.APIErrorResponse for serialization only.
+type openAIAPIErrorResponse struct {
+	Error openAIAPIError `json:"error"`
+}
+
+// openAIAPIError contains error details.
+// It is a copy of internal/oss/openai.APIError for serialization only.
+type openAIAPIError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+	Param   string `json:"param,omitzero"`
+	Code    string `json:"code,omitzero"`
+}
+
 // HTTPError writes an error response to the client.
 // Functions similarly to [http.Error], but also handles error reporting for SSE requests.
 func HTTPError(w http.ResponseWriter, r *http.Request, code int, msg string, args ...any) {
-	errObj := APIError{
+	errObj := openAIAPIError{
 		Message: fmt.Sprintf(msg, args...),
 		Type:    "",
 		Param:   "",
 		Code:    "",
 	}
-	formattedMsgBytes, err := json.Marshal(ErrorMessage{Error: errObj})
+	formattedMsgBytes, err := json.Marshal(openAIAPIErrorResponse{Error: errObj})
 	formattedMsg := string(formattedMsgBytes)
 	if err != nil {
 		// Only fall back to non-JSON error when we cannot even marshal the error (which is pretty bad)
@@ -536,4 +480,191 @@ func (fw *flushingWriter) Write(p []byte) (n int, err error) {
 	}
 	fw.flusher.Flush()
 	return n, nil
+}
+
+// UnaryResponse is a basic representation of a unary response with its body fully in memory.
+type UnaryResponse struct {
+	StatusCode int
+	Header     http.Header
+	Body       []byte
+}
+
+// responseSeal is the seal of the [Response] interface.
+func (u *UnaryResponse) responseSeal() {}
+
+// GetStatusCode fulfills [Response.GetStatusCode].
+func (u *UnaryResponse) GetStatusCode() int { return u.StatusCode }
+
+// GetHeader fulfills [Response.GetHeader].
+func (u *UnaryResponse) GetHeader() http.Header { return u.Header }
+
+var _ Response = (*UnaryResponse)(nil)
+
+// ReadUnaryResponse reads the upstream response body into memory and copies the status code.
+// The body is limited to maxBytes via [http.MaxBytesReader]. Headers are initialized empty.
+func ReadUnaryResponse(resp *http.Response, maxBytes int64) (*UnaryResponse, error) {
+	// http.MaxBytesReader: passing nil for the ResponseWriter is explicitly supported though not documented
+	body, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, maxBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	return &UnaryResponse{
+		StatusCode: resp.StatusCode,
+		Header:     http.Header{},
+		Body:       body,
+	}, nil
+}
+
+// ReadUnaryResponseWithHeaders is like [ReadUnaryResponse] but also copies forwardable headers.
+// Prefer [ReadUnaryResponse] for new code.
+func ReadUnaryResponseWithHeaders(resp *http.Response, maxBytes int64) (*UnaryResponse, error) {
+	body, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, maxBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	return &UnaryResponse{
+		StatusCode: resp.StatusCode,
+		Header:     cloneForwardableHeaders(resp.Header),
+		Body:       body,
+	}, nil
+}
+
+// cloneForwardableHeaders clones headers with hop-by-hop and Content-Length headers removed.
+// Content-Length is excluded because body mutation may change the length.
+func cloneForwardableHeaders(h http.Header) http.Header {
+	out := h.Clone()
+	delHopHeaders(out)
+	out.Del("Content-Length")
+	return out
+}
+
+// StreamingResponse is a basic representation of a streaming response with the body as an
+// [io.ReadCloser]. Streaming means that the body is sent in chunks to the client as it is
+// generated through Read. Omit the content-length header for that to work properly. See
+// [SendResponse] for details on the flushing behaviour. The body may be read exactly once for
+// sending out the response and must be closed in all cases. To transform the body, wrap Body
+// with a new [io.ReadCloser] whose Close cascades to the wrapped reader, and assign the wrapper.
+type StreamingResponse struct {
+	StatusCode int
+	Header     http.Header
+	Body       io.ReadCloser
+}
+
+// responseSeal is the seal of the [Response] interface.
+func (s *StreamingResponse) responseSeal() {}
+
+// GetStatusCode fulfills [Response.GetStatusCode].
+func (s *StreamingResponse) GetStatusCode() int { return s.StatusCode }
+
+// GetHeader fulfills [Response.GetHeader].
+func (s *StreamingResponse) GetHeader() http.Header { return s.Header }
+
+var _ Response = (*StreamingResponse)(nil)
+
+// NewStreamingResponse wraps the upstream response body as a streaming response and copies the
+// status code. Headers are initialized empty.
+func NewStreamingResponse(resp *http.Response) *StreamingResponse {
+	return &StreamingResponse{
+		StatusCode: resp.StatusCode,
+		Header:     http.Header{},
+		Body:       resp.Body,
+	}
+}
+
+// NewStreamingResponseWithHeaders is like [NewStreamingResponse] but also copies forwardable
+// headers. Prefer [NewStreamingResponse] for new code.
+func NewStreamingResponseWithHeaders(resp *http.Response) *StreamingResponse {
+	return &StreamingResponse{
+		StatusCode: resp.StatusCode,
+		Header:     cloneForwardableHeaders(resp.Header),
+		Body:       resp.Body,
+	}
+}
+
+// Response is the sum of all response types.
+// Type assert to extract [UnaryResponse] or [StreamingResponse]. In addition, interface methods
+// allow extracting common fields.
+type Response interface {
+	// GetStatusCode returns the HTTP status code.
+	GetStatusCode() int
+	// GetHeader returns the HTTP headers. The returned map is mutable and shared with the
+	// underlying response.
+	GetHeader() http.Header
+
+	// responseSeal seals the interface: all implementations are in this package.
+	responseSeal()
+}
+
+// ResponseMapper takes the upstream response and produces the downstream response to send out.
+// The upstream response is treated as read-only input and the returned [Response] must be an
+// independent value through deep-copying all input fields.
+//
+// The mapper may apply a pipeline of mutators, where each mutator addresses a single concern.
+// Mutators modify the response in place. Example:
+//
+//	func(resp *http.Response) (Response, error) {
+//	    // Create initial downstream response
+//	    dr, err := ReadUnaryResponse(resp, maxBytes)
+//	    if err != nil {
+//	        return nil, err
+//	    }
+//
+//	    // Apply a pipeline of mutators, each addressing a single concern
+//
+//	    if err := decryptBody(dr); err != nil {
+//	        return nil, err
+//	    }
+//
+//	    setContentType("application/json", dr)
+//
+//	    // Return the final downstream response
+//	    return dr, nil
+//	}
+//
+// Mutators do not have to follow a fixed signature but should take a pointer to the response along
+// with additional parameters and may return an error.
+type ResponseMapper func(*http.Response) (Response, error)
+
+// SendResponse sends out the resp to the downstream client via w.
+// For [StreamingResponse], it expects w to support flushing, and flushes after each Write() on w.
+// Because [io.Copy] performs one Write() for each Read(), resp can control flushing.
+// Alternatively, if resp implements [io.WriterTo], it can call Write() appropriately itself.
+func SendResponse(w http.ResponseWriter, resp Response) error {
+	if resp == nil {
+		return errors.New("nil response")
+	}
+	switch r := resp.(type) {
+	case *UnaryResponse:
+		writeHeaderTo(w.Header(), r.Header)
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(r.Body)))
+		w.WriteHeader(r.StatusCode)
+		if _, err := w.Write(r.Body); err != nil {
+			return fmt.Errorf("writing response body: %w", err)
+		}
+	case *StreamingResponse:
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			return errors.New("ResponseWriter does not support flushing")
+		}
+		writeHeaderTo(w.Header(), r.Header)
+		w.WriteHeader(r.StatusCode)
+		fw := &flushingWriter{w: w, flusher: flusher}
+		copyBuffer := make([]byte, copyBufferSize)
+		if _, err := io.CopyBuffer(fw, r.Body, copyBuffer); err != nil {
+			return fmt.Errorf("streaming response body: %w", err)
+		}
+	default:
+		return fmt.Errorf("unsupported response type %T", resp)
+	}
+	return nil
+}
+
+func writeHeaderTo(dst, src http.Header) {
+	for k, vs := range src {
+		// No cloning here: The header is written out immediately after this call, so any changes
+		// after are trailers on distinct keys.
+		dst[k] = vs
+	}
 }

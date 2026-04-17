@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#FFFFFF" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Privatemode" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/png" href="/favicon-dark.svg" media="(prefers-color-scheme: light)" />
+    <link rel="icon" type="image/png" href="/favicon-light.svg" media="(prefers-color-scheme: dark)" />
+    <link rel="apple-touch-icon" href="/logo-192.png" />
+    %sveltekit.head%
+</head>
+
+<body data-sveltekit-preload-data="hover">
+    <script>
+        (function () {
+            var p = localStorage.getItem('privatemode_theme') || 'system';
+            var d = p === 'dark' || (p === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+            var theme = d ? 'dark' : 'light';
+            var themeColor = d ? '#18181B' : '#FFFFFF';
+            document.documentElement.setAttribute('data-theme', theme);
+            document.documentElement.style.colorScheme = theme;
+
+            var themeColorMeta = document.querySelector('meta[name="theme-color"]');
+            themeColorMeta.setAttribute('content', themeColor);
+        })();
+    </script>
+    <div style="display: contents">%sveltekit.body%</div>
+</body>
+
+</html>

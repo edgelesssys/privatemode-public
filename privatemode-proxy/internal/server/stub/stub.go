@@ -41,7 +41,7 @@ func EchoHandler(secrets map[string][]byte, log *slog.Logger) http.Handler {
 
 func openAIChatCompletionsHandler(secrets map[string][]byte, log *slog.Logger) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		requestMutator, responseMutator := getConnectionMutators(secrets, log)
+		requestMutator, responseMutate := getConnectionMutators(secrets, log)
 		if err := requestMutator(r); err != nil {
 			forwarder.HTTPError(w, r, http.StatusInternalServerError, "Forwarding request: %s", err.Error())
 			return
@@ -124,7 +124,7 @@ func openAIChatCompletionsHandler(secrets map[string][]byte, log *slog.Logger) f
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		response, err := responseMutator.Mutate(responseJSON)
+		response, err := responseMutate(responseJSON)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -180,17 +180,19 @@ func GetEncryptionFunctions(secrets map[string][]byte) (encryptFunc forwarder.Mu
 	return encrypt, decrypt
 }
 
-func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (requestMutator forwarder.RequestMutator, responseMutator forwarder.ResponseMutator) {
+func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (requestMutator forwarder.RequestMutator, responseMutate func([]byte) ([]byte, error)) {
 	encrypt, decrypt := GetEncryptionFunctions(secrets)
 
 	requestMutator = forwarder.RequestMutatorChain(
 		forwarder.WithJSONRequestMutation(decrypt, openai.PlainCompletionsRequestFields, log),
 		openai.CacheSaltValidator(log),
-		openai.SecureImageURLValidator(log),
+		openai.MediaContentValidator(log),
 	)
 
-	responseMutator = forwarder.WithJSONResponseMutation(encrypt, openai.PlainCompletionsResponseFields)
-	return requestMutator, responseMutator
+	responseMutate = func(data []byte) ([]byte, error) {
+		return forwarder.MutateJSONFields(data, encrypt, openai.PlainCompletionsResponseFields)
+	}
+	return requestMutator, responseMutate
 }
 
 func openAIModelsHandler() func(w http.ResponseWriter, r *http.Request) {

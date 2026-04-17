@@ -25,7 +25,6 @@ func TestForwardStreaming(t *testing.T) {
 	mutator := &stubMutator{
 		mutateResponse: `"plainText"`,
 	}
-	responseMutator := WithJSONResponseMutation(mutator.mutate, nil)
 
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -46,8 +45,7 @@ func TestForwardStreaming(t *testing.T) {
 		resp,
 		req,
 		NoRequestMutation,
-		responseMutator,
-		NoHeaderMutation,
+		JSONResponseMapper(mutator.mutate, nil),
 	)
 
 	assert.Equal(http.StatusOK, resp.Code)
@@ -65,7 +63,6 @@ func TestForwardStreamingAborted(t *testing.T) {
 	mutator := &stubMutator{
 		mutateResponse: `"plainText"`,
 	}
-	responseMutator := WithJSONResponseMutation(mutator.mutate, nil)
 
 	sentFirstPart := make(chan struct{})
 
@@ -106,8 +103,7 @@ func TestForwardStreamingAborted(t *testing.T) {
 		resp,
 		req,
 		NoRequestMutation,
-		responseMutator,
-		NoHeaderMutation,
+		JSONResponseMapper(mutator.mutate, nil),
 	)
 
 	assert.Equal(http.StatusOK, resp.Code)
@@ -133,7 +129,6 @@ func TestForwardNonStreaming(t *testing.T) {
 	mutator := &stubMutator{
 		mutateResponse: `"plainText"`,
 	}
-	responseMutator := WithJSONResponseMutation(mutator.mutate, nil)
 
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -154,8 +149,7 @@ func TestForwardNonStreaming(t *testing.T) {
 		resp,
 		req,
 		NoRequestMutation,
-		responseMutator,
-		NoHeaderMutation,
+		JSONResponseMapper(mutator.mutate, nil),
 	)
 
 	assert.Equal(http.StatusOK, resp.Code)
@@ -165,11 +159,10 @@ func TestForwardNonStreaming(t *testing.T) {
 	assert.Equal(expectedResponse, resp.Body.String())
 }
 
-func TestForwardHeaderCopying(t *testing.T) {
+func TestForwardMutationError(t *testing.T) {
 	failingMutator := &stubMutator{
 		mutateErr: assert.AnError,
 	}
-	responseMutator := WithJSONResponseMutation(failingMutator.mutate, nil)
 
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -186,8 +179,7 @@ func TestForwardHeaderCopying(t *testing.T) {
 		resp,
 		req,
 		NoRequestMutation,
-		responseMutator,
-		NoHeaderMutation,
+		JSONResponseMapper(failingMutator.mutate, nil),
 	)
 
 	assert := assert.New(t)
@@ -211,7 +203,7 @@ func TestHTTPError(t *testing.T) {
 			args:                nil,
 			expectedStatusCode:  http.StatusInternalServerError,
 			expectedContentType: "application/json",
-			expectedBody:        `{"error":{"message":"Internal error occurred","type":"","param":"","code":""}}`,
+			expectedBody:        `{"error":{"message":"Internal error occurred","type":""}}`,
 		},
 		"SSE request": {
 			acceptHeader:        "text/event-stream",
@@ -220,7 +212,7 @@ func TestHTTPError(t *testing.T) {
 			args:                nil,
 			expectedStatusCode:  http.StatusBadRequest,
 			expectedContentType: "text/event-stream",
-			expectedBody:        "event: error\n\ndata: {\"error\":{\"message\":\"Invalid parameter\",\"type\":\"\",\"param\":\"\",\"code\":\"\"}}\n\n",
+			expectedBody:        "event: error\n\ndata: {\"error\":{\"message\":\"Invalid parameter\",\"type\":\"\"}}\n\n",
 		},
 		"Plain request with args": {
 			acceptHeader:        "",                  // No accept header
@@ -229,7 +221,7 @@ func TestHTTPError(t *testing.T) {
 			args:                []any{"item123"},
 			expectedStatusCode:  http.StatusNotFound,
 			expectedContentType: "application/json",
-			expectedBody:        `{"error":{"message":"Resource item123 not found","type":"","param":"","code":""}}`,
+			expectedBody:        `{"error":{"message":"Resource item123 not found","type":""}}`,
 		},
 		"SSE request with args": {
 			acceptHeader:        "text/event-stream",
@@ -238,7 +230,7 @@ func TestHTTPError(t *testing.T) {
 			args:                []any{42},
 			expectedStatusCode:  http.StatusUnauthorized,
 			expectedContentType: "text/event-stream",
-			expectedBody:        "event: error\n\ndata: {\"error\":{\"message\":\"User 42 unauthorized\",\"type\":\"\",\"param\":\"\",\"code\":\"\"}}\n\n",
+			expectedBody:        "event: error\n\ndata: {\"error\":{\"message\":\"User 42 unauthorized\",\"type\":\"\"}}\n\n",
 		},
 	}
 
@@ -296,7 +288,7 @@ func TestForwardMaxBodyBytes(t *testing.T) {
 
 			fwd.Forward(
 				resp, req,
-				NoRequestMutation, NoResponseMutation{}, NoHeaderMutation,
+				NoRequestMutation, PassthroughResponseMapper,
 				WithMaxBodyBytes(maxBytes, ""),
 			)
 
@@ -371,8 +363,7 @@ func TestForwardRetry(t *testing.T) {
 				resp,
 				req,
 				NoRequestMutation,
-				NoResponseMutation{},
-				NoHeaderMutation,
+				PassthroughResponseMapper,
 				WithRetryCallback(retryCallback),
 			)
 			elapsed := time.Since(startTime)
