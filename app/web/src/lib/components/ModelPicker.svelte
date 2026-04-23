@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { ChevronUp, ChevronDown } from 'lucide-svelte';
+  import Tooltip from './Tooltip.svelte';
   import type { Model } from '$lib/clientStore';
   import { modelConfig, DEFAULT_MODEL_ID } from '$lib/models';
   import { models as modelsStore, modelsLoaded } from '$lib/clientStore';
@@ -8,6 +9,8 @@
 
   export let privatemodeAIClient: PrivatemodeAI | null = null;
   export let selectedModel: string = '';
+  export let disabled: boolean = false;
+  export let lockedModel: string | undefined = undefined;
   export let onModelChange: (modelId: string) => void = () => {};
 
   const SELECTED_MODEL_KEY = 'privatemode_selected_model';
@@ -86,6 +89,7 @@
   }
 
   function togglePicker() {
+    if (disabled) return;
     isOpen = !isOpen;
     if (isOpen) {
       requestAnimationFrame(() => {
@@ -122,22 +126,38 @@
   class="model-picker"
   bind:this={pickerElement}
 >
-  <button
-    class="model-button"
-    type="button"
-    on:click={togglePicker}
-  >
-    <span class="model-name"
-      >{selectedModel
-        ? getModelDisplayName(selectedModel)
-        : 'Select model'}</span
+  {#if disabled}
+    <Tooltip
+      text="Model can only be changed before the first message in a chat. Start a new chat to select a different model."
     >
-    {#if isOpen}
-      <ChevronUp size={16} />
-    {:else}
-      <ChevronDown size={16} />
-    {/if}
-  </button>
+      <button
+        class="model-button disabled"
+        type="button"
+      >
+        <span class="model-name"
+          >{getModelDisplayName(lockedModel ?? selectedModel)}</span
+        >
+        <ChevronDown size={16} />
+      </button>
+    </Tooltip>
+  {:else}
+    <button
+      class="model-button"
+      type="button"
+      on:click={togglePicker}
+    >
+      <span class="model-name"
+        >{selectedModel
+          ? getModelDisplayName(selectedModel)
+          : 'Select model'}</span
+      >
+      {#if isOpen}
+        <ChevronUp size={16} />
+      {:else}
+        <ChevronDown size={16} />
+      {/if}
+    </button>
+  {/if}
 
   {#if isOpen}
     <div
@@ -192,8 +212,13 @@
     border-radius: 0.375rem;
   }
 
-  .model-button:hover {
+  .model-button:hover:not(.disabled) {
     background-color: var(--color-bg-hover);
+  }
+
+  .model-button.disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .model-button :global(svg) {

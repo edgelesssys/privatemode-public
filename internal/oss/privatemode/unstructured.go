@@ -113,7 +113,7 @@ func (c *Client) Unstructured(ctx context.Context, files []UnstructuredFile, opt
 
 	respBody, err := c.doAPIRequestAndReadBody(req)
 	if err != nil {
-		return nil, fmt.Errorf("sending request: %w", err)
+		return nil, fmt.Errorf("sending request: %w", tryDecryptResponseError(err, cipher, nil))
 	}
 
 	decrypted, err := forwarder.MutateJSONFields(respBody, cipher.DecryptResponse, nil)

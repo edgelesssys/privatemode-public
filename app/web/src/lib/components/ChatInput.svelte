@@ -2,6 +2,7 @@
   import {
     FileUp,
     File,
+    Image,
     X,
     Paperclip,
     Brain,
@@ -11,15 +12,17 @@
   import ModelPicker from './ModelPicker.svelte';
   import Tooltip from './Tooltip.svelte';
   import { chatStore } from '$lib/chatStore';
-  import type { AttachedFile } from '$lib/chatStore';
+  import type { AttachedFile, AttachedImage, Message } from '$lib/chatStore';
   import { countWords } from '$lib/chatStore';
   import { modelConfig } from '$lib/models';
+  import { models as modelsStore, modelsLoaded } from '$lib/clientStore';
   import { onMount } from 'svelte';
   import type { PrivatemodeAI } from 'privatemode-ai';
 
   export let privatemodeAIClient: PrivatemodeAI | null;
   export let currentChatId: string | null;
   export let onChatCreated: (chatId: string) => void = () => {};
+  export let draftMessage: Message | null = null;
 
   const EXTENDED_THINKING_KEY = 'privatemode_extended_thinking';
   const THINKING_ENABLED_KEY = 'privatemode_thinking_enabled';
@@ -32,12 +35,21 @@
   let isGenerating = false;
   let abortController: AbortController | null = null;
   let fileInput: HTMLInputElement;
+  let imageInput: HTMLInputElement;
   let isUploading = false;
   let attachedFiles: AttachedFile[] = [];
+  let attachedImages: AttachedImage[] = [];
   let isDragging = false;
   let dragCounter = 0;
+  let previewImage: AttachedImage | null = null;
+  let loadingImageCount = 0;
+  let isUnloading = false;
 
   onMount(() => {
+    const handleBeforeUnload = () => {
+      isUnloading = true;
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
     const savedThinking = localStorage.getItem(EXTENDED_THINKING_KEY);
     if (savedThinking) {
       extendedThinking = savedThinking === 'true';
@@ -48,7 +60,12 @@
     }
 
     const handleWindowDragEnter = (e: DragEvent) => {
-      if (!supportsFileUploads || isGenerating || isUploading) return;
+      if (
+        (!supportsFileUploads && !supportsVision) ||
+        isGenerating ||
+        isUploading
+      )
+        return;
       if (e.dataTransfer?.types?.includes('Files')) {
         dragCounter++;
         isDragging = true;
@@ -82,6 +99,7 @@
     window.addEventListener('drop', handleWindowDrop);
 
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('dragenter', handleWindowDragEnter);
       window.removeEventListener('dragleave', handleWindowDragLeave);
       window.removeEventListener('dragover', handleWindowDragOver);
@@ -89,12 +107,37 @@
     };
   });
 
+  $: if (draftMessage) {
+    if (draftMessage.role === 'user') {
+      message = draftMessage.content;
+      attachedFiles = draftMessage.attachedFiles
+        ? [...draftMessage.attachedFiles]
+        : [];
+      attachedImages = draftMessage.attachedImages
+        ? [...draftMessage.attachedImages]
+        : [];
+      requestAnimationFrame(() => autoResize());
+    }
+    draftMessage = null;
+  }
+
   $: currentChat = currentChatId
     ? $chatStore.find((c) => c.id === currentChatId)
     : null;
+  $: chatHasMessages = (currentChat?.messages.length ?? 0) > 0;
+  $: activeModel = currentChat?.modelId ?? selectedModel;
+  $: chatHasError = currentChat?.hasError ?? false;
+  $: chatModelUnavailable =
+    $modelsLoaded &&
+    !!currentChat?.modelId &&
+    !$modelsStore.some((m) => m.id === currentChat!.modelId);
+  $: chatDisabled = chatHasError || chatModelUnavailable;
+  $: lastNonErrorMessage = currentChat?.messages
+    ? [...currentChat.messages].reverse().find((m) => !m.isError)
+    : undefined;
   $: wordCount = currentChat?.wordCount || 0;
-  $: maxWords = selectedModel
-    ? modelConfig[selectedModel]?.maxWords || 60000
+  $: maxWords = activeModel
+    ? modelConfig[activeModel]?.maxWords || 60000
     : 60000;
   $: messageWordCount = countWords(message);
   $: attachedFilesWordCount = attachedFiles.reduce(
@@ -104,11 +147,15 @@
   $: totalWordCount = wordCount + messageWordCount + attachedFilesWordCount;
   $: totalUsagePercentage = Math.min((totalWordCount / maxWords) * 100, 100);
   $: wouldExceedLimit = totalWordCount > maxWords;
-  $: supportsFileUploads = selectedModel
-    ? (modelConfig[selectedModel]?.supportsFileUploads ?? false)
+  $: supportsFileUploads = activeModel
+    ? (modelConfig[activeModel]?.supportsFileUploads ?? false)
     : true;
-  $: thinkingMode = selectedModel
-    ? modelConfig[selectedModel]?.thinkingMode
+  $: supportsVision = activeModel
+    ? (modelConfig[activeModel]?.supportsVision ?? false)
+    : false;
+  $: if (!supportsVision) attachedImages = [];
+  $: thinkingMode = activeModel
+    ? modelConfig[activeModel]?.thinkingMode
     : undefined;
   $: supportsExtendedThinking = thinkingMode === 'extended';
   $: supportsThinkingToggle = thinkingMode === 'toggle';
@@ -125,12 +172,17 @@
         : 'Thinking is disabled. Enable it to let Kimi reason before answering.'
       : '';
   $: attachButtonTitle = isUploading
-    ? 'Uploading file...'
+    ? 'Uploading documents...'
     : isGenerating
-      ? 'Cannot attach files while generating'
+      ? 'Cannot attach documents while generating'
       : !supportsFileUploads
-        ? 'Selected model does not support file uploads'
-        : 'Attach a file';
+        ? 'Selected model does not support document uploads'
+        : 'Attach documents';
+  $: imageButtonTitle = isGenerating
+    ? 'Cannot attach images while generating'
+    : !supportsVision
+      ? 'Selected model does not support images'
+      : 'Attach images';
 
   function autoResize() {
     if (textarea) {
@@ -142,9 +194,10 @@
   async function sendMessage() {
     if (
       !message.trim() ||
-      !selectedModel ||
+      !activeModel ||
       isGenerating ||
       wouldExceedLimit ||
+      chatDisabled ||
       !privatemodeAIClient
     )
       return;
@@ -157,18 +210,22 @@
 
     const userMessage = message.trim();
     const filesToSend = [...attachedFiles];
+    const imagesToSend = [...attachedImages];
     message = '';
     attachedFiles = [];
+    attachedImages = [];
 
     if (textarea) {
       textarea.style.height = 'auto';
       textarea.focus();
     }
 
+    chatStore.setModelId(chatId, activeModel);
     chatStore.addMessage(chatId, {
       role: 'user',
       content: userMessage,
       attachedFiles: filesToSend.length > 0 ? filesToSend : undefined,
+      attachedImages: imagesToSend.length > 0 ? imagesToSend : undefined,
     });
 
     const assistantMessageId = chatStore.addMessage(chatId, {
@@ -188,8 +245,15 @@
         (m) => m.id !== assistantMessageId,
       );
 
-      const apiMessages: { role: string; content: string }[] = [];
-      const systemPrompt = modelConfig[selectedModel]?.systemPrompt;
+      type ContentPart =
+        | { type: 'text'; text: string }
+        | { type: 'image_url'; image_url: { url: string } };
+      type ApiMessage = {
+        role: string;
+        content: string | ContentPart[];
+      };
+      const apiMessages: ApiMessage[] = [];
+      const systemPrompt = modelConfig[activeModel]?.systemPrompt;
       if (systemPrompt) {
         apiMessages.push({ role: 'system', content: systemPrompt });
       }
@@ -202,10 +266,23 @@
             });
           }
         }
-        apiMessages.push({ role: msg.role, content: msg.content });
+        const hasImages = msg.attachedImages && msg.attachedImages.length > 0;
+        if (hasImages) {
+          const parts: ContentPart[] = [];
+          for (const img of msg.attachedImages!) {
+            parts.push({
+              type: 'image_url',
+              image_url: { url: img.dataUrl },
+            });
+          }
+          parts.push({ type: 'text', text: msg.content });
+          apiMessages.push({ role: msg.role, content: parts });
+        } else {
+          apiMessages.push({ role: msg.role, content: msg.content });
+        }
       }
       const requestBody: Record<string, unknown> = {
-        model: selectedModel,
+        model: activeModel,
         messages: apiMessages,
         stream: true,
       };
@@ -267,7 +344,10 @@
         thoughtDurationMs,
       );
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (
+        isUnloading ||
+        (error instanceof Error && error.name === 'AbortError')
+      ) {
         console.log('Generation cancelled by user');
       } else {
         console.error('Error generating response:', error);
@@ -282,7 +362,9 @@
           errorMessage,
           null,
           null,
+          true,
         );
+        chatStore.setChatError(chatId!, true);
       }
     } finally {
       chatStore.setStreaming(chatId, false);
@@ -305,28 +387,73 @@
     }
   }
 
+  const SUPPORTED_IMAGE_TYPES = [
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+    'image/avif',
+  ];
+
+  function isSupportedImage(type: string): boolean {
+    return SUPPORTED_IMAGE_TYPES.includes(type);
+  }
+
+  function handlePaste(event: ClipboardEvent) {
+    if (!supportsVision || isGenerating) return;
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (!isSupportedImage(item.type)) continue;
+      event.preventDefault();
+      const file = item.getAsFile();
+      if (!file) continue;
+      loadingImageCount++;
+      const reader = new FileReader();
+      reader.onload = () => {
+        attachedImages = [
+          ...attachedImages,
+          {
+            id: crypto.randomUUID(),
+            name: file.name || 'pasted-image.png',
+            dataUrl: reader.result as string,
+          },
+        ];
+        loadingImageCount--;
+      };
+      reader.onerror = () => {
+        loadingImageCount--;
+        console.error('Failed to read pasted image');
+        alert('Failed to read pasted image.');
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+
   async function handleFileSelect(event: Event) {
     const target = event.target as HTMLInputElement;
-    const file = target.files?.[0];
-    if (!file) return;
+    const files = target.files;
+    if (!files || files.length === 0) return;
 
     isUploading = true;
     try {
-      const content = new Uint8Array(await file.arrayBuffer());
-      const elements = (await privatemodeAIClient!.unstructured(
-        [{ name: file.name, content, contentType: file.type }],
-        { strategy: 'fast' },
-      )) as Array<{ text: string }>;
+      for (const file of files) {
+        const content = new Uint8Array(await file.arrayBuffer());
+        const elements = (await privatemodeAIClient!.unstructured(
+          [{ name: file.name, content, contentType: file.type }],
+          { strategy: 'fast' },
+        )) as Array<{ text: string }>;
 
-      const extractedText = elements.map((el) => el.text).join('\n\n');
+        const extractedText = elements.map((el) => el.text).join('\n\n');
 
-      attachedFiles = [
-        ...attachedFiles,
-        {
-          name: file.name,
-          content: extractedText,
-        },
-      ];
+        attachedFiles = [
+          ...attachedFiles,
+          {
+            name: file.name,
+            content: extractedText,
+          },
+        ];
+      }
     } catch (error) {
       console.error('Error uploading file:', error);
       let errorMessage = `Failed to upload file: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -343,6 +470,38 @@
 
   function removeFile(index: number) {
     attachedFiles = attachedFiles.filter((_, i) => i !== index);
+  }
+
+  function handleImageSelect(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const files = target.files;
+    if (!files || files.length === 0) return;
+    for (const file of files) {
+      loadingImageCount++;
+      const reader = new FileReader();
+      reader.onload = () => {
+        attachedImages = [
+          ...attachedImages,
+          {
+            id: crypto.randomUUID(),
+            name: file.name,
+            dataUrl: reader.result as string,
+          },
+        ];
+        loadingImageCount--;
+      };
+      reader.onerror = () => {
+        loadingImageCount--;
+        console.error('Failed to read image:', file.name);
+        alert(`Failed to read image: ${file.name}`);
+      };
+      reader.readAsDataURL(file);
+    }
+    target.value = '';
+  }
+
+  function removeImage(index: number) {
+    attachedImages = attachedImages.filter((_, i) => i !== index);
   }
 
   function toggleThinking() {
@@ -362,41 +521,92 @@
     event.preventDefault();
     isDragging = false;
 
-    if (!supportsFileUploads || isGenerating || isUploading) return;
+    if (isGenerating || isUploading) return;
 
-    const file = event.dataTransfer?.files?.[0];
-    if (!file) return;
+    const files = event.dataTransfer?.files;
+    if (!files || files.length === 0) return;
 
-    isUploading = true;
-    try {
-      const content = new Uint8Array(await file.arrayBuffer());
-      const elements = (await privatemodeAIClient!.unstructured(
-        [{ name: file.name, content, contentType: file.type }],
-        { strategy: 'fast' },
-      )) as Array<{ text: string }>;
-
-      const extractedText = elements.map((el) => el.text).join('\n\n');
-
-      attachedFiles = [
-        ...attachedFiles,
-        {
-          name: file.name,
-          content: extractedText,
-        },
-      ];
-    } catch (error) {
-      console.error('Error uploading file:', error);
-      let errorMessage = `Failed to upload file: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      if (error instanceof Error && (error as any).status === 401) {
-        errorMessage +=
-          '\n\nYour API key may be invalid or expired. Please update your API key in settings.';
+    const droppedImages: globalThis.File[] = [];
+    const droppedOther: globalThis.File[] = [];
+    const droppedUnsupportedImages: globalThis.File[] = [];
+    for (const f of files) {
+      if (isSupportedImage(f.type)) {
+        if (supportsVision) {
+          droppedImages.push(f);
+        } else {
+          droppedUnsupportedImages.push(f);
+        }
+      } else {
+        droppedOther.push(f);
       }
-      alert(errorMessage);
-    } finally {
-      isUploading = false;
+    }
+
+    if (droppedUnsupportedImages.length > 0) {
+      alert(
+        'The selected model does not support image inputs. Please select a vision-enabled model to attach images.',
+      );
+    }
+
+    for (const f of droppedImages) {
+      loadingImageCount++;
+      const reader = new FileReader();
+      reader.onload = () => {
+        attachedImages = [
+          ...attachedImages,
+          {
+            id: crypto.randomUUID(),
+            name: f.name,
+            dataUrl: reader.result as string,
+          },
+        ];
+        loadingImageCount--;
+      };
+      reader.onerror = () => {
+        loadingImageCount--;
+        console.error('Failed to read image:', f.name);
+        alert(`Failed to read image: ${f.name}`);
+      };
+      reader.readAsDataURL(f);
+    }
+
+    if (droppedOther.length > 0 && supportsFileUploads) {
+      isUploading = true;
+      try {
+        for (const f of droppedOther) {
+          const content = new Uint8Array(await f.arrayBuffer());
+          const elements = (await privatemodeAIClient!.unstructured(
+            [{ name: f.name, content, contentType: f.type }],
+            { strategy: 'fast' },
+          )) as Array<{ text: string }>;
+
+          const extractedText = elements.map((el) => el.text).join('\n\n');
+
+          attachedFiles = [
+            ...attachedFiles,
+            {
+              name: f.name,
+              content: extractedText,
+            },
+          ];
+        }
+      } catch (error) {
+        console.error('Error uploading file:', error);
+        let errorMessage = `Failed to upload file: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        if (error instanceof Error && (error as any).status === 401) {
+          errorMessage +=
+            '\n\nYour API key may be invalid or expired. Please update your API key in settings.';
+        }
+        alert(errorMessage);
+      } finally {
+        isUploading = false;
+      }
     }
   }
 </script>
+
+<svelte:window
+  onkeydown={(e) => e.key === 'Escape' && previewImage && (previewImage = null)}
+/>
 
 {#if isDragging}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -412,131 +622,278 @@
   </div>
 {/if}
 
-<div
-  class="chat-input-wrapper"
-  role="region"
->
-  {#if attachedFiles.length > 0}
-    <div class="attached-files">
-      {#each attachedFiles as file, index}
-        <div class="file-chip">
-          <File size={16} />
-          <span class="file-name">{file.name}</span>
-          <Tooltip text="Remove file">
-            <button
-              class="remove-file"
-              onclick={() => removeFile(index)}
-              type="button"
-            >
-              <X size={16} />
-            </button>
-          </Tooltip>
-        </div>
-      {/each}
-    </div>
-  {/if}
-  <textarea
-    bind:this={textarea}
-    bind:value={message}
-    oninput={autoResize}
-    onkeydown={handleKeyDown}
-    placeholder="Type a message..."
-    class="chat-input"
-    rows="1"
-    disabled={isGenerating}
-  ></textarea>
-  <div class="button-row">
-    <input
-      type="file"
-      bind:this={fileInput}
-      onchange={handleFileSelect}
-      style="display: none;"
-    />
-    <div class="left-buttons">
-      <Tooltip text={attachButtonTitle}>
-        <button
-          class="attach-button"
-          type="button"
-          disabled={isGenerating || isUploading || !supportsFileUploads}
-          onclick={() => fileInput?.click()}
-        >
-          <Paperclip size={18} />
-          {isUploading ? 'Uploading...' : 'Attach'}
-        </button>
-      </Tooltip>
-      {#if supportsExtendedThinking || supportsThinkingToggle}
-        <Tooltip text={thinkingTooltip}>
-          <button
-            class="thinking-toggle-button"
-            class:active={thinkingButtonActive}
-            type="button"
-            disabled={isGenerating}
-            aria-label={thinkingTooltip}
-            onclick={toggleThinking}
-          >
-            <Brain size={18} />
-          </button>
-        </Tooltip>
-      {/if}
-    </div>
-    <div class="right-buttons">
-      <div class="model-controls">
-        {#if totalUsagePercentage >= 75}
-          <Tooltip
-            text="{totalWordCount.toLocaleString()} / {maxWords.toLocaleString()} words&#10;{Math.max(
-              maxWords - totalWordCount,
-              0,
-            ).toLocaleString()} remaining"
-          >
-            <div
-              class="token-indicator"
-              class:warning={totalUsagePercentage >= 75 &&
-                totalUsagePercentage < 100}
-              class:danger={totalUsagePercentage >= 100}
-            >
-              <span class="token-percentage"
-                >{Math.round(totalUsagePercentage)}%</span
-              >
-            </div>
-          </Tooltip>
-        {/if}
-        <ModelPicker
-          {privatemodeAIClient}
-          bind:selectedModel
-        />
-      </div>
-      {#if isGenerating}
-        <Tooltip text="Stop generating">
-          <button
-            class="send-button stop"
-            type="button"
-            onclick={stopGeneration}
-          >
-            <Square size={20} />
-          </button>
-        </Tooltip>
+{#if chatDisabled}
+  <div
+    class="chat-input-wrapper"
+    role="region"
+  >
+    <div class="chat-error-banner">
+      {#if chatModelUnavailable}
+        The model used in this chat ({currentChat?.modelId}) is no longer
+        available.
       {:else}
-        <Tooltip
-          text={wouldExceedLimit
-            ? 'Message would exceed token limit'
-            : 'Send message'}
-        >
-          <button
-            class="send-button"
-            type="button"
-            onclick={sendMessage}
-            disabled={!message.trim() ||
-              !selectedModel ||
-              wouldExceedLimit ||
-              isUploading}
-          >
-            <ArrowUp size={20} />
-          </button>
-        </Tooltip>
+        This chat can no longer be used due to an error.
       {/if}
+      <button
+        class="new-chat-link"
+        type="button"
+        onclick={() => {
+          const id = chatStore.createChat();
+          onChatCreated(id);
+        }}
+      >
+        Start a new chat
+      </button>
+      {#if lastNonErrorMessage}
+        or
+        <button
+          class="new-chat-link"
+          type="button"
+          onclick={() => {
+            if (!currentChatId || !lastNonErrorMessage) return;
+            const includeInChat = lastNonErrorMessage.role !== 'user';
+            const result = chatStore.branchChat(
+              currentChatId,
+              lastNonErrorMessage.id,
+              includeInChat,
+            );
+            if (result) {
+              if (result.message.role === 'user') {
+                draftMessage = result.message;
+              }
+              onChatCreated(result.chatId);
+            }
+          }}
+        >
+          branch off from the last message
+        </button>
+      {/if}
+      to continue.
     </div>
   </div>
-</div>
+{:else}
+  <div
+    class="chat-input-wrapper"
+    role="region"
+  >
+    {#if attachedFiles.length > 0 || attachedImages.length > 0 || loadingImageCount > 0}
+      <div class="attached-files">
+        {#each Array(loadingImageCount) as _}
+          <div class="image-chip loading-image-chip">
+            <div class="image-thumbnail-placeholder">
+              <div class="loading-spinner"></div>
+            </div>
+            <span class="file-name">Loading...</span>
+          </div>
+        {/each}
+        {#each attachedImages as image, index}
+          <div class="image-chip">
+            <button
+              class="image-thumbnail-button"
+              type="button"
+              onclick={() => (previewImage = image)}
+            >
+              <img
+                src={image.dataUrl}
+                alt={image.name}
+                class="image-thumbnail"
+              />
+            </button>
+            <span class="file-name">{image.name}</span>
+            <Tooltip text="Remove image">
+              <button
+                class="remove-file"
+                onclick={() => removeImage(index)}
+                type="button"
+              >
+                <X size={16} />
+              </button>
+            </Tooltip>
+          </div>
+        {/each}
+        {#each attachedFiles as file, index}
+          <div class="file-chip">
+            <File size={16} />
+            <span class="file-name">{file.name}</span>
+            <Tooltip text="Remove file">
+              <button
+                class="remove-file"
+                onclick={() => removeFile(index)}
+                type="button"
+              >
+                <X size={16} />
+              </button>
+            </Tooltip>
+          </div>
+        {/each}
+      </div>
+    {/if}
+    <textarea
+      bind:this={textarea}
+      bind:value={message}
+      oninput={autoResize}
+      onkeydown={handleKeyDown}
+      onpaste={handlePaste}
+      placeholder="Type a message..."
+      class="chat-input"
+      rows="1"
+      disabled={isGenerating}
+    ></textarea>
+    <div class="button-row">
+      <!--
+      In theory, Unstructured should also support images [1], but I
+      haven't been able to get it working reliably.
+      [1]: https://docs.unstructured.io/ui/supported-file-types
+      -->
+      <input
+        type="file"
+        multiple
+        accept=".md,.html,.htm,.csv,.txt,.text,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.odt,.ods,.odp,.rtf"
+        bind:this={fileInput}
+        onchange={handleFileSelect}
+        style="display: none;"
+      />
+      <input
+        type="file"
+        multiple
+        accept="image/png,image/jpeg,image/gif,image/webp,image/avif"
+        bind:this={imageInput}
+        onchange={handleImageSelect}
+        style="display: none;"
+      />
+      <div class="left-buttons">
+        <Tooltip text={attachButtonTitle}>
+          <button
+            class="attach-button"
+            type="button"
+            disabled={isGenerating || isUploading || !supportsFileUploads}
+            onclick={() => fileInput?.click()}
+          >
+            <Paperclip size={18} />
+            <span class="attach-label"
+              >{isUploading ? 'Uploading...' : 'Attach documents'}</span
+            >
+          </button>
+        </Tooltip>
+        {#if supportsVision}
+          <Tooltip text={imageButtonTitle}>
+            <button
+              class="attach-button"
+              type="button"
+              disabled={isGenerating}
+              onclick={() => imageInput?.click()}
+            >
+              <Image size={18} />
+              <span class="attach-label">Attach images</span>
+            </button>
+          </Tooltip>
+        {/if}
+        {#if supportsExtendedThinking || supportsThinkingToggle}
+          <Tooltip text={thinkingTooltip}>
+            <button
+              class="thinking-toggle-button"
+              class:active={thinkingButtonActive}
+              type="button"
+              disabled={isGenerating}
+              aria-label={thinkingTooltip}
+              onclick={toggleThinking}
+            >
+              <Brain size={18} />
+            </button>
+          </Tooltip>
+        {/if}
+      </div>
+      <div class="right-buttons">
+        <div class="model-controls">
+          {#if totalUsagePercentage >= 75}
+            <Tooltip
+              text="{totalWordCount.toLocaleString()} / {maxWords.toLocaleString()} words&#10;{Math.max(
+                maxWords - totalWordCount,
+                0,
+              ).toLocaleString()} remaining"
+            >
+              <div
+                class="token-indicator"
+                class:warning={totalUsagePercentage >= 75 &&
+                  totalUsagePercentage < 100}
+                class:danger={totalUsagePercentage >= 100}
+              >
+                <span class="token-percentage"
+                  >{Math.round(totalUsagePercentage)}%</span
+                >
+              </div>
+            </Tooltip>
+          {/if}
+          <ModelPicker
+            {privatemodeAIClient}
+            bind:selectedModel
+            disabled={chatHasMessages}
+            lockedModel={currentChat?.modelId}
+          />
+        </div>
+        {#if isGenerating}
+          <Tooltip text="Stop generating">
+            <button
+              class="send-button stop"
+              type="button"
+              onclick={stopGeneration}
+            >
+              <Square size={20} />
+            </button>
+          </Tooltip>
+        {:else}
+          <Tooltip
+            text={wouldExceedLimit
+              ? 'Message would exceed token limit'
+              : 'Send message'}
+          >
+            <button
+              class="send-button"
+              type="button"
+              onclick={sendMessage}
+              disabled={!message.trim() ||
+                !activeModel ||
+                wouldExceedLimit ||
+                isUploading}
+            >
+              <ArrowUp size={20} />
+            </button>
+          </Tooltip>
+        {/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if previewImage}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="image-preview-overlay"
+    onclick={() => (previewImage = null)}
+  >
+    <button
+      class="image-preview-close"
+      type="button"
+      onclick={() => (previewImage = null)}
+    >
+      <X size={24} />
+    </button>
+
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="image-preview-container"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <img
+        src={previewImage.dataUrl}
+        alt={previewImage.name}
+        class="image-preview-full"
+      />
+    </div>
+  </div>
+{/if}
 
 <style>
   .chat-input-wrapper {
@@ -610,6 +967,28 @@
       opacity: 1;
       transform: scale(1);
     }
+  }
+
+  .chat-error-banner {
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  .new-chat-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--color-accent);
+    text-decoration: underline;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .new-chat-link:hover {
+    opacity: 0.8;
   }
 
   .chat-input {
@@ -751,6 +1130,99 @@
     color: var(--color-text-primary);
   }
 
+  .image-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.375rem 0.5rem;
+    background-color: var(--color-bg-surface-muted);
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--color-text-primary);
+  }
+
+  .image-thumbnail-button {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    border-radius: 0.25rem;
+    display: flex;
+  }
+
+  .image-thumbnail-button:hover .image-thumbnail {
+    opacity: 0.8;
+  }
+
+  .image-thumbnail {
+    width: 32px;
+    height: 32px;
+    object-fit: cover;
+    border-radius: 0.25rem;
+  }
+
+  .image-thumbnail-placeholder {
+    width: 32px;
+    height: 32px;
+    border-radius: 0.25rem;
+    background-color: var(--color-bg-active);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--color-border);
+    border-top-color: var(--color-text-secondary);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .image-preview-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: overlay-fade-in 0.15s ease-out;
+  }
+
+  .image-preview-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    display: flex;
+    transition: color 0.2s;
+  }
+
+  .image-preview-close:hover {
+    color: white;
+  }
+
+  .image-preview-full {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;
+    border-radius: 0.5rem;
+  }
+
   .file-name {
     max-width: 200px;
     overflow: hidden;
@@ -821,6 +1293,12 @@
     font-size: 0.75rem;
     font-weight: 600;
     color: var(--color-text-primary);
+  }
+
+  @media (max-width: 768px) {
+    .attach-label {
+      display: none;
+    }
   }
 
   .token-indicator.warning .token-percentage {

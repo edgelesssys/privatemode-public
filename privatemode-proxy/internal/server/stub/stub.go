@@ -35,7 +35,6 @@ func EchoHandler(secrets map[string][]byte, log *slog.Logger) http.Handler {
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.HandleFunc("GET /v1/models", openAIModelsHandler())
-	mux.HandleFunc("OPTIONS /", func(_ http.ResponseWriter, _ *http.Request) {})
 	return mux
 }
 

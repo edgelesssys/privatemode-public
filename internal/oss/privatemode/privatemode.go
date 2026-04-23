@@ -18,6 +18,8 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/attest"
 	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/crypto"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/secretclient"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
@@ -25,6 +27,35 @@ import (
 	contrastsdk "github.com/edgelesssys/contrast/sdk"
 	"github.com/google/uuid"
 )
+
+// ResponseError is returned when the API responds with a non-2xx
+// status code. It preserves the raw response body so callers can
+// attempt decryption.
+type ResponseError struct {
+	StatusCode int
+	Body       []byte
+}
+
+func (e *ResponseError) Error() string {
+	return fmt.Sprintf("unexpected status code %d: %s", e.StatusCode, e.Body)
+}
+
+// tryDecryptResponseError checks whether err wraps a [ResponseError]
+// and, if so, attempts to decrypt the response body using the given
+// cipher and field selector. If decryption succeeds the returned error
+// contains the decrypted body; otherwise the original error is
+// returned unchanged.
+func tryDecryptResponseError(err error, cipher *crypto.RequestCipher, skipFields forwarder.FieldSelector) error {
+	respErr, ok := errors.AsType[*ResponseError](err)
+	if !ok {
+		return err
+	}
+	decrypted, decryptErr := forwarder.MutateJSONFields(respErr.Body, cipher.DecryptResponse, skipFields)
+	if decryptErr != nil {
+		return err
+	}
+	return &ResponseError{StatusCode: respErr.StatusCode, Body: decrypted}
+}
 
 // Client is a client for interacting with a Privatemode deployment.
 //
@@ -275,7 +306,7 @@ func (c *Client) doAPIRequest(req *http.Request) (*http.Response, error) {
 				fmt.Errorf("reading response body: %w", readErr),
 			)
 		}
-		return nil, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, respBody)
+		return nil, &ResponseError{StatusCode: resp.StatusCode, Body: respBody}
 	}
 
 	return resp, nil

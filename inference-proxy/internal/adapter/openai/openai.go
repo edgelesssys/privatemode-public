@@ -10,8 +10,6 @@ import (
 	"net/http"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
-	"github.com/edgelesssys/continuum/internal/compat"
-	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/tidwall/gjson"
@@ -114,20 +112,13 @@ func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Reques
 func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Request) {
 	session := a.Cipher.NewResponseCipher()
 
-	requestFieldSelector := openai.PlainTranscriptionRequestFields
-	responseMapper := forwarder.JSONResponseMapper(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields)
-	if !compat.AtLeastMajorMinor(r.Header.Get(constants.PrivatemodeVersionHeader), 1, 33) {
-		requestFieldSelector = forwarder.FieldSelector{{"model"}}                          // Clients before v1.33 only have "model" as unencrypted field
-		responseMapper = forwarder.RawResponseMapper(session.EncryptResponse(r.Context())) // Clients before v1.33 expect the full response body to be encrypted
-	}
-
 	a.Forwarder.Forward(
 		w, r,
 		forwarder.RequestMutatorChain(
-			forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), requestFieldSelector, a.Log),
+			forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), openai.PlainTranscriptionRequestFields, a.Log),
 			a.mutators.AudioStreamUsageReportingInjector,
 		),
-		responseMapper,
+		forwarder.JSONResponseMapper(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields),
 	)
 }
 

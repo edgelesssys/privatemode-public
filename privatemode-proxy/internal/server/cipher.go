@@ -6,7 +6,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"net/http"
 
 	"github.com/edgelesssys/continuum/internal/oss/crypto"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
@@ -14,8 +13,9 @@ import (
 
 // RenewableRequestCipher wraps a RequestCipher and that can be renewed when needed.
 type RenewableRequestCipher struct {
-	sm secretManager
-	rc *crypto.RequestCipher
+	sm     secretManager
+	rc     *crypto.RequestCipher
+	secret *secretmanager.Secret
 }
 
 type secretManager interface {
@@ -25,45 +25,62 @@ type secretManager interface {
 }
 
 // NewRenewableRequestCipher creates a new RenewableRequestCipher with the given secretManager.
-func NewRenewableRequestCipher(sm secretManager, r *http.Request) (*RenewableRequestCipher, *secretmanager.Secret, error) {
+func NewRenewableRequestCipher(ctx context.Context, sm secretManager) (*RenewableRequestCipher, error) {
 	c := &RenewableRequestCipher{sm: sm, rc: nil}
-	secret, err := c.init(r)
+	err := c.init(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("initializing renewable request cipher: %w", err)
+		return nil, fmt.Errorf("initializing renewable request cipher: %w", err)
 	}
-	return c, secret, nil
+	return c, nil
 }
 
 // ResetSecret clears the cached RequestCipher, forcing re-initialization on next use.
-func (c *RenewableRequestCipher) ResetSecret(r *http.Request) (*secretmanager.Secret, error) {
+func (c *RenewableRequestCipher) ResetSecret(ctx context.Context) error {
 	c.rc = nil
-	err := c.sm.ForceUpdate(r.Context())
+	c.secret = nil
+	err := c.sm.ForceUpdate(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("forcing secret update: %w", err)
+		return fmt.Errorf("forcing secret update: %w", err)
 	}
 
-	return c.init(r)
+	return c.init(ctx)
 }
 
-func (c *RenewableRequestCipher) init(r *http.Request) (*secretmanager.Secret, error) {
-	secret, err := c.sm.LatestSecret(r.Context())
+// Reinitialize re-initializes the cached RequestCipher, only updating the secret if it is no
+// longer valid.
+func (c *RenewableRequestCipher) Reinitialize(ctx context.Context) error {
+	return c.init(ctx)
+}
+
+// GetSecret returns the secret in use by the cached RequestCipher. An error is returned if none
+// has been initialized yet.
+func (c *RenewableRequestCipher) GetSecret() (secretmanager.Secret, error) {
+	if c.secret == nil {
+		return secretmanager.Secret{}, fmt.Errorf("RenewableRequestCipher not initialized")
+	}
+	return *c.secret, nil
+}
+
+func (c *RenewableRequestCipher) init(ctx context.Context) error {
+	secret, err := c.sm.LatestSecret(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("get latest secret: %w", err)
+		return fmt.Errorf("get latest secret: %w", err)
 	}
 
 	rc, err := crypto.NewRequestCipher(secret.Data, secret.ID)
 	if err != nil {
-		return nil, fmt.Errorf("creating request cipher: %w", err)
+		return fmt.Errorf("creating request cipher: %w", err)
 	}
 
 	c.rc = rc
-	return &secret, nil
+	c.secret = &secret
+	return nil
 }
 
 // Encrypt encrypts the given plaintext using the wrapped RequestCipher.
 func (c *RenewableRequestCipher) Encrypt(plaintext string) (string, error) {
 	if c.rc == nil {
-		return "", fmt.Errorf("request cipher is nil")
+		return "", fmt.Errorf("RenewableRequestCipher not initialized")
 	}
 	return c.rc.Encrypt(plaintext)
 }
@@ -71,7 +88,7 @@ func (c *RenewableRequestCipher) Encrypt(plaintext string) (string, error) {
 // DecryptResponse decrypts the given ciphertext using the wrapped RequestCipher.
 func (c *RenewableRequestCipher) DecryptResponse(ciphertext string) (string, error) {
 	if c.rc == nil {
-		return "", fmt.Errorf("request cipher is nil")
+		return "", fmt.Errorf("RenewableRequestCipher not initialized")
 	}
 	return c.rc.DecryptResponse(ciphertext)
 }

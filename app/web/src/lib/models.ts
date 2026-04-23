@@ -6,20 +6,22 @@ export interface ModelInfo {
   systemPrompt: string;
   thinkingMode?: 'extended' | 'toggle';
   supportsFileUploads: boolean;
+  supportsVision: boolean;
   maxWords: number;
 }
 
 function getSystemPrompt(modelName: string): string {
   return `
-    You, ${modelName}, run as part of the AI service Privatemode AI, which is developed by Edgeless Systems.
-    You run inside a secure environment based on confidential computing (AMD SEV-SNP, with NVIDIA H100 GPUs).
-    The environment cannot be accessed from the outside and user data remains encrypted in memory during processing.
-    All the data you process is end-to-end encrypted, and even Edgeless Systems or the cloud provider cannot access the data.
-    Because of these security guarantees, you can perfectly handle prompts and file uploads with sensitive information
-    such as tax returns, doctor's notes, or other personal data.
-    If the user has problems with Privatemode, refer them to https://www.privatemode.ai/contact for support.
-    You are a helpful assistant answering user questions concisely and to the point.
-    You don't talk about yourself unless asked.
+You are Privatemode Assistant and run as part of the AI service Privatemode AI, which is developed by Edgeless Systems.
+You run inside a secure environment based on confidential computing (AMD SEV-SNP, with NVIDIA H100 GPUs).
+The environment cannot be accessed from the outside and user data remains encrypted in memory during processing.
+All the data you process is end-to-end encrypted, and even Edgeless Systems or the cloud provider cannot access the data.
+Because of these security guarantees, you can perfectly handle prompts and file uploads with sensitive information
+such as tax returns, doctor's notes, or other personal data.
+If the user has problems with Privatemode, refer them to https://www.privatemode.ai/contact for support.
+You are a helpful assistant answering user questions concisely and to the point.
+You don't talk about yourself unless asked.
+You are based on the LLM ${modelName}.
     `.trim();
 }
 
@@ -30,13 +32,15 @@ export const modelConfig: Record<string, ModelInfo> = {
     systemPrompt: getSystemPrompt('gpt-oss-120b'),
     thinkingMode: 'extended',
     supportsFileUploads: true,
+    supportsVision: false,
     maxWords: 70000,
   },
-  'leon-se/gemma-3-27b-it-fp8-dynamic': {
-    displayName: 'Gemma 3 27B',
+  'gemma-4-31b': {
+    displayName: 'Gemma 4 31B',
     subtitle: 'Multi-modal model with image understanding',
-    systemPrompt: getSystemPrompt('Gemma 3 27B'),
-    supportsFileUploads: false,
+    systemPrompt: getSystemPrompt('Gemma 4 31B'),
+    supportsFileUploads: true,
+    supportsVision: true,
     maxWords: 70000,
   },
   'qwen3-coder-30b-a3b': {
@@ -44,6 +48,7 @@ export const modelConfig: Record<string, ModelInfo> = {
     subtitle: 'Coding-specialized model for programming tasks',
     systemPrompt: getSystemPrompt('Qwen3 Coder 30B'),
     supportsFileUploads: true,
+    supportsVision: false,
     maxWords: 70000,
   },
   'kimi-k2.5': {
@@ -52,6 +57,7 @@ export const modelConfig: Record<string, ModelInfo> = {
     systemPrompt: getSystemPrompt('Kimi K2.5'),
     thinkingMode: 'toggle',
     supportsFileUploads: true,
+    supportsVision: true,
     maxWords: 70000,
   },
 };

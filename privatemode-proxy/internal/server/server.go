@@ -136,40 +136,53 @@ func (s *Server) inferenceHandler(
 	responseMapper func(*RenewableRequestCipher) forwarder.ResponseMapper,
 ) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions {
-			s.noEncryptionHandler(w, r)
-			return
-		}
-
 		s.setStaticRequestHeaders(r)
 
-		rc, secret, err := NewRenewableRequestCipher(s.sm, r)
+		rc, err := NewRenewableRequestCipher(r.Context(), s.sm)
 		if err != nil {
 			forwarder.HTTPError(w, r, http.StatusInternalServerError, "creating request cipher: %s", err)
 			return
 		}
-		requestID := newRequestID()
-		if err := s.setDynamicHeaders(r, *secret, requestID, 0); err != nil {
-			forwarder.HTTPError(w, r, http.StatusInternalServerError, "setting dynamic headers: %s", err)
-			return
-		}
+		suppliedRequestMutator := requestMutator(rc)
 
-		// Set up retry logic for specific status codes with exponential backoff
-		retryCallback := func(statusCode int, errMsg string, attempt int) (bool, time.Duration) {
+		requestID := newRequestID()
+		attempt := 0
+
+		// Set up retry logic for specific status codes
+		//nolint:contextcheck // retryCallback is only called within the Forward() call so r.Context() does not leak
+		retryCallback := func(statusCode int, errMsg string, callbackAttempt int) (bool, time.Duration) {
+			attempt = callbackAttempt
 			switch {
 			case attempt <= 1 && (statusCode == 500 && strings.Contains(errMsg, constants.ErrorNoSecretForID)):
-				return s.noSecretForIDCallback(w, r, rc, requestID, attempt)
+				return s.noSecretForIDCallback(r.Context(), rc)
 			case attempt <= 1 && strings.Contains(errMsg, "read: connection reset by peer"):
-				return s.connectionResetCallback(w, r, rc, requestID, attempt)
+				return s.connectionResetCallback(r.Context(), rc)
 			default:
 				return false, 0
 			}
 		}
 
+		fullRequestMutator := func(req *http.Request) error {
+			secret, err := rc.GetSecret()
+			if err != nil {
+				return fmt.Errorf("getting exchange secret: %w", err)
+			}
+
+			if err := s.setDynamicHeaders(req, secret, requestID, attempt); err != nil {
+				return fmt.Errorf("setting headers on upstream request: %w", err)
+			}
+
+			if err := suppliedRequestMutator(req); err != nil {
+				return err
+			}
+
+			return nil
+		}
+
 		s.forwarder.Forward(
 			w, r,
-			requestMutator(rc),
-			withAllowDesktopApp(responseMapper(rc), r),
+			fullRequestMutator,
+			responseMapper(rc),
 			forwarder.WithRetryCallback(retryCallback),
 		)
 	}
@@ -282,7 +295,7 @@ func (s *Server) noEncryptionHandler(w http.ResponseWriter, r *http.Request) {
 	s.forwarder.Forward(
 		w, r,
 		forwarder.NoRequestMutation,
-		withAllowDesktopApp(forwarder.PassthroughResponseMapper, r),
+		forwarder.PassthroughResponseMapper,
 	)
 }
 
@@ -304,26 +317,6 @@ func (s *Server) setStaticRequestHeaders(r *http.Request) {
 	r.Header.Set(constants.PrivatemodeOSHeader, runtime.GOOS)
 	r.Header.Set(constants.PrivatemodeArchitectureHeader, runtime.GOARCH)
 	r.Header.Set(constants.PrivatemodeClientHeader, s.getClientHeader())
-}
-
-// withAllowDesktopApp wraps a base mapper and adds CORS headers for desktop app origins (app://).
-// Handling CORS headers inside the mapper is required because upstream CORS headers are applied
-// after the middlewares and overwrite the values we want. Ideally, only relevant upstream headers
-// would be copied by the mapper, and CORS would be applied via a middleware.
-func withAllowDesktopApp(mapper forwarder.ResponseMapper, req *http.Request) forwarder.ResponseMapper {
-	return func(ur *http.Response) (forwarder.Response, error) {
-		dr, err := mapper(ur)
-		if err != nil {
-			return nil, err
-		}
-
-		origin := req.Header.Get("Origin")
-		if strings.HasPrefix(origin, "app://") {
-			dr.GetHeader().Set("Access-Control-Allow-Origin", origin)
-		}
-
-		return dr, nil
-	}
 }
 
 // setDynamicHeaders sets the dynamic headers for the request.
@@ -359,17 +352,11 @@ func (s *Server) setDynamicHeaders(r *http.Request, secret secretmanager.Secret,
 }
 
 func (s *Server) connectionResetCallback(
-	w http.ResponseWriter, r *http.Request, rc *RenewableRequestCipher, requestID string, attempt int,
+	ctx context.Context, rc *RenewableRequestCipher,
 ) (bool, time.Duration) {
 	// Force a new rc for the next attempt, but keep the same secret
-	secret, err := rc.init(r)
-	if err != nil {
+	if err := rc.Reinitialize(ctx); err != nil {
 		s.log.Error("Resetting request cipher", "error", err)
-		return false, 0
-	}
-
-	if err := s.setDynamicHeaders(r, *secret, requestID, attempt); err != nil {
-		forwarder.HTTPError(w, r, http.StatusInternalServerError, "setting dynamic headers: %s", err)
 		return false, 0
 	}
 
@@ -378,17 +365,11 @@ func (s *Server) connectionResetCallback(
 }
 
 func (s *Server) noSecretForIDCallback(
-	w http.ResponseWriter, r *http.Request, rc *RenewableRequestCipher, requestID string, attempt int,
+	ctx context.Context, rc *RenewableRequestCipher,
 ) (bool, time.Duration) {
 	// Force a new rc for the next attempt
-	secret, err := rc.ResetSecret(r)
-	if err != nil {
+	if err := rc.ResetSecret(ctx); err != nil {
 		s.log.Error("Resetting request cipher", "error", err)
-		return false, 0
-	}
-
-	if err := s.setDynamicHeaders(r, *secret, requestID, attempt); err != nil {
-		forwarder.HTTPError(w, r, http.StatusInternalServerError, "setting dynamic headers: %s", err)
 		return false, 0
 	}
 

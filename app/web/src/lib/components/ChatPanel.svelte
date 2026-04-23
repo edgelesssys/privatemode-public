@@ -1,7 +1,17 @@
 <script lang="ts">
   import { chatStore } from '$lib/chatStore';
-  import type { Message } from '$lib/chatStore';
-  import { MessageSquare, Copy, File, Brain } from 'lucide-svelte';
+  import type { Message, AttachedImage } from '$lib/chatStore';
+  import {
+    MessageSquare,
+    Copy,
+    GitBranch,
+    File,
+    Brain,
+    X,
+    CircleAlert,
+    Loader2,
+  } from 'lucide-svelte';
+  import Tooltip from './Tooltip.svelte';
   import { renderMarkdown } from '$lib/markdown';
   import logoDark from '$lib/assets/favicon-dark.svg';
   import logoLight from '$lib/assets/favicon-light.svg';
@@ -9,6 +19,10 @@
   import 'highlight.js/styles/github-dark.css';
 
   export let chatId: string | null;
+  export let onBranchOff: (
+    newChatId: string,
+    message: Message,
+  ) => void = () => {};
 
   $: logo = $isDark ? logoLight : logoDark;
 
@@ -16,6 +30,7 @@
   let chatPanelElement: HTMLDivElement;
   let previousChatId: string | null = null;
   let previousMessageCount = 0;
+  let previewImage: AttachedImage | null = null;
 
   interface RenderedMessage extends Message {
     renderedContent: string;
@@ -35,15 +50,22 @@
 
   $: chat = chatId ? $chatStore.find((c) => c.id === chatId) : null;
   $: messages = chat?.messages || [];
-  $: renderedMessages = messages.map((msg) => ({
-    ...msg,
-    renderedContent: renderMarkdown(msg.content),
-    renderedReasoning: renderMarkdown(msg.reasoning || ''),
-  })) as RenderedMessage[];
+  $: renderedMessages = messages.map((msg) => {
+    const displayContent =
+      msg.isError && msg.content.startsWith('Error: ')
+        ? msg.content.slice('Error: '.length)
+        : msg.content;
+    return {
+      ...msg,
+      renderedContent: renderMarkdown(displayContent),
+      renderedReasoning: renderMarkdown(msg.reasoning || ''),
+    };
+  }) as RenderedMessage[];
 
-  $: if (chatId && chatPanelElement) {
+  $: messageCount = messages.length;
+  $: if (chatId && chatPanelElement && messageCount >= 0) {
     const chatChanged = chatId !== previousChatId;
-    const messageCountIncreased = messages.length > previousMessageCount;
+    const messageCountIncreased = messageCount > previousMessageCount;
 
     requestAnimationFrame(() => {
       if (chatChanged) {
@@ -51,22 +73,36 @@
           top: chatPanelElement.scrollHeight,
           behavior: 'instant',
         });
-      } else if (messageCountIncreased && messages.length > 0) {
-        const lastMessage = chatPanelElement.querySelector(
-          '.message:last-child',
-        ) as HTMLElement;
-        if (lastMessage) {
-          lastMessage.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+      } else if (messageCountIncreased && messageCount > 0) {
+        chatPanelElement.scrollTo({
+          top: chatPanelElement.scrollHeight,
+          behavior: 'smooth',
+        });
       }
     });
 
     previousChatId = chatId;
-    previousMessageCount = messages.length;
+    previousMessageCount = messageCount;
   }
 
-  function handleCopyClick(event: MouseEvent) {
+  function handleActionClick(event: MouseEvent) {
     const target = event.target as HTMLElement;
+
+    const branchButton = target.closest(
+      '.branch-message-button',
+    ) as HTMLButtonElement;
+    if (branchButton) {
+      const messageDiv = branchButton.closest('.message');
+      const messageId = messageDiv?.getAttribute('data-message-id');
+      if (chatId && messageId) {
+        const msg = messages.find((m) => m.id === messageId);
+        const includeInChat = msg?.role !== 'user';
+        const result = chatStore.branchChat(chatId, messageId, includeInChat);
+        if (result) onBranchOff(result.chatId, result.message);
+      }
+      return;
+    }
+
     const button = target.closest(
       '.copy-button, .copy-message-button',
     ) as HTMLButtonElement;
@@ -89,12 +125,17 @@
   }
 </script>
 
+<svelte:window
+  on:keydown={(e) =>
+    e.key === 'Escape' && previewImage && (previewImage = null)}
+/>
+
 <!-- svelte-ignore a11y-click-events-have-key-events -->
 <!-- svelte-ignore a11y-no-static-element-interactions -->
 <div
   class="chat-panel"
   bind:this={chatPanelElement}
-  on:click={handleCopyClick}
+  on:click={handleActionClick}
 >
   {#if !chatId}
     <div class="empty-state">
@@ -113,67 +154,164 @@
       {#each renderedMessages as message (message.id)}
         <div
           class="message {message.role}"
+          class:error={message.isError}
           data-message-id={message.id}
         >
-          {#if message.role === 'assistant'}
-            <div class="message-header">
-              <span class="role">
-                <img
-                  src={logo}
-                  alt="Privatemode Logo"
-                  width="16"
-                  height="16"
+          <div class="message-bubble">
+            {#if message.isError}
+              <div class="message-header error-header">
+                <span class="role">
+                  <CircleAlert size={16} />
+                  Error
+                </span>
+              </div>
+            {:else if message.role === 'assistant'}
+              <div class="message-header">
+                <span class="role">
+                  <img
+                    src={logo}
+                    alt="Privatemode Logo"
+                    width="16"
+                    height="16"
+                  />
+                  Privatemode
+                </span>
+              </div>
+            {/if}
+            {#if (message.attachedImages && message.attachedImages.length > 0) || (message.attachedFiles && message.attachedFiles.length > 0)}
+              <div class="attached-files">
+                {#if message.attachedImages}
+                  {#each message.attachedImages as image}
+                    <div class="image-chip">
+                      {#if image.dataUrl}
+                        <button
+                          class="image-thumbnail-button"
+                          type="button"
+                          on:click={() => (previewImage = image)}
+                        >
+                          <img
+                            src={image.dataUrl}
+                            alt={image.name}
+                            class="image-thumbnail"
+                          />
+                        </button>
+                      {:else}
+                        <div class="image-thumbnail placeholder"></div>
+                      {/if}
+                      <span class="file-name">{image.name}</span>
+                    </div>
+                  {/each}
+                {/if}
+                {#if message.attachedFiles}
+                  {#each message.attachedFiles as file}
+                    <div class="file-chip">
+                      <File size={16} />
+                      <span class="file-name">{file.name}</span>
+                    </div>
+                  {/each}
+                {/if}
+              </div>
+            {/if}
+            {#if chat?.isStreaming && message.id === messages[messages.length - 1]?.id && !message.content && !message.reasoning}
+              <div class="loading-indicator">
+                <Loader2
+                  size={18}
+                  class="spinning"
                 />
-                Privatemode
-              </span>
-              <button class="copy-message-button">
-                <Copy size={16} />
-              </button>
-            </div>
-          {/if}
-          {#if message.attachedFiles && message.attachedFiles.length > 0}
-            <div class="attached-files">
-              {#each message.attachedFiles as file}
-                <div class="file-chip">
-                  <File size={16} />
-                  <span class="file-name">{file.name}</span>
+              </div>
+            {/if}
+            {#if message.role === 'assistant' && message.reasoning}
+              <details class="thinking-details">
+                <summary
+                  class="thinking-summary"
+                  class:streaming={chat?.isStreaming &&
+                    message.id === messages[messages.length - 1]?.id}
+                >
+                  <Brain size={16} />
+                  <span class="thinking-label">
+                    {#if chat?.isStreaming && message.id === messages[messages.length - 1]?.id}
+                      Thinking
+                    {:else if message.thoughtDurationMs}
+                      Thought for {formatThoughtDuration(
+                        message.thoughtDurationMs,
+                      )}
+                    {:else}
+                      Thinking
+                    {/if}
+                  </span>
+                </summary>
+                <div class="thinking-content">
+                  {@html message.renderedReasoning}
                 </div>
-              {/each}
-            </div>
-          {/if}
-          {#if message.role === 'assistant' && message.reasoning}
-            <details class="thinking-details">
-              <summary
-                class="thinking-summary"
-                class:streaming={chat?.isStreaming &&
+              </details>
+            {/if}
+            {#if message.content}
+              <div class="message-content">
+                {@html message.renderedContent}
+              </div>
+            {/if}
+          </div>
+          <div
+            class="message-actions"
+            class:hidden={chat?.isStreaming &&
+              message.id === messages[messages.length - 1]?.id}
+          >
+            <Tooltip text="Copy message">
+              <button
+                class="copy-message-button"
+                disabled={chat?.isStreaming &&
                   message.id === messages[messages.length - 1]?.id}
               >
-                <Brain size={16} />
-                <span class="thinking-label">
-                  {#if chat?.isStreaming && message.id === messages[messages.length - 1]?.id}
-                    Thinking
-                  {:else if message.thoughtDurationMs}
-                    Thought for {formatThoughtDuration(
-                      message.thoughtDurationMs,
-                    )}
-                  {:else}
-                    Thinking
-                  {/if}
-                </span>
-              </summary>
-              <div class="thinking-content">
-                {@html message.renderedReasoning}
-              </div>
-            </details>
-          {/if}
-          <div class="message-content">
-            {@html message.renderedContent}
+                <Copy size={16} />
+              </button>
+            </Tooltip>
+            {#if !message.isError}
+              <Tooltip text="Branch off from here">
+                <button
+                  class="branch-message-button"
+                  disabled={chat?.isStreaming &&
+                    message.id === messages[messages.length - 1]?.id}
+                >
+                  <GitBranch size={16} />
+                </button>
+              </Tooltip>
+            {/if}
           </div>
         </div>
       {/each}
     </div>
   {/if}
 </div>
+
+{#if previewImage}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div
+    class="image-preview-overlay"
+    on:click={() => (previewImage = null)}
+  >
+    <button
+      class="image-preview-close"
+      type="button"
+      on:click={() => (previewImage = null)}
+    >
+      <X size={24} />
+    </button>
+
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div
+      class="image-preview-container"
+      on:click|stopPropagation
+    >
+      <img
+        src={previewImage.dataUrl}
+        alt={previewImage.name}
+        class="image-preview-full"
+      />
+    </div>
+  </div>
+{/if}
 
 <style>
   .chat-panel {
@@ -231,21 +369,62 @@
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    border-radius: 0.75rem;
+    gap: 0.25rem;
     max-width: 80%;
   }
 
   .message.user {
-    padding: 1rem;
     align-self: flex-end;
-    background-color: var(--color-bg-surface-muted);
     color: var(--color-text-on-user-bubble);
   }
 
   .message.assistant {
     align-self: flex-start;
     color: var(--color-text-primary);
+  }
+
+  .message.error .message-bubble {
+    border: 1px solid var(--color-error);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    background-color: var(--color-danger-indicator-bg);
+  }
+
+  .error-header .role {
+    color: var(--color-error);
+  }
+
+  .message.error .message-content {
+    color: var(--color-text-primary);
+  }
+
+  .loading-indicator {
+    display: flex;
+    align-items: center;
+    padding: 0.25rem 0;
+    color: var(--color-text-secondary);
+  }
+
+  .loading-indicator :global(.spinning) {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .message-bubble {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .message.user .message-bubble {
+    padding: 1rem;
+    border-radius: 0.75rem;
+    background-color: var(--color-bg-surface-muted);
   }
 
   .message-header {
@@ -294,16 +473,16 @@
 
   .thinking-summary.streaming .thinking-label {
     background: linear-gradient(
-      120deg,
-      var(--color-text-secondary) 30%,
+      90deg,
+      var(--color-text-secondary) 40%,
       rgba(255, 255, 255, 0.95) 50%,
-      var(--color-text-secondary) 70%
+      var(--color-text-secondary) 60%
     );
-    background-size: 220% 100%;
+    background-size: 300% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
-    animation: thinking-shine 1.4s linear infinite;
+    animation: thinking-shine 2s ease-in-out infinite;
   }
 
   .thinking-content {
@@ -314,11 +493,14 @@
   }
 
   @keyframes thinking-shine {
-    from {
-      background-position: 200% 0;
+    0% {
+      background-position: 100% 0;
     }
-    to {
-      background-position: -20% 0;
+    50% {
+      background-position: 0% 0;
+    }
+    100% {
+      background-position: 100% 0;
     }
   }
 
@@ -506,7 +688,100 @@
     color: var(--color-text-primary);
   }
 
-  .message.user .file-chip {
+  .image-chip {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.375rem 0.5rem;
+    background-color: var(--color-bg-surface-muted);
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--color-text-primary);
+  }
+
+  .image-thumbnail-button {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    border-radius: 0.25rem;
+    display: flex;
+  }
+
+  .image-thumbnail-button:hover .image-thumbnail {
+    opacity: 0.8;
+  }
+
+  .image-thumbnail {
+    width: 32px;
+    height: 32px;
+    object-fit: cover;
+    border-radius: 0.25rem;
+  }
+
+  .image-thumbnail.placeholder {
+    background-color: var(--color-bg-active);
+    animation: placeholder-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes placeholder-pulse {
+    0%,
+    100% {
+      opacity: 0.4;
+    }
+    50% {
+      opacity: 0.8;
+    }
+  }
+
+  .image-preview-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: overlay-fade-in 0.15s ease-out;
+  }
+
+  @keyframes overlay-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .image-preview-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    display: flex;
+    transition: color 0.2s;
+  }
+
+  .image-preview-close:hover {
+    color: white;
+  }
+
+  .image-preview-full {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;
+    border-radius: 0.5rem;
+  }
+
+  .message.user .file-chip,
+  .message.user .image-chip {
     background-color: rgba(0, 0, 0, 0.05);
   }
 
@@ -565,42 +840,67 @@
     border-color: rgba(34, 197, 94, 0.3);
   }
 
+  .message-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    transition: opacity 0.2s;
+  }
+
+  .message-actions.hidden {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .message.user .message-actions {
+    opacity: 0;
+  }
+
+  .message.user:hover .message-actions {
+    opacity: 1;
+  }
+
   .copy-message-button {
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 0.375rem;
-    background-color: var(--color-bg-surface);
-    border: 1px solid var(--color-border);
+    background: none;
+    border: none;
     border-radius: 0.375rem;
     color: var(--color-text-secondary);
     cursor: pointer;
-    opacity: 0;
     transition: all 0.2s;
-    z-index: 10;
   }
 
-  .message.assistant:hover .copy-message-button {
-    opacity: 1;
-  }
-
-  .copy-message-button:hover {
+  .copy-message-button:hover,
+  .branch-message-button:hover {
     background-color: var(--color-bg-hover);
-    border-color: var(--color-border-secondary);
     color: var(--color-text-primary);
   }
 
   .copy-message-button.copied {
-    background-color: rgba(34, 197, 94, 0.1);
-    border-color: var(--color-success-border);
     color: var(--color-accent-green-check);
+  }
+
+  .branch-message-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.375rem;
+    background: none;
+    border: none;
+    border-radius: 0.375rem;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
   }
 
   @media (max-width: 768px) {
     .message {
       max-width: 95%;
     }
-    .copy-message-button {
+    .message-actions {
       opacity: 1;
     }
   }

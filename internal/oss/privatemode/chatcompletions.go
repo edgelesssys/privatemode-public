@@ -45,7 +45,7 @@ func (c *Client) ChatCompletions(ctx context.Context, body []byte) ([]byte, erro
 
 	respBody, err := c.doAPIRequestAndReadBody(req)
 	if err != nil {
-		return nil, fmt.Errorf("sending request: %w", err)
+		return nil, fmt.Errorf("sending request: %w", tryDecryptResponseError(err, cipher, openai.PlainCompletionsResponseFields))
 	}
 
 	decrypted, err := forwarder.MutateJSONFields(respBody, cipher.DecryptResponse, openai.PlainCompletionsResponseFields)
@@ -70,7 +70,7 @@ func (c *Client) StreamChatCompletions(ctx context.Context, body []byte) (*ChatC
 
 	resp, err := c.doAPIRequest(req)
 	if err != nil {
-		return nil, err
+		return nil, tryDecryptResponseError(err, cipher, openai.PlainCompletionsResponseFields)
 	}
 
 	if !strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {

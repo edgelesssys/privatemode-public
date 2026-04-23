@@ -268,7 +268,7 @@ test.describe('File upload', () => {
   test('should upload and process a text file', async ({ page }) => {
     const fileContent = 'This is a test document with important information.';
 
-    const fileInput = page.locator('input[type="file"]');
+    const fileInput = page.locator('input[type="file"][accept*=".md"]');
 
     await fileInput.setInputFiles({
       name: 'test.txt',

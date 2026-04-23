@@ -32,9 +32,6 @@
           inherit system;
           config = {
             allowUnfree = true;
-            permittedInsecurePackages = [
-              "electron-38.8.4" # TODO(msanft): Remove once native app is removed.
-            ];
           };
           overlays = [
             # Cross-platform packages that may also be built for and run on MacOS.

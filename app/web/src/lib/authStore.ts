@@ -73,7 +73,7 @@ async function createWebAppKey(token: string): Promise<string> {
     headers: authHeaders(token),
     body: JSON.stringify({
       name: 'chat.privatemode.ai',
-      comment: "Access key that's used by the Privatemode web app",
+      comment: "API key that's used by the Privatemode web app",
       is_webapp_key: true,
     }),
   });

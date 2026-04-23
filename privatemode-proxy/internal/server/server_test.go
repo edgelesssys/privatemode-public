@@ -101,28 +101,6 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 			proxyCacheSalt:   "p1234567890123456789012345678912",
 			requestCacheSalt: "r1234567890123456789012345678912",
 		},
-		"ACAO header is set for app origin": {
-			proxyAPIKey:      &apiKey,
-			expectStatusCode: http.StatusOK,
-			prompt:           "Hello",
-			requestMutator: func(req *http.Request) {
-				req.Header.Set("Origin", "app://-")
-			},
-			expectedHeaders: map[string]string{
-				"Access-Control-Allow-Origin": "app://-",
-			},
-		},
-		"ACAO header is unset for unknown origin": {
-			proxyAPIKey:      &apiKey,
-			expectStatusCode: http.StatusOK,
-			prompt:           "Hello",
-			requestMutator: func(req *http.Request) {
-				req.Header.Set("Origin", "http://localhost")
-			},
-			expectedHeaders: map[string]string{
-				"Access-Control-Allow-Origin": "",
-			},
-		},
 		"with app client": {
 			proxyAPIKey:      &apiKey,
 			expectStatusCode: http.StatusOK,
@@ -230,7 +208,7 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 	}
 }
 
-func TestInvalidSecret(t *testing.T) {
+func TestInvalidSecretRetry(t *testing.T) {
 	require := require.New(t)
 	assert := assert.New(t)
 
@@ -247,9 +225,9 @@ func TestInvalidSecret(t *testing.T) {
 	// setup a server with secretValid and check that there are two requests
 	// - the first fails due to the invalid secret
 	// - the second succeeds with the valid secret
-	numRequests := 0
+	var capturedHeaders []http.Header
 	stubAuthBackendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		numRequests++
+		capturedHeaders = append(capturedHeaders, r.Header.Clone())
 		token := r.Header.Get("Authorization")
 		if token == "" {
 			forwarder.HTTPError(w, r, http.StatusUnauthorized, "no auth found: expected Authorization header with 'Bearer <auth>'")
@@ -281,7 +259,7 @@ func TestInvalidSecret(t *testing.T) {
 	sut.GetHandler().ServeHTTP(resp, req)
 
 	require.Equal(http.StatusOK, resp.Code)
-	assert.Equal(2, numRequests)
+	require.Len(capturedHeaders, 2)
 
 	var res openai.ChatResponse
 	require.NoError(json.NewDecoder(resp.Body).Decode(&res))
@@ -292,6 +270,15 @@ func TestInvalidSecret(t *testing.T) {
 	// but no shard key is generated as caching is disabled
 	assert.NotEmpty(resp.Header().Get("Request-Cache-Salt"))
 	assert.Empty(resp.Header().Get("Request-Shard-Key"))
+
+	// each attempt gets fresh dynamic headers: the secret ID reflects the rotated secret and the
+	// request ID differs per attempt
+	assert.Equal(secretInvalid.ID, capturedHeaders[0].Get(constants.PrivatemodeSecretIDHeader))
+	assert.Equal(secretValid.ID, capturedHeaders[1].Get(constants.PrivatemodeSecretIDHeader))
+	assert.NotEqual(
+		capturedHeaders[0].Get(constants.RequestIDHeader),
+		capturedHeaders[1].Get(constants.RequestIDHeader),
+	)
 }
 
 func TestTools(t *testing.T) {

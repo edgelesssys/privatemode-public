@@ -2,6 +2,7 @@
   import ChatInput from '$lib/components/ChatInput.svelte';
   import ChatPanel from '$lib/components/ChatPanel.svelte';
   import { chatStore } from '$lib/chatStore';
+  import type { Message } from '$lib/chatStore';
   import {
     privatemodeClient,
     clientVerifying,
@@ -10,12 +11,17 @@
 
   let currentChatId: string | null = $state(null);
   let slowConnection = $state(false);
+  let draftMessage: Message | null = $state(null);
 
   $effect(() => {
     const unsubscribe = chatStore.currentChatId.subscribe((id) => {
       currentChatId = id;
     });
     return unsubscribe;
+  });
+
+  $effect(() => {
+    chatStore.hydrateImages();
   });
 
   $effect(() => {
@@ -30,6 +36,11 @@
   });
 
   function handleChatCreated(chatId: string) {
+    chatStore.currentChatId.set(chatId);
+  }
+
+  function handleBranchOff(chatId: string, message: Message) {
+    draftMessage = message;
     chatStore.currentChatId.set(chatId);
   }
 </script>
@@ -53,11 +64,15 @@
       <p>Failed to establish secure connection: {$clientError}</p>
     </div>
   {:else}
-    <ChatPanel chatId={currentChatId} />
+    <ChatPanel
+      chatId={currentChatId}
+      onBranchOff={handleBranchOff}
+    />
     <ChatInput
       privatemodeAIClient={$privatemodeClient}
       {currentChatId}
       onChatCreated={handleChatCreated}
+      bind:draftMessage
     />
   {/if}
 </div>

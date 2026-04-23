@@ -14,7 +14,7 @@ const config = {
       strict: true,
     }),
     version: {
-      name: "1776411881662",
+      name: process.env.SOURCE_DATE_EPOCH || Date.now().toString(),
     },
   },
 };

@@ -92,3 +92,14 @@ data:
       "veritysetup_version": "2.8.4",
       "file_hash_sha256": "8dd2fd2371cb7676a771c0b24802e95126b15aa480693afb695d200950eedb4a"
     }
+  nvidia-gemma-4-31b-it-nvfp4: |-
+    {
+      "model_source": "https://huggingface.co/nvidia/Gemma-4-31B-IT-NVFP4",
+      "commit_hash": "1365cf7aa2de42546878b8d2e4a425019a0be514",
+      "excluded_files": "",
+      "root_hash": "e60b3dbcd95c026297db0ec524c8578048d142653c2d68e20c2ec1c45f74ee6c",
+      "hash_offset": "32666148864",
+      "erofs_version": "1.9",
+      "veritysetup_version": "2.8.4",
+      "file_hash_sha256": "2eae04be9d3cb669c43b4447388f68a1b97bf8b16a68fafa4e5eaeccb8229c05"
+    }

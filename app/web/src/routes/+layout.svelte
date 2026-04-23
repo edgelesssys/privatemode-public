@@ -117,7 +117,7 @@
           <span>
             <a
               class="sign-in-link"
-              href="https://portal.privatemode.ai/access-keys"
+              href="https://portal.privatemode.ai/api-keys"
               target="_blank"
               rel="noopener noreferrer">Create a web app API key</a
             >

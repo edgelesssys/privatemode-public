@@ -56,41 +56,81 @@ function saveCachedSession(
 }
 
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let nextRefreshTime: number | null = null;
+let currentClient: PrivatemodeAI | null = null;
+let currentClientOpts: PrivatemodeAIOptions | null = null;
+let refreshInProgress = false;
+
+async function performSecretRefresh(): Promise<void> {
+  if (!currentClient || !currentClientOpts) return;
+  if (refreshInProgress) {
+    console.log('Secret refresh already in progress, skipping...');
+    return;
+  }
+  refreshInProgress = true;
+  try {
+    console.log('Refreshing Privatemode secret...');
+    // If the client was initialized offline (from cache), a plain
+    // refreshSecret() will fail because the secret manager was never
+    // set up. Fall back to a full re-initialization: create a fresh
+    // client so verify() fetches the current manifest instead of
+    // reusing the (potentially stale) cached one.
+    try {
+      await currentClient.refreshSecret();
+    } catch {
+      const fresh = new PrivatemodeAI(currentClientOpts);
+      await fresh.verify();
+      await fresh.refreshSecret();
+      currentClient = fresh;
+      privatemodeClient.set(fresh);
+    }
+    const exported = currentClient.exportSecret();
+    const manifestBytes = currentClient.manifestBytes!;
+    saveCachedSession(exported, btoa(String.fromCharCode(...manifestBytes)));
+    scheduleSecretRefresh(
+      currentClient,
+      exported.expiresAtUnix,
+      currentClientOpts,
+    );
+  } catch (e) {
+    console.error('Background secret refresh failed:', e);
+  } finally {
+    refreshInProgress = false;
+  }
+}
 
 function scheduleSecretRefresh(
   client: PrivatemodeAI,
   expiresAtUnix: number,
   clientOpts: PrivatemodeAIOptions,
 ): void {
+  currentClient = client;
+  currentClientOpts = clientOpts;
   if (refreshTimer !== null) clearTimeout(refreshTimer);
   // Refresh 60 seconds before expiration (the server-side buffer is 5min,
   // so this is well within the valid window).
   const msUntilRefresh = expiresAtUnix * 1000 - Date.now() - 60_000;
-  if (msUntilRefresh <= 0) return;
-  refreshTimer = setTimeout(async () => {
-    try {
-      // If the client was initialized offline (from cache), a plain
-      // refreshSecret() will fail because the secret manager was never
-      // set up. Fall back to a full re-initialization: create a fresh
-      // client so verify() fetches the current manifest instead of
-      // reusing the (potentially stale) cached one.
-      try {
-        await client.refreshSecret();
-      } catch {
-        const fresh = new PrivatemodeAI(clientOpts);
-        await fresh.verify();
-        await fresh.refreshSecret();
-        client = fresh;
-        privatemodeClient.set(client);
-      }
-      const exported = client.exportSecret();
-      const manifestBytes = client.manifestBytes!;
-      saveCachedSession(exported, btoa(String.fromCharCode(...manifestBytes)));
-      scheduleSecretRefresh(client, exported.expiresAtUnix, clientOpts);
-    } catch (e) {
-      console.error('Background secret refresh failed:', e);
+  nextRefreshTime = Date.now() + msUntilRefresh;
+  refreshTimer = setTimeout(performSecretRefresh, msUntilRefresh);
+}
+
+// Handle visibility changes to refresh secret if timer was missed while tab was hidden
+function handleVisibilityChange(): void {
+  if (document.visibilityState === 'visible' && nextRefreshTime !== null) {
+    // Check if we're past the scheduled refresh time
+    if (Date.now() >= nextRefreshTime) {
+      console.log(
+        'Tab became visible and refresh is overdue, triggering now...',
+      );
+      performSecretRefresh();
     }
-  }, msUntilRefresh);
+  }
+}
+
+// Set up visibility listener once
+if (typeof document !== 'undefined') {
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
 }
 
 export async function initializeClient(): Promise<void> {
