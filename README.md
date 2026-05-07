@@ -14,4 +14,4 @@ See the [Verification from source code](https://docs.privatemode.ai/guides/verif
 
 ## Build and verify the web app
 
-See the [Verification from source code](https://docs.privatemode.ai/guides/web-app/verify-from-source/) guide in the Privatemode documentation.
+See the [Verification from source code](https://docs.privatemode.ai/web-app/verify-from-source/) guide in the Privatemode documentation.

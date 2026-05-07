@@ -4,6 +4,7 @@ import { saveImage, loadImage, deleteImages } from './imageStore';
 export interface AttachedFile {
   name: string;
   content: string;
+  kind?: 'document' | 'audio-transcription';
 }
 
 export interface AttachedImage {
@@ -238,7 +239,11 @@ function createChatStore() {
             };
 
             if (chat.messages.length === 0 && message.role === 'user') {
-              updatedChat.title = message.content.slice(0, 50);
+              updatedChat.title =
+                message.content.trim().slice(0, 50) ||
+                message.attachedFiles?.[0]?.name ||
+                message.attachedImages?.[0]?.name ||
+                'New chat';
             }
 
             return updatedChat;

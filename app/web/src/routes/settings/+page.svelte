@@ -4,19 +4,47 @@
   import { goto } from '$app/navigation';
   import { themePreference } from '$lib/themeStore';
   import type { ThemePreference } from '$lib/themeStore';
+  import {
+    models as modelsStore,
+    modelsError,
+    modelsLoaded,
+    modelsLoading,
+  } from '$lib/clientStore';
+  import {
+    getAvailableTranscriptionModels,
+    transcriptionModelConfig,
+    transcriptionModel,
+  } from '$lib/transcriptionStore';
+  import type { TranscriptionModelID } from '$lib/transcriptionStore';
   import { onMount } from 'svelte';
 
   let showDeleteConfirm = $state(false);
   let currentTheme = $state<ThemePreference>('system');
+  let currentTranscriptionModel =
+    $state<TranscriptionModelID>('whisper-large-v3');
+  let availableTranscriptionModels = $derived(
+    getAvailableTranscriptionModels($modelsStore),
+  );
 
   onMount(() => {
-    return themePreference.subscribe((v) => {
+    const unsubscribeTheme = themePreference.subscribe((v) => {
       currentTheme = v;
     });
+    const unsubscribeTranscriptionModel = transcriptionModel.subscribe((v) => {
+      currentTranscriptionModel = v;
+    });
+    return () => {
+      unsubscribeTheme();
+      unsubscribeTranscriptionModel();
+    };
   });
 
   function setTheme(value: ThemePreference) {
     themePreference.set(value);
+  }
+
+  function setTranscriptionModel(value: TranscriptionModelID) {
+    transcriptionModel.set(value);
   }
 
   const themeOptions: {
@@ -68,6 +96,41 @@
           </button>
         {/each}
       </div>
+    </section>
+
+    <section class="setting-section">
+      <h2>Audio transcription</h2>
+      <p class="setting-description">
+        Choose the speech-to-text model used for audio uploads
+      </p>
+      {#if !$modelsLoaded && $modelsLoading}
+        <p class="empty-model-state">Transcription models are still loading.</p>
+      {:else if !$modelsLoaded && $modelsError}
+        <p class="empty-model-state">
+          Failed to load transcription models: {$modelsError}
+        </p>
+      {:else if availableTranscriptionModels.length === 0}
+        <p class="empty-model-state">
+          No transcription model is currently available.
+        </p>
+      {:else}
+        <div class="transcription-model-picker">
+          {#each availableTranscriptionModels as model}
+            <button
+              class="transcription-model-option"
+              class:active={currentTranscriptionModel === model.id}
+              onclick={() => setTranscriptionModel(model.id)}
+            >
+              <span class="model-label"
+                >{transcriptionModelConfig[model.id].displayName}</span
+              >
+              <span class="model-description"
+                >{transcriptionModelConfig[model.id].description}</span
+              >
+            </button>
+          {/each}
+        </div>
+      {/if}
     </section>
 
     <section class="setting-section danger-section">
@@ -205,6 +268,61 @@
     background: var(--color-bg-active);
     border-color: var(--color-accent);
     color: var(--color-accent);
+  }
+
+  .transcription-model-picker {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+  }
+
+  .transcription-model-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 12px;
+    min-width: 0;
+    background: var(--color-bg-surface);
+    color: var(--color-text-muted);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: 'Inter Variable', sans-serif;
+    text-align: left;
+  }
+
+  .transcription-model-option:hover {
+    background: var(--color-bg-hover);
+    border-color: var(--color-border-secondary);
+  }
+
+  .transcription-model-option.active {
+    background: var(--color-bg-active);
+    border-color: var(--color-accent);
+  }
+
+  .model-label {
+    color: var(--color-text-heading);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .transcription-model-option.active .model-label {
+    color: var(--color-accent);
+  }
+
+  .model-description {
+    color: var(--color-text-muted);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .empty-model-state {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 14px;
   }
 
   .danger-section {

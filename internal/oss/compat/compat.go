@@ -1,3 +1,6 @@
+// Copyright (c) Edgeless Systems GmbH
+// SPDX-License-Identifier: MIT
+
 // Package compat provides utilities for version compatibility checks.
 // It contains helpers for decision making based on a client's version for consistent handling
 // across our codebase.

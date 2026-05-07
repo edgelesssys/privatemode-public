@@ -6,6 +6,7 @@ Package anthropic implements an inference API adapter for the [Anthropic Message
 package anthropic
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/edgelesssys/continuum/internal/oss/usage"
 )
 
 // Adapter implements an inference adapter for the Anthropic API.
@@ -52,6 +54,8 @@ func (a *Adapter) HandlesCatchAll() bool {
 // forwardMessagesRequest forwards a request to the Anthropic messages endpoint.
 func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request) {
 	session := a.Cipher.NewResponseCipher()
+	encryptMutator := forwarder.NewJSONMutatingReader(session.EncryptResponse(r.Context()), anthropic.PlainMessagesResponseFields)
+
 	a.Forwarder.Forward(
 		w, r,
 		forwarder.RequestMutatorChain(
@@ -59,6 +63,22 @@ func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request)
 			a.cacheSaltValidator,
 			a.mediaContentValidator,
 		),
-		forwarder.JSONResponseMapper(session.EncryptResponse(r.Context()), anthropic.PlainMessagesResponseFields),
+		a.ResponseMapper(encryptMutator, extractAnthropicUsage, extractAnthropicUsage),
 	)
+}
+
+func extractAnthropicUsage(body []byte) (usage.Stats, error) {
+	// In streaming responses, usage information is only included in message_delta events, while
+	// response tokens are sent in content_block_delta events. We attempt simply attempt parsing
+	// the known usage structure.
+	var parsed struct {
+		Usage *anthropic.Usage `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return usage.Stats{}, err
+	}
+	if parsed.Usage == nil {
+		return usage.Stats{}, inference.ErrNoUsage
+	}
+	return parsed.Usage.ToUsageStats(), nil
 }

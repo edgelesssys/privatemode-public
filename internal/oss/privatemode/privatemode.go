@@ -21,11 +21,11 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/crypto"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/edgelesssys/continuum/internal/oss/secretclient"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager/updater"
 	contrastsdk "github.com/edgelesssys/contrast/sdk"
-	"github.com/google/uuid"
 )
 
 // ResponseError is returned when the API responds with a non-2xx
@@ -290,7 +290,7 @@ func (c *Client) doAPIRequest(req *http.Request) (*http.Response, error) {
 	req.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
 	req.Header.Set(constants.PrivatemodeClientHeader, constants.PrivatemodeClientSDK)
 	req.Header.Set(constants.PrivatemodeSecretIDHeader, c.currentSecret.ID)
-	req.Header.Set(constants.RequestIDHeader, "sdk_"+uuid.New().String())
+	req.Header.Set(requestid.UserHeader, "sdk_"+requestid.New())
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

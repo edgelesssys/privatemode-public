@@ -38,11 +38,11 @@
   "devDependencies": {
     "@eslint/js": "9.39.4",
     "@types/node": "25.6.0",
-    "@vitest/browser-playwright": "4.1.4",
+    "@vitest/browser-playwright": "4.1.5",
     "eslint": "9.39.4",
     "globals": "17.5.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.58.2",
-    "vitest": "4.1.4"
+    "typescript-eslint": "8.59.1",
+    "vitest": "4.1.5"
   }
 }

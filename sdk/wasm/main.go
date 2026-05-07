@@ -341,6 +341,62 @@ func (w *privatemodeWasmWrapper) unstructured(this js.Value, args []js.Value) an
 	return promiseConstructor.New(fn)
 }
 
+// transcribeAudio returns a JS Promise that resolves with the decrypted
+// response from the /v1/audio/transcriptions endpoint.
+// Arguments:
+//   - args[0]: JS file object with "name" (string), "content"
+//     (Uint8Array), and optional "contentType" (string).
+//   - args[1]: JSON-encoded options string.
+//
+// The returned Promise resolves with the decrypted response body as a
+// string, or rejects with a JS Error on failure.
+func (w *privatemodeWasmWrapper) transcribeAudio(this js.Value, args []js.Value) any {
+	jsFile := args[0]
+	jsContent := jsFile.Get("content")
+	content := make([]byte, jsContent.Length())
+	js.CopyBytesToGo(content, jsContent)
+	file := privatemode.AudioFile{
+		Name:    jsFile.Get("name").String(),
+		Content: content,
+	}
+	ct := jsFile.Get("contentType")
+	if ct.Truthy() {
+		file.ContentType = ct.String()
+	}
+
+	opts := privatemode.AudioTranscriptionOptions{}
+	if optsJSON := args[1].String(); optsJSON != "" {
+		if err := json.Unmarshal([]byte(optsJSON), &opts); err != nil {
+			promiseConstructor := js.Global().Get("Promise")
+			return promiseConstructor.Call("reject",
+				js.Global().Get("Error").New(fmt.Sprintf("transcribe audio: parsing options: %s", err)))
+		}
+	}
+
+	promiseConstructor := js.Global().Get("Promise")
+	promiseFunc := func(_ js.Value, promiseArgs []js.Value) any {
+		resolve := promiseArgs[0]
+		reject := promiseArgs[1]
+
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			resp, err := w.client.TranscribeAudio(ctx, file, opts)
+			if err != nil {
+				reject.Invoke(js.Global().Get("Error").New(fmt.Sprintf("transcribe audio: %s", err)))
+				return
+			}
+			resolve.Invoke(js.ValueOf(string(resp)))
+		}()
+
+		return nil
+	}
+
+	fn := js.FuncOf(promiseFunc)
+	defer fn.Release()
+	return promiseConstructor.New(fn)
+}
+
 // listModels returns a JS Promise that resolves with the JSON response
 // from the /v1/models endpoint.
 // It takes no JS arguments.
@@ -446,6 +502,7 @@ func main() {
 	js.Global().Set("chatCompletions", js.FuncOf(w.chatCompletions))
 	js.Global().Set("streamChatCompletions", js.FuncOf(w.streamChatCompletions))
 	js.Global().Set("unstructured", js.FuncOf(w.unstructured))
+	js.Global().Set("transcribeAudio", js.FuncOf(w.transcribeAudio))
 	js.Global().Set("listModels", js.FuncOf(w.listModels))
 	js.Global().Set("exportSecret", js.FuncOf(w.exportSecret))
 	js.Global().Set("importSecret", js.FuncOf(w.importSecret))

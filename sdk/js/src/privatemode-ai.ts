@@ -10,6 +10,7 @@ import {
   chatCompletions as wasmChatCompletions,
   streamChatCompletions as wasmStreamChatCompletions,
   unstructured as wasmUnstructured,
+  transcribeAudio as wasmTranscribeAudio,
   listModels as wasmListModels,
   exportSecret as wasmExportSecret,
   importSecret as wasmImportSecret,
@@ -378,6 +379,37 @@ export class PrivatemodeAI {
   }
 
   /**
+   * Send an audio file to the OpenAI-compatible transcription endpoint.
+   * The request is encrypted and the response is decrypted transparently.
+   *
+   * {@link verify} and {@link refreshSecret} must have been called
+   * first.
+   *
+   * @param file - The audio file to transcribe.
+   * @param options - Transcription options, including the STT model.
+   * @returns The decrypted response body as a parsed object.
+   * @throws If encryption, sending, or decryption fails or the
+   * response is invalid JSON.
+   */
+  public async transcribeAudio(
+    file: AudioFile,
+    options: AudioTranscriptionOptions,
+  ): Promise<unknown> {
+    return this.retryWithSecretRefresh(async () => {
+      const wasmFile = {
+        name: file.name,
+        content:
+          file.content instanceof Uint8Array
+            ? file.content
+            : new Uint8Array(file.content),
+        ...(file.contentType ? { contentType: file.contentType } : {}),
+      };
+      const resp = await wasmTranscribeAudio(wasmFile, JSON.stringify(options));
+      return JSON.parse(resp);
+    });
+  }
+
+  /**
    * List available models. The response is not encrypted and only
    * requires authentication.
    *
@@ -582,6 +614,30 @@ export interface UnstructuredOptions {
   unique_element_ids?: boolean;
   /** Keep XML tags in output. */
   xml_keep_tags?: boolean;
+}
+
+/** An audio file to send to the transcription endpoint. */
+export interface AudioFile {
+  /** Filename (e.g. "recording.mp3"). */
+  name: string;
+  /** Raw audio content as a Uint8Array or ArrayBuffer. */
+  content: Uint8Array | ArrayBuffer;
+  /** Optional MIME type hint (e.g. "audio/mpeg"). */
+  contentType?: string;
+}
+
+/** Optional parameters for the audio transcription endpoint. */
+export interface AudioTranscriptionOptions {
+  /** Speech-to-text model ID, e.g. "voxtral-mini-3b" or "whisper-large-v3". */
+  model: string;
+  /** Optional ISO-639-1 language code. */
+  language?: string;
+  /** Optional text to guide transcription style. */
+  prompt?: string;
+  /** JSON response format. Defaults to "json". */
+  response_format?: 'json' | 'verbose_json';
+  /** Sampling temperature. */
+  temperature?: number;
 }
 
 /**

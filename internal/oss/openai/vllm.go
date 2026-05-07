@@ -29,6 +29,7 @@ import (
 	"github.com/tidwall/sjson"
 
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/usage"
 )
 
 const (
@@ -261,6 +262,21 @@ type Usage struct {
 	PromptTokensDetails *PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
 }
 
+// ToUsageStats converts an OpenAI [Usage] to a [usage.Stats].
+func (u Usage) ToUsageStats() usage.Stats {
+	promptTokens := int64(u.PromptTokens)
+	var cachedPromptTokens int64
+	if u.PromptTokensDetails != nil {
+		cachedPromptTokens = int64(u.PromptTokensDetails.CachedTokens)
+		promptTokens -= cachedPromptTokens
+	}
+	return usage.Stats{
+		PromptTokens:       promptTokens,
+		CachedPromptTokens: cachedPromptTokens,
+		CompletionTokens:   int64(u.CompletionTokens),
+	}
+}
+
 // PromptTokensDetails contains detailed information about prompt tokens.
 type PromptTokensDetails struct {
 	AudioTokens  int `json:"audio_tokens,omitzero"`
@@ -280,6 +296,13 @@ type AudioUsage struct {
 	PromptTokens     int    `json:"prompt_tokens,omitzero"`
 	TotalTokens      int    `json:"total_tokens,omitzero"`
 	CompletionTokens int    `json:"completion_tokens,omitzero"`
+}
+
+// ToUsageStats converts an OpenAI [AudioUsage] to a [usage.Stats].
+func (a AudioUsage) ToUsageStats() usage.Stats {
+	return usage.Stats{
+		AudioSeconds: int64(a.Seconds),
+	}
 }
 
 // APIErrorResponse represents the error response returned by the /v1/chat/completions endpoint.

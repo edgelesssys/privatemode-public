@@ -9,7 +9,7 @@ contrast_version=$(cat "$dir/contrast-version")
 base_url=https://github.com/edgelesssys/contrast/releases/download/$contrast_version
 
 # download Contrast CLI if not already existing with the correct version
-./contrast -v | grep "contrast version $contrast_version" || wget --backups=1 "$base_url/contrast" && chmod +x contrast
+./contrast -v | grep "contrast version $contrast_version" || wget --backups=1 "$base_url/contrast-x86_64-linux" -O contrast && chmod +x contrast
 
 # generate and adjust manifest
 ./contrast generate --disable-updates --reference-values metal-qemu-snp-gpu "$dir/deployment.yaml"

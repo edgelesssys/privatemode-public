@@ -17,7 +17,7 @@ import (
 
 const (
 	secretLifetime      = time.Hour
-	secretRefreshBuffer = 5 * time.Minute
+	secretRefreshBuffer = 15 * time.Minute
 )
 
 // SecretManager manages the lifetime of a secret and always returns an up-to-date secret.

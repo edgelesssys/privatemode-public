@@ -80,10 +80,6 @@ const (
 	PrivatemodeClientAPIGateway = "ApiGateway"
 	// PrivatemodeClientSDK is the [PrivatemodeClientHeader] value for the Privatemode SDK client.
 	PrivatemodeClientSDK = "SDK"
-	// RequestIDHeader is the header used to identify requests. It will be set by envoy if not set by the client.
-	// X-Request-ID is mostly standard and also supported by envoy.
-	// cf. https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers#config-http-conn-man-headers-x-request-id
-	RequestIDHeader = "X-Request-ID"
 	// PrivatemodeNvidiaOCSPPolicyHeader is the header used to allow specific NVIDIA OCSP status codes.
 	PrivatemodeNvidiaOCSPPolicyHeader = "Privatemode-NVIDIA-OCSP-Policy"
 	// PrivatemodeNvidiaOCSPPolicyMACHeader is the header used to verify the integrity of the Privatemode-NVIDIA-OCSP-Policy header.

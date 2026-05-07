@@ -23,6 +23,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/server/stub"
 	"github.com/stretchr/testify/assert"
@@ -276,8 +277,8 @@ func TestInvalidSecretRetry(t *testing.T) {
 	assert.Equal(secretInvalid.ID, capturedHeaders[0].Get(constants.PrivatemodeSecretIDHeader))
 	assert.Equal(secretValid.ID, capturedHeaders[1].Get(constants.PrivatemodeSecretIDHeader))
 	assert.NotEqual(
-		capturedHeaders[0].Get(constants.RequestIDHeader),
-		capturedHeaders[1].Get(constants.RequestIDHeader),
+		capturedHeaders[0].Get(requestid.UserHeader),
+		capturedHeaders[1].Get(requestid.UserHeader),
 	)
 }
 
@@ -569,7 +570,7 @@ func TestSetDynamicHeaders(t *testing.T) {
 				assert.Equal(req.Header.Get(constants.PrivatemodeSecretIDHeader), tc.secret.ID)
 				assert.NotEmpty(req.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyHeader))
 				assert.NotEmpty(req.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyMACHeader))
-				assert.Equal(req.Header.Get(constants.RequestIDHeader), fmt.Sprintf("%s_%d", requestID, attempt))
+				assert.Equal(req.Header.Get(requestid.UserHeader), fmt.Sprintf("%s_%d", requestID, attempt))
 			}
 		})
 	}

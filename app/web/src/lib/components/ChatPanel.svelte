@@ -1,11 +1,13 @@
 <script lang="ts">
   import { chatStore } from '$lib/chatStore';
-  import type { Message, AttachedImage } from '$lib/chatStore';
+  import type { Message, AttachedFile, AttachedImage } from '$lib/chatStore';
   import {
     MessageSquare,
     Copy,
     GitBranch,
     File,
+    Mic,
+    Check,
     Brain,
     X,
     CircleAlert,
@@ -31,6 +33,8 @@
   let previousChatId: string | null = null;
   let previousMessageCount = 0;
   let previewImage: AttachedImage | null = null;
+  let previewTranscription: AttachedFile | null = null;
+  let transcriptionCopied = false;
 
   interface RenderedMessage extends Message {
     renderedContent: string;
@@ -123,11 +127,24 @@
     button.classList.add('copied');
     setTimeout(() => button.classList.remove('copied'), 2000);
   }
+
+  function copyText(text: string) {
+    navigator.clipboard.writeText(text).catch(() => {});
+  }
+
+  function copyTranscription(text: string) {
+    copyText(text);
+    transcriptionCopied = true;
+    setTimeout(() => {
+      transcriptionCopied = false;
+    }, 2000);
+  }
 </script>
 
 <svelte:window
   on:keydown={(e) =>
-    e.key === 'Escape' && previewImage && (previewImage = null)}
+    e.key === 'Escape' &&
+    ((previewImage = null), (previewTranscription = null))}
 />
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -205,8 +222,19 @@
                 {#if message.attachedFiles}
                   {#each message.attachedFiles as file}
                     <div class="file-chip">
-                      <File size={16} />
-                      <span class="file-name">{file.name}</span>
+                      {#if file.kind === 'audio-transcription'}
+                        <button
+                          class="file-preview-button"
+                          type="button"
+                          on:click={() => (previewTranscription = file)}
+                        >
+                          <Mic size={16} />
+                          <span class="file-name">{file.name}</span>
+                        </button>
+                      {:else}
+                        <File size={16} />
+                        <span class="file-name">{file.name}</span>
+                      {/if}
                     </div>
                   {/each}
                 {/if}
@@ -309,6 +337,50 @@
         alt={previewImage.name}
         class="image-preview-full"
       />
+    </div>
+  </div>
+{/if}
+
+{#if previewTranscription}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div
+    class="image-preview-overlay"
+    on:click={() => (previewTranscription = null)}
+  >
+    <button
+      class="image-preview-close"
+      type="button"
+      on:click={() => (previewTranscription = null)}
+    >
+      <X size={24} />
+    </button>
+
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div
+      class="transcription-preview-container"
+      on:click|stopPropagation
+    >
+      <div class="transcription-preview-header">
+        <h2>{previewTranscription.name}</h2>
+        <button
+          class="transcription-copy-button"
+          class:copied={transcriptionCopied}
+          type="button"
+          on:click={() => copyTranscription(previewTranscription!.content)}
+          aria-label={transcriptionCopied
+            ? 'Copied transcription'
+            : 'Copy transcription'}
+        >
+          {#if transcriptionCopied}
+            <Check size={16} />
+          {:else}
+            <Copy size={16} />
+          {/if}
+        </button>
+      </div>
+      <p>{previewTranscription.content}</p>
     </div>
   </div>
 {/if}
@@ -688,6 +760,22 @@
     color: var(--color-text-primary);
   }
 
+  .file-preview-button {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .file-preview-button:hover {
+    color: var(--color-accent);
+  }
+
   .image-chip {
     display: flex;
     align-items: center;
@@ -778,6 +866,63 @@
     max-height: 90vh;
     object-fit: contain;
     border-radius: 0.5rem;
+  }
+
+  .transcription-preview-container {
+    width: min(720px, calc(100vw - 2rem));
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 1.25rem;
+    border-radius: 0.5rem;
+    background-color: var(--color-bg-surface);
+    color: var(--color-text-primary);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  }
+
+  .transcription-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .transcription-preview-header h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .transcription-copy-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    padding: 0.375rem;
+    border: none;
+    border-radius: 0.375rem;
+    background: none;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition:
+      background-color 0.2s,
+      color 0.2s;
+  }
+
+  .transcription-copy-button:hover {
+    background-color: var(--color-bg-hover);
+    color: var(--color-text-primary);
+  }
+
+  .transcription-copy-button.copied {
+    color: var(--color-accent-green-check);
+  }
+
+  .transcription-preview-container p {
+    margin: 0;
+    white-space: pre-wrap;
+    line-height: 1.6;
+    color: var(--color-text-secondary);
   }
 
   .message.user .file-chip,

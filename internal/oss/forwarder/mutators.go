@@ -245,9 +245,9 @@ func withJSONRequestMutation(
 	}
 }
 
-// mutatingReader implements a wrapper for an [io.ReadCloser],
-// which transparently mutates data chunks.
-type mutatingReader struct {
+// MutatingReader implements a wrapper for an [io.ReadCloser], which transparently mutates data
+// chunks.
+type MutatingReader struct {
 	scanner  *bufio.Scanner
 	leftover []byte
 	closer   io.Closer
@@ -257,20 +257,46 @@ type mutatingReader struct {
 	dataParseFunc func(data []byte, mutate MutationFunc, fields FieldSelector) ([]byte, error)
 }
 
+// NewJSONMutatingReader constructs a [MutatingReader] applying mutate to all JSON fields not in
+// skipFields.
+func NewJSONMutatingReader(mutate MutationFunc, skipFields FieldSelector) *MutatingReader {
+	return &MutatingReader{
+		mutate:        mutate,
+		dataParseFunc: MutateJSONFields,
+		fields:        skipFields,
+	}
+}
+
+// NewRawMutatingReader constructs a [MutatingReader] applying mutate on entire chunks.
+func NewRawMutatingReader(mutate MutationFunc) *MutatingReader {
+	return &MutatingReader{
+		mutate: mutate,
+		dataParseFunc: func(data []byte, mutate MutationFunc, _ FieldSelector) ([]byte, error) {
+			mutated, err := mutate(string(data))
+			return []byte(mutated), err
+		},
+	}
+}
+
+// Mutate performs mutation on a single input.
+func (r *MutatingReader) Mutate(input []byte) ([]byte, error) {
+	return r.dataParseFunc(input, r.mutate, r.fields)
+}
+
 // Reader returns a mutating [io.Reader]. Close cascades to the wrapped reader.
-func (r *mutatingReader) Reader(reader io.ReadCloser) io.ReadCloser {
+func (r *MutatingReader) Reader(reader io.ReadCloser) io.ReadCloser {
 	r.scanner = bufio.NewScanner(reader)
 	r.closer = reader
 	return r
 }
 
 // Close closes the wrapped reader.
-func (r *mutatingReader) Close() error {
+func (r *MutatingReader) Close() error {
 	return r.closer.Close()
 }
 
 // Read reads from the underlying reader, performs mutation on the data chunks, and returns the mutated data.
-func (r *mutatingReader) Read(b []byte) (int, error) {
+func (r *MutatingReader) Read(b []byte) (int, error) {
 	// The data read from the underlying reader and/or the final mutated data may be larger than the given buffer
 	// In this case, the remaining data is stored and returned on the next call to Read
 	if len(r.leftover) > 0 {
@@ -316,7 +342,7 @@ func (r *mutatingReader) Read(b []byte) (int, error) {
 // of the mutated data to an [io.Writer], improving performance for copy operations.
 // Data is read, one line (chunk) at a time, from a pre-configured [bufio.Scanner], mutated,
 // and written to the provided [io.Writer].
-func (r *mutatingReader) WriteTo(w io.Writer) (n int64, err error) {
+func (r *MutatingReader) WriteTo(w io.Writer) (n int64, err error) {
 	if r.scanner == nil {
 		return 0, errors.New("mutatingReader: no data to write")
 	}
@@ -334,7 +360,7 @@ func (r *mutatingReader) WriteTo(w io.Writer) (n int64, err error) {
 }
 
 // writeTo writes a single chunk of (mutated) data to the given [io.Writer].
-func (r *mutatingReader) writeTo(w io.Writer, b []byte) (int64, error) {
+func (r *MutatingReader) writeTo(w io.Writer, b []byte) (int64, error) {
 	// Skip empty chunks
 	if len(b) == 0 {
 		return 0, nil
@@ -353,7 +379,7 @@ func (r *mutatingReader) writeTo(w io.Writer, b []byte) (int64, error) {
 }
 
 // mutateChunk parses and mutates a single data chunk.
-func (r *mutatingReader) mutateChunk(b []byte) ([]byte, error) {
+func (r *MutatingReader) mutateChunk(b []byte) ([]byte, error) {
 	// Remove the event stream prefix, since it breaks JSON parsing
 	bufCpy := make([]byte, len(b))
 	copy(bufCpy, b)

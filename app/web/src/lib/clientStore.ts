@@ -14,6 +14,8 @@ export const clientReady = writable<boolean>(false);
 export const clientError = writable<string | null>(null);
 export const clientVerifying = writable<boolean>(true);
 export const modelsLoaded = writable<boolean>(false);
+export const modelsLoading = writable<boolean>(false);
+export const modelsError = writable<string | null>(null);
 export const models = writable<Model[]>([]);
 
 const SECRET_STORAGE_KEY = 'privatemode-secret';
@@ -133,12 +135,44 @@ if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', handleVisibilityChange);
 }
 
+let modelsRequest: Promise<Model[]> | null = null;
+
+export async function loadModels(
+  client: PrivatemodeAI | null = get(privatemodeClient),
+): Promise<Model[]> {
+  if (!client) return [];
+  if (get(modelsLoaded)) return get(models);
+  if (modelsRequest) return modelsRequest;
+
+  modelsLoading.set(true);
+  modelsError.set(null);
+  modelsRequest = (async () => {
+    const resp = (await client.listModels()) as { data: Model[] };
+    models.set(resp.data);
+    modelsLoaded.set(true);
+    return resp.data;
+  })();
+
+  try {
+    return await modelsRequest;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to load models';
+    modelsError.set(message);
+    modelsLoaded.set(false);
+    throw e;
+  } finally {
+    modelsLoading.set(false);
+    modelsRequest = null;
+  }
+}
+
 export async function initializeClient(): Promise<void> {
   const apiKey = get(activeApiKey);
   clientError.set(null);
   clientReady.set(false);
   clientVerifying.set(true);
   modelsLoaded.set(false);
+  modelsError.set(null);
   try {
     const configuredManifestBytes = import.meta.env
       .VITE_PRIVATEMODE_MANIFEST_BASE64
@@ -191,6 +225,9 @@ export async function initializeClient(): Promise<void> {
 
     privatemodeClient.set(client);
     clientReady.set(true);
+    loadModels(client).catch((e) => {
+      console.error('Error loading models:', e);
+    });
   } catch (e) {
     privatemodeClient.set(null);
     clientError.set(e instanceof Error ? e.message : 'Verification failed');

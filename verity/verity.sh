@@ -24,6 +24,7 @@ if [[ -n ${EXCLUDE_GIT_FILES} ]]; then
   readarray -t excluded_files <<<"$(echo "${EXCLUDE_GIT_FILES}" | tr ',' '\n')"
 fi
 
+mkdir -p "${TMPDIR:-/tmp}"
 cd "${TMPDIR:-/tmp}" || exit 1
 
 umask 22
@@ -59,6 +60,7 @@ staging_path="${TMPDIR:-/tmp}"
 if [[ -n ${STAGING_PATH} ]]; then
   staging_path="${STAGING_PATH}"
 fi
+mkdir -p "${staging_path}"
 
 model_name="$(normalize-model-name.sh "${model_src}")"
 temp_disk="${staging_path}/${model_name}.tmp"

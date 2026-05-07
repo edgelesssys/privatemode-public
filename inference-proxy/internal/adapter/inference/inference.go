@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
@@ -16,9 +18,12 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
+	"github.com/edgelesssys/continuum/internal/oss/sse"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
+
+const maxSSELineBytes = 1024 * 1024 // 1 MiB
 
 var ocspStatusMetrics = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "privatemode_nvidia_ocsp_status",
@@ -154,4 +159,131 @@ func addOCSPStatusMetric(index int, component string, status ocsp.Status) {
 		statusFloat = -1
 	}
 	ocspStatusMetrics.WithLabelValues(fmt.Sprintf("gpu_index_%d", index), component).Set(statusFloat)
+}
+
+// ResponseMapper returns a mapper that handles both unary and streaming vLLM responses.
+// It performs usage report extraction and encryption.
+func (a *Adapter) ResponseMapper(
+	encryptMutator *forwarder.MutatingReader,
+	extractUnaryUsage UsageExtractor,
+	extractStreamingUsage UsageExtractor,
+) forwarder.ResponseMapper {
+	return func(resp *http.Response) (forwarder.Response, error) {
+		if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
+			return a.streamingResponse(resp, encryptMutator, extractStreamingUsage), nil
+		}
+		return a.unaryResponse(resp, encryptMutator, extractUnaryUsage)
+	}
+}
+
+func (a *Adapter) unaryResponse(
+	usResp *http.Response,
+	encryptMutator *forwarder.MutatingReader,
+	extractUsage UsageExtractor,
+) (*forwarder.UnaryResponse, error) {
+	dsResp, err := forwarder.ReadUnaryResponse(usResp, constants.MaxUnaryResponseBodyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("reading upstream response body: %w", err)
+	}
+
+	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
+
+	// Extract usage from the pre-encryption body (only for successful responses).
+	if dsResp.StatusCode < 400 {
+		stats, err := extractUsage(dsResp.Body)
+		if err != nil {
+			a.Log.Warn("Failed to extract usage from response", "error", err)
+		} else {
+			a.Log.Info("Extracted usage stats from response", "usage", stats, "response_type", "unary")
+		}
+	}
+
+	body, err := encryptMutator.Mutate(dsResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("encrypting response: %w", err)
+	}
+	dsResp.Body = body
+
+	return dsResp, nil
+}
+
+func (a *Adapter) streamingResponse(
+	usResp *http.Response,
+	encryptMutator *forwarder.MutatingReader,
+	extractUsage UsageExtractor,
+) *forwarder.StreamingResponse {
+	dsResp := forwarder.NewStreamingResponse(usResp)
+	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
+
+	body, clone := cloneReader(dsResp.Body)
+	sseReader := sse.NewReader(clone, maxSSELineBytes)
+	usageReader := NewUsageSSEReader(sseReader, extractUsage, a.Log)
+
+	go func() {
+		// Termination behaviour: clone, the io.Reader underneath usageReader, eventually returns
+		// an error on Read(). Either the body stream ends regularly (io.EOF), there is an error
+		// on the body stream (error is passed through to clone), or body is closed explicitly
+		// (io.ErrUnexpectedEOF) which always happens because of the [forwarder.StreamingResponse]
+		// contract.
+		// On error, this goroutine ends, though it is not awaited.
+
+		streamCompleted := false
+		for {
+			_, err := usageReader.Next()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					streamCompleted = true
+				} else if !errors.Is(err, context.Canceled) && !errors.Is(err, io.ErrUnexpectedEOF) {
+					// The above are expected errors when a request is cancelled -> no need to Warn
+					a.Log.Warn("SSE usage extraction error", "error", err)
+				}
+				break
+			}
+		}
+		a.Log.Info(
+			"Extracted usage stats from response", "usage", usageReader.LatestUsage(),
+			"response_type", "streaming", "stream_completed", streamCompleted,
+		)
+		// Drain remaining clone data to prevent blocking the main flow.
+		_, _ = io.Copy(io.Discard, clone)
+	}()
+
+	encryptedBody := encryptMutator.Reader(body)
+
+	dsResp.Body = encryptedBody
+
+	return dsResp
+}
+
+// cloneReader returns two readers over the same byte stream.
+//
+// The returned original must be read to drive the underlying reader r.
+// The clone receives the same bytes and errors via an [io.Pipe] as they are read from original.
+// The clone blocks the original and hence must be fully read in a separate goroutine. Always
+// Close() the original to ensure that clone.Read() eventually returns an error and does not block.
+func cloneReader(r io.Reader) (original io.ReadCloser, clone io.Reader) {
+	pr, pw := io.Pipe()
+	return &cloningReader{r: r, pw: pw}, pr
+}
+
+type cloningReader struct {
+	r  io.Reader
+	pw *io.PipeWriter
+}
+
+func (c *cloningReader) Read(p []byte) (int, error) {
+	// Similar to io.TeeReader, but also forwards errors.
+	n, err := c.r.Read(p)
+	if n > 0 {
+		_, _ = c.pw.Write(p[:n])
+	}
+	if err != nil {
+		c.pw.CloseWithError(err)
+	}
+	return n, err
+}
+
+func (c *cloningReader) Close() error {
+	c.pw.CloseWithError(io.ErrUnexpectedEOF)
+	return nil
 }

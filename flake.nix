@@ -43,6 +43,32 @@
             (_final: _prev: { linuxPkgs = self.legacyPackages.x86_64-linux; })
             # Custom Nix library functions and utilities.
             (_final: prev: { lib = prev.lib // (import ./nix/lib { inherit (prev) lib callPackage; }); })
+
+            # Fix segfault in devshell on M5 Macs caused by:
+            # https://github.com/grafana/alloy/issues/6033
+            (_final: prev: {
+              grafana-alloy = prev.grafana-alloy.overrideAttrs (
+                oldAttrs:
+                let
+                  m1cpuPatch = prev.fetchpatch {
+                    url = "https://github.com/xingzihai/alloy/commit/7fa0cbce40c5d09cec5f6b45a10de823ec0c9732.patch";
+                    hash = "sha256-uyGhNiIE09tkMekJ+Wm+CBfT0q2RmEPRAwOk/BaZQSk=";
+                  };
+                in
+                {
+                  patches = (oldAttrs.patches or [ ]) ++ [ m1cpuPatch ];
+                  # grafana-alloy defines a custom patchPhase in nixpkgs, which prevents
+                  # stdenv's default patchPhase from applying `patches` in the final
+                  # package derivation. Apply the patch explicitly there as well. The
+                  # goModules fixed-output derivation still consumes `patches` above.
+                  patchPhase = ''
+                    patch -p1 < ${m1cpuPatch}
+                  ''
+                  + (oldAttrs.patchPhase or "");
+                  vendorHash = "sha256-pWaAg3m/M1iskZxVnDshkrelIqghw6fK9qNx2Nqly/I=";
+                }
+              );
+            })
           ];
         };
 

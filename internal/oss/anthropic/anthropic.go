@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/usage"
 	"github.com/tidwall/gjson"
 )
 
@@ -97,6 +98,15 @@ type Usage struct {
 	OutputTokens             int `json:"output_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitzero"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitzero"`
+}
+
+// ToUsageStats converts an Anthropic [Usage] to a [usage.Stats].
+func (u Usage) ToUsageStats() usage.Stats {
+	return usage.Stats{
+		PromptTokens:       int64(u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens),
+		CachedPromptTokens: int64(u.CacheCreationInputTokens),
+		CompletionTokens:   int64(u.OutputTokens),
+	}
 }
 
 // MediaContentValidator creates a [forwarder.RequestMutator] that enforces policy on media content

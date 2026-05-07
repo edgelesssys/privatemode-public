@@ -23,6 +23,7 @@ import (
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/persist"
+	"github.com/edgelesssys/continuum/internal/oss/requestid"
 )
 
 const (
@@ -192,14 +193,14 @@ func (f *Forwarder) Forward(
 			shardKey = shardKey[:constants.CacheSaltHashLength] + "..."
 		}
 		f.log.Info("Forwarding finished successfully",
-			"requestID", req.Header.Get(constants.RequestIDHeader),
+			"requestID", requestID(req),
 			"responseStatus", statusCode,
 			"shardKey", shardKey,
 		)
 	} else {
 		// No shard key present
 		f.log.Info("Forwarding finished successfully",
-			"requestID", req.Header.Get(constants.RequestIDHeader),
+			"requestID", requestID(req),
 			"responseStatus", statusCode,
 		)
 	}
@@ -258,7 +259,7 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 		return false, nil, fmt.Errorf("mutating request: %w", err)
 	}
 
-	requestID := req.Header.Get(constants.RequestIDHeader)
+	requestID := requestID(req)
 
 	resp, err := f.client.Do(req)
 	if err != nil {
@@ -399,7 +400,7 @@ func (f *Forwarder) logMsg(logFn func(msg string, args ...any), msg string, err 
 		"remoteAddress", req.RemoteAddr,
 		"method", req.Method,
 		"path", req.URL.RequestURI(), // full url not available here, so we use RequestURI
-		"requestID", req.Header.Get(constants.RequestIDHeader),
+		"requestID", requestID(req),
 		"userAgent", req.UserAgent(),
 		"clientVersion", req.Header.Get(constants.PrivatemodeVersionHeader),
 		"clientOS", req.Header.Get(constants.PrivatemodeOSHeader),
@@ -667,4 +668,11 @@ func writeHeaderTo(dst, src http.Header) {
 		// after are trailers on distinct keys.
 		dst[k] = vs
 	}
+}
+
+func requestID(r *http.Request) string {
+	if id := requestid.FromHeader(r); id != requestid.Unknown {
+		return id
+	}
+	return requestid.FromUserHeader(r)
 }

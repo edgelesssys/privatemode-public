@@ -4,7 +4,10 @@
   import Tooltip from './Tooltip.svelte';
   import type { Model } from '$lib/clientStore';
   import { modelConfig, DEFAULT_MODEL_ID } from '$lib/models';
-  import { models as modelsStore, modelsLoaded } from '$lib/clientStore';
+  import {
+    loadModels as loadModelsFromClient,
+    models as modelsStore,
+  } from '$lib/clientStore';
   import type { PrivatemodeAI } from 'privatemode-ai';
 
   export let privatemodeAIClient: PrivatemodeAI | null = null;
@@ -15,10 +18,10 @@
 
   const SELECTED_MODEL_KEY = 'privatemode_selected_model';
 
-  let models: Model[] = [];
   let isOpen = false;
   let loading = false;
   let error: string | null = null;
+  let loadedClient: PrivatemodeAI | null = null;
   let pickerElement: HTMLDivElement;
   let dropdownElement: HTMLDivElement;
 
@@ -45,7 +48,8 @@
     };
   });
 
-  $: if (privatemodeAIClient) {
+  $: if (privatemodeAIClient && privatemodeAIClient !== loadedClient) {
+    loadedClient = privatemodeAIClient;
     loadModels();
   }
 
@@ -60,15 +64,10 @@
     try {
       loading = true;
       error = null;
-      const resp = (await privatemodeAIClient.listModels()) as {
-        data: Model[];
-      };
-      models = resp.data;
-      modelsStore.set(models);
-      modelsLoaded.set(true);
+      const loadedModels = await loadModelsFromClient(privatemodeAIClient);
 
       const filteredModels = Object.keys(modelConfig)
-        .map((id) => models.find((m) => m.id === id))
+        .map((id) => loadedModels.find((m) => m.id === id))
         .filter((m): m is Model => m !== undefined);
 
       if (!selectedModel && filteredModels.length > 0) {
@@ -82,7 +81,6 @@
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load models';
       console.error('Error loading models:', e);
-      modelsLoaded.set(false);
     } finally {
       loading = false;
     }
@@ -118,7 +116,7 @@
   }
 
   $: filteredModels = Object.keys(modelConfig)
-    .map((id) => models.find((m) => m.id === id))
+    .map((id) => $modelsStore.find((m) => m.id === id))
     .filter((m): m is Model => m !== undefined);
 </script>
 

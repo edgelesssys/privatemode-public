@@ -37,6 +37,9 @@ Optionally, these environment variables can be specified:
   the tests with.
 - `BASE_URL`: Run the tests against an already-deployed version of the
   web app. (e.g. `BASE_URL=https://chat.privatemode.ai`)
+- `IGNORE_HTTPS_ERRORS=1`: Ignore HTTPS certificate errors in Playwright.
+  Useful when testing against custom deployments with non-publicly-trusted
+  certificates.
 - `VITE_PRIVATEMODE_URL`: Point the web app at a custom Privatemode API
   deployment instead of `https://api.privatemode.ai`. Use the full base
   URL, for example `https://<namespace>.api.privatemode.ai`, without a

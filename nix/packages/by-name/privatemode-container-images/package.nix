@@ -54,7 +54,6 @@ let
     images
     ++ [
       privatemode-proxy-amd64
-      linuxPkgs.contrast.image
     ]
   );
 

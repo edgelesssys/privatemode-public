@@ -6,12 +6,14 @@ Package openai implements an inference API adapter for the [OpenAI API spec].
 package openai
 
 import (
+	"encoding/json"
 	"log/slog"
 	"net/http"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/edgelesssys/continuum/internal/oss/usage"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -101,16 +103,18 @@ func (a *Adapter) forwardSpecificModelRequest(w http.ResponseWriter, r *http.Req
 
 func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Request) {
 	session := a.Cipher.NewResponseCipher()
+	encryptMutator := forwarder.NewJSONMutatingReader(session.EncryptResponse(r.Context()), openai.PlainEmbeddingsResponseFields)
 
 	a.Forwarder.Forward(
 		w, r,
 		forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainEmbeddingsRequestFields, a.Log),
-		forwarder.JSONResponseMapper(session.EncryptResponse(r.Context()), openai.PlainEmbeddingsResponseFields),
+		a.ResponseMapper(encryptMutator, extractOpenAIUsage, extractOpenAIUsage),
 	)
 }
 
 func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Request) {
 	session := a.Cipher.NewResponseCipher()
+	encryptMutator := forwarder.NewJSONMutatingReader(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields)
 
 	a.Forwarder.Forward(
 		w, r,
@@ -118,17 +122,20 @@ func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Re
 			forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), openai.PlainTranscriptionRequestFields, a.Log),
 			a.mutators.AudioStreamUsageReportingInjector,
 		),
-		forwarder.JSONResponseMapper(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields),
+		a.ResponseMapper(encryptMutator, extractTranscriptionUsage, extractOpenAIUsage),
 	)
 }
 
-// forwardChatCompletionsRequest returns a handler to forward chat completions with field mutation using the given selectors.
+// forwardChatCompletionsRequest forwards chat completions with field mutation using the given selectors.
 func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.Request) {
 	session := a.Cipher.NewResponseCipher()
 
-	// duplicate reasoning field during deprecation
-	// TODO: remove after May 1st
-	responseMutation := forwarder.MutationFuncChain(duplicateReasoningFieldInJSON, session.EncryptResponse(r.Context()))
+	encryptMutator := forwarder.NewJSONMutatingReader(
+		// duplicate reasoning field during deprecation
+		// TODO: remove after May 1st
+		forwarder.MutationFuncChain(duplicateReasoningFieldInJSON, session.EncryptResponse(r.Context())),
+		openai.PlainCompletionsResponseFields,
+	)
 
 	a.Forwarder.Forward(
 		w, r,
@@ -138,7 +145,7 @@ func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 			a.mutators.MediaContentValidator,
 			a.mutators.StreamUsageReportingInjector,
 		),
-		forwarder.JSONResponseMapper(responseMutation, openai.PlainCompletionsResponseFields),
+		a.ResponseMapper(encryptMutator, extractOpenAIUsage, extractOpenAIUsage),
 	)
 }
 
@@ -174,4 +181,30 @@ func duplicateReasoningFieldInJSON(in string) (string, error) {
 	}
 
 	return string(data), nil
+}
+
+func extractOpenAIUsage(body []byte) (usage.Stats, error) {
+	var parsed struct {
+		Usage *openai.Usage `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return usage.Stats{}, err
+	}
+	if parsed.Usage == nil {
+		return usage.Stats{}, inference.ErrNoUsage
+	}
+	return parsed.Usage.ToUsageStats(), nil
+}
+
+func extractTranscriptionUsage(body []byte) (usage.Stats, error) {
+	var parsed struct {
+		Usage *openai.AudioUsage `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return usage.Stats{}, err
+	}
+	if parsed.Usage == nil {
+		return usage.Stats{}, inference.ErrNoUsage
+	}
+	return parsed.Usage.ToUsageStats(), nil
 }

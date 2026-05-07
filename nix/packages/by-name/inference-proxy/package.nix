@@ -13,7 +13,8 @@ let
       "go.mod"
       "go.sum"
       "inference-proxy"
-      "internal/compat"
+      "internal/mtls"
+      "internal/oss/compat"
       "internal/oss"
     ];
 

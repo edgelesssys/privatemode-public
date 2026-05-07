@@ -41,11 +41,7 @@ func JSONResponseMapper(mutate MutationFunc, skipFields FieldSelector) ResponseM
 
 		if isEventStream(resp) {
 			r := NewStreamingResponseWithHeaders(resp)
-			mr := &mutatingReader{
-				mutate:        mutate,
-				dataParseFunc: MutateJSONFields,
-				fields:        skipFields,
-			}
+			mr := NewJSONMutatingReader(mutate, skipFields)
 			r.Body = mr.Reader(r.Body)
 			return r, nil
 		}
@@ -77,13 +73,7 @@ func RawResponseMapper(mutate MutationFunc) ResponseMapper {
 
 		if isEventStream(resp) {
 			r := NewStreamingResponseWithHeaders(resp)
-			mr := &mutatingReader{
-				mutate: mutate,
-				dataParseFunc: func(data []byte, mutate MutationFunc, _ FieldSelector) ([]byte, error) {
-					mutated, err := mutate(string(data))
-					return []byte(mutated), err
-				},
-			}
+			mr := NewRawMutatingReader(mutate)
 			r.Body = mr.Reader(r.Body)
 			return r, nil
 		}

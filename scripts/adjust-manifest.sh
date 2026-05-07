@@ -9,6 +9,7 @@ manifest=$1
 ### SNP
 
 # remove bloat introduced in Contrast 1.19
+# TODO: Decide which entries to keep for multi CPU support
 yq eval -i '.ReferenceValues.snp |= map(select(.CPUs == 1))' "$manifest"
 
 # set TCB versions and mitigation vector
@@ -16,7 +17,7 @@ yq eval -i '.ReferenceValues.snp[].MinimumTCB.BootloaderVersion=10' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.TEEVersion=0' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.SNPVersion=28' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.MicrocodeVersion=88' "$manifest"
-yq eval -i '.ReferenceValues.snp[].MinimumMitigationVector=11' "$manifest"
+yq eval -i '.ReferenceValues.snp[].MinimumMitigationVector=15' "$manifest"
 
 # configure GuestPolicy and PlatformInfo
 yq eval -i '.ReferenceValues.snp[].GuestPolicy={ "SMT":true, "MigrateMA":false, "Debug":false, "CXLAllowed":false, "PageSwapDisable":true }' "$manifest"
@@ -56,4 +57,4 @@ yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("workload-")).SAN
 yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("unstructured")).SANs) |= ["continuum-etcd-client"] + .' "$manifest"
 
 # remove workload owner key because we don't use the functionality and it makes the trust story clearer
-yq eval -i 'del(.WorkloadOwnerKeyDigests)' "$manifest"
+yq eval -i 'del(.WorkloadOwnerPubKeys)' "$manifest"

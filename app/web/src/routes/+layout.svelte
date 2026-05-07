@@ -102,6 +102,16 @@
     class="content"
     class:collapsed-sidebar={sidebarCollapsed}
   >
+    {#if !$isLimitedMode}
+      <button
+        class="mobile-menu-btn"
+        type="button"
+        aria-label="Open sidebar"
+        onclick={() => (sidebarOpen = true)}
+      >
+        <Menu size={24} />
+      </button>
+    {/if}
     {#if $isLimitedMode}
       <div class="limited-banner">
         <button
@@ -133,18 +143,6 @@
             for full access.
           </span>
         {/if}
-      </div>
-    {:else}
-      <div class="preview-banner">
-        <button
-          class="hamburger-btn"
-          type="button"
-          aria-label="Open sidebar"
-          onclick={() => (sidebarOpen = true)}
-        >
-          <Menu size={24} />
-        </button>
-        🚧 Preview — This is an early version of the Privatemode web app.
       </div>
     {/if}
     <div class="page">
@@ -188,20 +186,6 @@
 
   .content.collapsed-sidebar {
     margin-left: 60px;
-  }
-
-  .preview-banner {
-    flex-shrink: 0;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: var(--color-banner-bg);
-    color: var(--color-banner-text);
-    text-align: center;
-    padding: 8px 16px;
-    font-size: 0.875rem;
-    font-weight: 500;
   }
 
   .page {
@@ -259,6 +243,24 @@
     color: var(--color-text-inverse);
   }
 
+  .mobile-menu-btn {
+    display: none;
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    width: 40px;
+    height: 40px;
+    align-items: center;
+    justify-content: center;
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    color: var(--color-text-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow-sm);
+  }
+
   .sidebar-overlay {
     display: none;
   }
@@ -273,10 +275,13 @@
       display: flex;
     }
 
-    .preview-banner,
     .limited-banner {
       padding-left: 48px;
       padding-right: 48px;
+    }
+
+    .mobile-menu-btn {
+      display: flex;
     }
 
     .sidebar-overlay {

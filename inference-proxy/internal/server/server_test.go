@@ -134,7 +134,7 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 	adapters, err := adapter.New([]string{apiType}, []string{"generate"}, c, ocspFile, fw, log)
 	require.NoError(err)
 
-	server := New(adapters, log)
+	server := New(adapters, nil, log)
 
 	return []byte(payload), server
 }

@@ -26,8 +26,8 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/persist"
 	"github.com/edgelesssys/continuum/internal/oss/process"
+	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
-	"github.com/google/uuid"
 )
 
 // Server implements the HTTP server for the API gateway.
@@ -290,7 +290,7 @@ func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) noEncryptionHandler(w http.ResponseWriter, r *http.Request) {
 	s.setStaticRequestHeaders(r)
-	r.Header.Set(constants.RequestIDHeader, newRequestID())
+	r.Header.Set(requestid.UserHeader, newRequestID())
 
 	s.forwarder.Forward(
 		w, r,
@@ -347,7 +347,7 @@ func (s *Server) setDynamicHeaders(r *http.Request, secret secretmanager.Secret,
 	r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyHeader, ocspPolicyHeader)
 	r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyMACHeader, ocspMACHeader)
 	r.Header.Set(constants.PrivatemodeSecretIDHeader, secret.ID)
-	r.Header.Set(constants.RequestIDHeader, fmt.Sprintf("%s_%d", requestID, attempt))
+	r.Header.Set(requestid.UserHeader, fmt.Sprintf("%s_%d", requestID, attempt))
 	return nil
 }
 
@@ -397,7 +397,7 @@ func getOcspHeaders(allowedStatuses []ocspheader.AllowStatus, revocNbf time.Time
 }
 
 func newRequestID() string {
-	return "proxy_" + uuid.New().String()
+	return "proxy_" + requestid.New()
 }
 
 // unmarshalJSONBody uses [persist.ReadBodyUnlimited] to read r's body and then unmarshals it.

@@ -1,3 +1,6 @@
+// Copyright (c) Edgeless Systems GmbH
+// SPDX-License-Identifier: MIT
+
 package compat
 
 import (

@@ -13,6 +13,7 @@ export default defineConfig({
   timeout: 60000,
   use: {
     baseURL,
+    ignoreHTTPSErrors: !!process.env.IGNORE_HTTPS_ERRORS,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

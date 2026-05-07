@@ -28,6 +28,7 @@
 
     function showTooltip() {
       if (tooltipElement) return;
+      if (!params.text) return;
 
       tooltipElement = document.createElement('div');
       tooltipElement.className = 'custom-tooltip';
@@ -35,7 +36,11 @@
       tooltipElement.style.whiteSpace = 'pre-line';
 
       document.body.appendChild(tooltipElement);
+      positionTooltip();
+    }
 
+    function positionTooltip() {
+      if (!tooltipElement) return;
       const rect = node.getBoundingClientRect();
       const tooltipRect = tooltipElement.getBoundingClientRect();
       const margin = 8;
@@ -67,6 +72,13 @@
     node.addEventListener('mouseleave', handleMouseLeave);
 
     return {
+      update(newParams: { text: string; delay: number }) {
+        params = newParams;
+        if (tooltipElement) {
+          tooltipElement.textContent = params.text;
+          positionTooltip();
+        }
+      },
       destroy() {
         if (timeoutId) {
           clearTimeout(timeoutId);

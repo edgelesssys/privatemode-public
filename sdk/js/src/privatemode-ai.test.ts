@@ -509,6 +509,48 @@ describe('PrivatemodeAI', () => {
       },
     );
 
+    it.skipIf(!isNode)(
+      'retries transcribeAudio after refreshing expired secret',
+      async () => {
+        const client = new PrivatemodeAI({
+          apiKey: 'test-key',
+        });
+
+        const wasmMocks = mockWasmFunctions();
+
+        let callCount = 0;
+        const mockTranscribeAudio = vi
+          .spyOn(wasm, 'transcribeAudio')
+          .mockImplementation(async () => {
+            callCount++;
+            if (callCount === 1) {
+              throw new Error(wasm.errNoSecretForID() + ' xyz');
+            }
+            return JSON.stringify({ text: 'Success' });
+          });
+
+        try {
+          await client.verify();
+
+          const response = await client.transcribeAudio(
+            {
+              name: 'test.wav',
+              content: new Uint8Array([1, 2, 3]),
+              contentType: 'audio/wav',
+            },
+            { model: 'voxtral-mini-3b' },
+          );
+
+          expect(callCount).toBe(2);
+          expect(wasmMocks.mockUpdateSecret).toHaveBeenCalledTimes(1);
+          expect(response).toEqual({ text: 'Success' });
+        } finally {
+          mockTranscribeAudio.mockRestore();
+          wasmMocks.restoreAll();
+        }
+      },
+    );
+
     it.skipIf(!isNode)('does not retry on non-secret errors', async () => {
       const client = new PrivatemodeAI({
         apiKey: 'test-key',

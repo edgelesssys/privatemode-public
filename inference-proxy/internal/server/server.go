@@ -3,7 +3,6 @@ package server
 
 import (
 	"context"
-	"crypto/tls"
 	"log"
 	"log/slog"
 	"net"
@@ -11,31 +10,28 @@ import (
 	"strings"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
+	"github.com/edgelesssys/continuum/internal/mtls"
 	"github.com/edgelesssys/continuum/internal/oss/process"
 )
 
 // Server implements the user facing HTTP REST server.
 type Server struct {
-	adapters []adapter.InferenceAdapter
-
-	log *slog.Logger
+	adapters     []adapter.InferenceAdapter
+	mtlsIdentity mtls.Identity
+	log          *slog.Logger
 }
 
 // New creates a new Server.
-func New(adapters []adapter.InferenceAdapter, log *slog.Logger) *Server {
+func New(adapters []adapter.InferenceAdapter, mtlsIdentity mtls.Identity, log *slog.Logger) *Server {
 	return &Server{
-		adapters: adapters,
-		log:      log,
+		adapters:     adapters,
+		mtlsIdentity: mtlsIdentity,
+		log:          log,
 	}
 }
 
 // Serve starts the server.
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
-	certs, err := tls.LoadX509KeyPair("/etc/tls/tls.crt", "/etc/tls/tls.key")
-	if err != nil {
-		return err
-	}
-
 	// Build combined ServeMux from all adapters.
 	// Each adapter registers its routes with middleware already applied per-route.
 	mux := http.NewServeMux()
@@ -58,12 +54,10 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	}
 
 	server := &http.Server{
-		Addr:    listener.Addr().String(),
-		Handler: mux,
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{certs},
-		},
-		ErrorLog: newHTTPLogger(s.log), // Prometheus tries to scrape metrics from this TLS endpoint, causing errors we want to ignore
+		Addr:      listener.Addr().String(),
+		Handler:   mux,
+		TLSConfig: s.mtlsIdentity.ServerConfig(),
+		ErrorLog:  newHTTPLogger(s.log), // Prometheus tries to scrape metrics from this TLS endpoint, causing errors we want to ignore
 	}
 	return process.HTTPServeContext(ctx, server, listener, s.log)
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/etcd"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/server"
+	"github.com/edgelesssys/continuum/internal/mtls"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/logging"
@@ -52,11 +53,17 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.etcdMemberCert, "etcd-member-cert", filepath.Join(constants.EtcdBasePath(), "etcd.crt"), "path to the etcd member certificate")
 	cmd.Flags().StringVar(&cfg.etcdMemberKey, "etcd-member-key", filepath.Join(constants.EtcdBasePath(), "etcd.key"), "path to the etcd member key")
 	cmd.Flags().StringVar(&cfg.etcdCA, "etcd-ca", filepath.Join(constants.EtcdBasePath(), "ca.crt"), "path to the etcd CA certificate")
+	cmd.Flags().StringVar(&cfg.identityCertPath, "identity-cert-path", "", "path to the workload identity certificate")
+	cmd.Flags().StringVar(&cfg.identityKeyPath, "identity-key-path", "", "path to the workload identity key")
+	cmd.Flags().StringVar(&cfg.identityCAPath, "identity-ca-path", "", "path to the workload identity CA bundle (used to verify peer identity certs)")
 	cmd.Flags().StringVar(&cfg.workloadTasks, "workload-tasks", "", "comma separated list of tasks the workload supports")
 	cmd.Flags().StringVar(&cfg.ocspStatusFile, "ocsp-status-file", constants.OCSPStatusFile(), "path to read the OCSP status file from")
 	cmd.Flags().StringVar(&cfg.logLevel, logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
 
-	_ = cmd.MarkFlagRequired("workload-address")
+	must(cmd.MarkFlagRequired("workload-address"))
+	must(cmd.MarkFlagRequired("identity-cert-path"))
+	must(cmd.MarkFlagRequired("identity-key-path"))
+	must(cmd.MarkFlagRequired("identity-ca-path"))
 
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		log := logging.NewLogger(cfg.logLevel)
@@ -69,18 +76,21 @@ func newRootCmd() *cobra.Command {
 }
 
 type runConfig struct {
-	listenPort      string
-	metricsPort     string
-	workloadPort    string
-	adapterTypes    []string
-	workloadAddress string
-	ssAddress       string
-	etcdMemberCert  string
-	etcdMemberKey   string
-	etcdCA          string
-	workloadTasks   string
-	ocspStatusFile  string
-	logLevel        string
+	listenPort       string
+	metricsPort      string
+	workloadPort     string
+	adapterTypes     []string
+	workloadAddress  string
+	ssAddress        string
+	etcdMemberCert   string
+	etcdMemberKey    string
+	etcdCA           string
+	identityCertPath string
+	identityKeyPath  string
+	identityCAPath   string
+	workloadTasks    string
+	ocspStatusFile   string
+	logLevel         string
 }
 
 func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
@@ -126,7 +136,11 @@ func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("creating adapters: %w", err)
 	}
-	server := server.New(adapters, log)
+	mtlsIdentity, err := mtls.LoadIdentity(cfg.identityCertPath, cfg.identityKeyPath, cfg.identityCAPath)
+	if err != nil {
+		return fmt.Errorf("loading workload identity: %w", err)
+	}
+	server := server.New(adapters, mtlsIdentity, log)
 
 	wg, ctx := errgroup.WithContext(ctx)
 
@@ -189,4 +203,10 @@ type stubSecretGetter struct{}
 
 func (s stubSecretGetter) GetSecret(_ context.Context, _ string) ([]byte, error) {
 	return nil, errors.New("not found")
+}
+
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
 }

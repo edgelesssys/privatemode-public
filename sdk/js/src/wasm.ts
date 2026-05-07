@@ -137,6 +137,21 @@ export async function unstructured(
   return unstructuredWasm(files, optionsJSON);
 }
 
+export async function transcribeAudio(
+  file: { name: string; content: Uint8Array; contentType?: string },
+  optionsJSON: string,
+): Promise<string> {
+  ensureInitialized();
+
+  const transcribeAudioWasm = (globalThis as Record<string, unknown>)
+    .transcribeAudio as (
+    file: { name: string; content: Uint8Array; contentType?: string },
+    optionsJSON: string,
+  ) => Promise<string>;
+
+  return transcribeAudioWasm(file, optionsJSON);
+}
+
 export async function listModels(): Promise<string> {
   ensureInitialized();
 

@@ -1,10 +1,12 @@
-export const DEFAULT_MODEL_ID = 'openai/gpt-oss-120b';
+export const DEFAULT_MODEL_ID = 'kimi-k2.6';
 
 export interface ModelInfo {
   displayName: string;
   subtitle: string;
   systemPrompt: string;
   thinkingMode?: 'extended' | 'toggle';
+  thinkingToggleParam?: 'thinking' | 'enable_thinking';
+  thinkingToggleAlwaysSend?: boolean;
   supportsFileUploads: boolean;
   supportsVision: boolean;
   maxWords: number;
@@ -39,6 +41,9 @@ export const modelConfig: Record<string, ModelInfo> = {
     displayName: 'Gemma 4 31B',
     subtitle: 'Multi-modal model with image understanding',
     systemPrompt: getSystemPrompt('Gemma 4 31B'),
+    thinkingMode: 'toggle',
+    thinkingToggleParam: 'enable_thinking',
+    thinkingToggleAlwaysSend: true,
     supportsFileUploads: true,
     supportsVision: true,
     maxWords: 70000,
@@ -51,11 +56,12 @@ export const modelConfig: Record<string, ModelInfo> = {
     supportsVision: false,
     maxWords: 70000,
   },
-  'kimi-k2.5': {
-    displayName: 'Kimi K2.5',
+  'kimi-k2.6': {
+    displayName: 'Kimi K2.6',
     subtitle: 'Reasoning model with a large context window',
-    systemPrompt: getSystemPrompt('Kimi K2.5'),
+    systemPrompt: getSystemPrompt('Kimi K2.6'),
     thinkingMode: 'toggle',
+    thinkingToggleParam: 'thinking',
     supportsFileUploads: true,
     supportsVision: true,
     maxWords: 70000,

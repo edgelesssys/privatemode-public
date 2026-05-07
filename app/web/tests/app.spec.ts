@@ -280,9 +280,39 @@ test.describe('File upload', () => {
 
     const fileChip = page.locator('.file-chip').filter({ hasText: 'test.txt' });
     await expect(fileChip).toBeVisible();
+    await expect(page.locator('.send-button')).toBeEnabled({
+      timeout: 30000,
+    });
 
     const removeButton = fileChip.locator('button');
     await removeButton.click();
     await expect(fileChip).not.toBeVisible();
+  });
+
+  test('should allow sending an image without message text', async ({
+    page,
+  }) => {
+    await page.evaluate(() => {
+      localStorage.setItem('privatemode_selected_model', 'gemma-4-31b');
+    });
+    await page.reload();
+    await web.waitForAppReady(page);
+
+    const imageInput = page.locator('input[type="file"][accept*="image/png"]');
+
+    await imageInput.setInputFiles({
+      name: 'image.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax8L9sAAAAASUVORK5CYII=',
+        'base64',
+      ),
+    });
+
+    await expect(page.getByText('image.png')).toBeVisible({ timeout: 30000 });
+    await expect(page.getByPlaceholder('Type a message...')).toHaveValue('');
+    await expect(page.locator('.send-button')).toBeEnabled({
+      timeout: 30000,
+    });
   });
 });

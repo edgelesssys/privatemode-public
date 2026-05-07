@@ -8,6 +8,8 @@
     Brain,
     Square,
     ArrowUp,
+    Mic,
+    Copy,
   } from 'lucide-svelte';
   import ModelPicker from './ModelPicker.svelte';
   import Tooltip from './Tooltip.svelte';
@@ -15,9 +17,19 @@
   import type { AttachedFile, AttachedImage, Message } from '$lib/chatStore';
   import { countWords } from '$lib/chatStore';
   import { modelConfig } from '$lib/models';
-  import { models as modelsStore, modelsLoaded } from '$lib/clientStore';
+  import {
+    models as modelsStore,
+    modelsLoaded,
+    modelsLoading,
+  } from '$lib/clientStore';
+  import {
+    DEFAULT_TRANSCRIPTION_MODEL_ID,
+    getAvailableTranscriptionModels,
+    transcriptionModel,
+  } from '$lib/transcriptionStore';
   import { onMount } from 'svelte';
   import type { PrivatemodeAI } from 'privatemode-ai';
+  import { showToast } from '$lib/toastStore';
 
   export let privatemodeAIClient: PrivatemodeAI | null;
   export let currentChatId: string | null;
@@ -26,26 +38,33 @@
 
   const EXTENDED_THINKING_KEY = 'privatemode_extended_thinking';
   const THINKING_ENABLED_KEY = 'privatemode_thinking_enabled';
+  const THINKING_ENABLED_KEY_PREFIX = 'privatemode_thinking_enabled_';
 
   let message = '';
   let textarea: HTMLTextAreaElement;
   let selectedModel = '';
   let extendedThinking = false;
   let thinkingEnabled = true;
+  let thinkingEnabledByModel: Record<string, boolean> = {};
   let isGenerating = false;
   let abortController: AbortController | null = null;
   let fileInput: HTMLInputElement;
   let imageInput: HTMLInputElement;
-  let isUploading = false;
+  let audioInput: HTMLInputElement;
+  let isUploadingDocuments = false;
+  let isUploadingAudio = false;
   let attachedFiles: AttachedFile[] = [];
   let attachedImages: AttachedImage[] = [];
   let isDragging = false;
   let dragCounter = 0;
   let previewImage: AttachedImage | null = null;
+  let previewTranscription: AttachedFile | null = null;
   let loadingImageCount = 0;
   let isUnloading = false;
+  let mounted = false;
 
   onMount(() => {
+    mounted = true;
     const handleBeforeUnload = () => {
       isUnloading = true;
     };
@@ -99,6 +118,7 @@
     window.addEventListener('drop', handleWindowDrop);
 
     return () => {
+      mounted = false;
       window.removeEventListener('beforeunload', handleBeforeUnload);
       window.removeEventListener('dragenter', handleWindowDragEnter);
       window.removeEventListener('dragleave', handleWindowDragLeave);
@@ -147,6 +167,16 @@
   $: totalWordCount = wordCount + messageWordCount + attachedFilesWordCount;
   $: totalUsagePercentage = Math.min((totalWordCount / maxWords) * 100, 100);
   $: wouldExceedLimit = totalWordCount > maxWords;
+  $: hasMessageText = message.trim().length > 0;
+  $: hasAttachments = attachedFiles.length > 0 || attachedImages.length > 0;
+  $: canSend =
+    (hasMessageText || hasAttachments) &&
+    !!activeModel &&
+    !isGenerating &&
+    !wouldExceedLimit &&
+    !chatDisabled &&
+    !isUploading &&
+    !!privatemodeAIClient;
   $: supportsFileUploads = activeModel
     ? (modelConfig[activeModel]?.supportsFileUploads ?? false)
     : true;
@@ -159,19 +189,47 @@
     : undefined;
   $: supportsExtendedThinking = thinkingMode === 'extended';
   $: supportsThinkingToggle = thinkingMode === 'toggle';
+  $: if (
+    mounted &&
+    activeModel &&
+    supportsThinkingToggle &&
+    thinkingEnabledByModel[activeModel] === undefined
+  ) {
+    const savedModelThinkingEnabled = localStorage.getItem(
+      `${THINKING_ENABLED_KEY_PREFIX}${activeModel}`,
+    );
+    thinkingEnabledByModel = {
+      ...thinkingEnabledByModel,
+      [activeModel]:
+        savedModelThinkingEnabled === null
+          ? true
+          : savedModelThinkingEnabled === 'true',
+    };
+  }
+  $: activeThinkingEnabled = activeModel
+    ? (thinkingEnabledByModel[activeModel] ?? true)
+    : thinkingEnabled;
   $: thinkingButtonActive = supportsExtendedThinking
     ? extendedThinking
     : supportsThinkingToggle
-      ? thinkingEnabled
+      ? activeThinkingEnabled
       : false;
-  $: thinkingTooltip = supportsExtendedThinking
-    ? 'Extended thinking lets the model reason more deeply about complex tasks, improving response quality at the expense of longer generation time.'
-    : supportsThinkingToggle
-      ? thinkingEnabled
-        ? 'Thinking is enabled. Disable it to make Kimi answer directly without reasoning first.'
-        : 'Thinking is disabled. Enable it to let Kimi reason before answering.'
+  $: thinkingTooltip =
+    supportsExtendedThinking || supportsThinkingToggle
+      ? `${thinkingButtonActive ? 'Disable' : 'Enable'} (extended) thinking mode. This lets the model reason more deeply about the request before providing a response`
       : '';
-  $: attachButtonTitle = isUploading
+  $: isUploading = isUploadingDocuments || isUploadingAudio;
+  $: availableTranscriptionModels =
+    getAvailableTranscriptionModels($modelsStore);
+  $: selectedTranscriptionModel =
+    availableTranscriptionModels.find((m) => m.id === $transcriptionModel)
+      ?.id ??
+    availableTranscriptionModels.find(
+      (m) => m.id === DEFAULT_TRANSCRIPTION_MODEL_ID,
+    )?.id ??
+    availableTranscriptionModels[0]?.id ??
+    null;
+  $: attachButtonTitle = isUploadingDocuments
     ? 'Uploading documents...'
     : isGenerating
       ? 'Cannot attach documents while generating'
@@ -183,6 +241,17 @@
     : !supportsVision
       ? 'Selected model does not support images'
       : 'Attach images';
+  $: audioButtonTitle = isUploadingAudio
+    ? 'Uploading audio...'
+    : isGenerating
+      ? 'Cannot attach audio while generating'
+      : !supportsFileUploads
+        ? 'Selected model does not support audio uploads'
+        : !selectedTranscriptionModel
+          ? $modelsLoaded
+            ? 'No transcription model is available'
+            : 'Transcription models are still loading'
+          : 'Attach audio';
 
   function autoResize() {
     if (textarea) {
@@ -192,15 +261,7 @@
   }
 
   async function sendMessage() {
-    if (
-      !message.trim() ||
-      !activeModel ||
-      isGenerating ||
-      wouldExceedLimit ||
-      chatDisabled ||
-      !privatemodeAIClient
-    )
-      return;
+    if (!canSend || !activeModel || !privatemodeAIClient) return;
 
     let chatId = currentChatId;
     if (!chatId) {
@@ -260,9 +321,13 @@
       for (const msg of messagesToSend) {
         if (msg.attachedFiles && msg.attachedFiles.length > 0) {
           for (const file of msg.attachedFiles) {
+            const content =
+              file.kind === 'audio-transcription'
+                ? `The user attached an audio file named "${file.name}". The following is the speech-to-text transcription of that audio:\n\n${file.content}`
+                : `[File: ${file.name}]\n\n${file.content}`;
             apiMessages.push({
               role: msg.role,
-              content: `[File: ${file.name}]\n\n${file.content}`,
+              content,
             });
           }
         }
@@ -275,9 +340,11 @@
               image_url: { url: img.dataUrl },
             });
           }
-          parts.push({ type: 'text', text: msg.content });
+          if (msg.content.trim()) {
+            parts.push({ type: 'text', text: msg.content });
+          }
           apiMessages.push({ role: msg.role, content: parts });
-        } else {
+        } else if (msg.content.trim()) {
           apiMessages.push({ role: msg.role, content: msg.content });
         }
       }
@@ -289,9 +356,17 @@
       if (supportsExtendedThinking) {
         requestBody.reasoning_effort = extendedThinking ? 'high' : 'medium';
       }
-      if (supportsThinkingToggle && !thinkingEnabled) {
+      const activeModelConfig = activeModel
+        ? modelConfig[activeModel]
+        : undefined;
+      const thinkingToggleParam = activeModelConfig?.thinkingToggleParam;
+      const shouldSendThinkingToggle =
+        supportsThinkingToggle &&
+        thinkingToggleParam &&
+        (activeModelConfig?.thinkingToggleAlwaysSend || !activeThinkingEnabled);
+      if (shouldSendThinkingToggle) {
         requestBody.chat_template_kwargs = {
-          thinking: false,
+          [thinkingToggleParam]: activeThinkingEnabled,
         };
       }
 
@@ -394,39 +469,217 @@
     'image/webp',
     'image/avif',
   ];
+  const SUPPORTED_AUDIO_TYPES = [
+    'audio/aac',
+    'audio/flac',
+    'audio/m4a',
+    'audio/mp3',
+    'audio/mpeg',
+    'audio/mp4',
+    'audio/ogg',
+    'audio/wav',
+    'audio/webm',
+    'audio/x-m4a',
+  ];
+  const SUPPORTED_AUDIO_EXTENSIONS = [
+    '.aac',
+    '.flac',
+    '.m4a',
+    '.mp3',
+    '.mp4',
+    '.mpeg',
+    '.mpga',
+    '.oga',
+    '.ogg',
+    '.wav',
+    '.webm',
+  ];
+  const MAX_AUDIO_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 
   function isSupportedImage(type: string): boolean {
     return SUPPORTED_IMAGE_TYPES.includes(type);
   }
 
-  function handlePaste(event: ClipboardEvent) {
-    if (!supportsVision || isGenerating) return;
+  function isSupportedAudio(file: globalThis.File): boolean {
+    const normalizedName = file.name.toLowerCase();
+    return (
+      SUPPORTED_AUDIO_TYPES.includes(file.type) ||
+      SUPPORTED_AUDIO_EXTENSIONS.some((ext) => normalizedName.endsWith(ext))
+    );
+  }
+
+  async function attachDocumentFile(file: globalThis.File) {
+    const content = new Uint8Array(await file.arrayBuffer());
+    const elements = (await privatemodeAIClient!.unstructured(
+      [{ name: file.name, content, contentType: file.type }],
+      { strategy: 'fast' },
+    )) as Array<{ text: string }>;
+
+    const extractedText = elements.map((el) => el.text).join('\n\n');
+
+    attachedFiles = [
+      ...attachedFiles,
+      {
+        name: file.name,
+        content: extractedText,
+      },
+    ];
+  }
+
+  async function attachAudioFile(file: globalThis.File) {
+    if (file.size > MAX_AUDIO_FILE_SIZE_BYTES) {
+      throw new Error(`${file.name} exceeds the 50 MB audio upload limit`);
+    }
+
+    const model = selectedTranscriptionModel;
+    if (!model) {
+      throw new Error('No transcription model is available');
+    }
+
+    const content = new Uint8Array(await file.arrayBuffer());
+    const transcription = (await privatemodeAIClient!.transcribeAudio(
+      { name: file.name, content, contentType: file.type },
+      { model },
+    )) as { text?: string };
+
+    const text = transcription.text?.trim();
+    if (!text) {
+      throw new Error(`${file.name} did not produce a transcription`);
+    }
+
+    attachedFiles = [
+      ...attachedFiles,
+      {
+        name: file.name,
+        content: text,
+        kind: 'audio-transcription',
+      },
+    ];
+  }
+
+  function showErrorToast(message: string, error?: unknown) {
+    let text = message;
+    if (error instanceof Error && (error as any).status === 401) {
+      text +=
+        ' Your API key may be invalid or expired. <a href="/settings">Update your API key</a>.';
+    }
+    showToast(text, { type: 'error', dangerouslyRenderHTML: true });
+  }
+
+  function readImageFile(file: globalThis.File, fallbackName?: string) {
+    loadingImageCount++;
+    const reader = new FileReader();
+    reader.onload = () => {
+      attachedImages = [
+        ...attachedImages,
+        {
+          id: crypto.randomUUID(),
+          name: file.name || fallbackName || 'pasted-image.png',
+          dataUrl: reader.result as string,
+        },
+      ];
+      loadingImageCount--;
+    };
+    reader.onerror = () => {
+      loadingImageCount--;
+      console.error('Failed to read image:', file.name);
+      showErrorToast(`Failed to read image: ${file.name || 'pasted image'}.`);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function uploadAudioFiles(files: globalThis.File[]) {
+    if (files.length === 0) return;
+    if (!selectedTranscriptionModel) {
+      showErrorToast(
+        $modelsLoading
+          ? 'Transcription models are still loading. Please try again in a moment.'
+          : 'No transcription model is available.',
+      );
+      return;
+    }
+    isUploadingAudio = true;
+    try {
+      for (const f of files) {
+        await attachAudioFile(f);
+      }
+    } catch (error) {
+      console.error('Error uploading audio:', error);
+      showErrorToast(
+        `Failed to upload audio: ${error instanceof Error ? error.message : 'Unknown error'}.`,
+        error,
+      );
+    } finally {
+      isUploadingAudio = false;
+    }
+  }
+
+  async function uploadDocumentFiles(files: globalThis.File[]) {
+    if (files.length === 0) return;
+    isUploadingDocuments = true;
+    try {
+      for (const f of files) {
+        await attachDocumentFile(f);
+      }
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      showErrorToast(
+        `Failed to upload file: ${error instanceof Error ? error.message : 'Unknown error'}.`,
+        error,
+      );
+    } finally {
+      isUploadingDocuments = false;
+    }
+  }
+
+  function classifyFiles(files: Iterable<globalThis.File>): {
+    images: globalThis.File[];
+    audio: globalThis.File[];
+    documents: globalThis.File[];
+    unsupportedImages: globalThis.File[];
+  } {
+    const images: globalThis.File[] = [];
+    const audio: globalThis.File[] = [];
+    const documents: globalThis.File[] = [];
+    const unsupportedImages: globalThis.File[] = [];
+    for (const f of files) {
+      if (isSupportedImage(f.type)) {
+        if (supportsVision) images.push(f);
+        else unsupportedImages.push(f);
+      } else if (isSupportedAudio(f)) {
+        audio.push(f);
+      } else {
+        documents.push(f);
+      }
+    }
+    return { images, audio, documents, unsupportedImages };
+  }
+
+  async function handlePaste(event: ClipboardEvent) {
+    if (isGenerating || isUploading) return;
     const items = event.clipboardData?.items;
     if (!items) return;
+    const files: globalThis.File[] = [];
     for (const item of items) {
-      if (!isSupportedImage(item.type)) continue;
-      event.preventDefault();
+      if (item.kind !== 'file') continue;
       const file = item.getAsFile();
-      if (!file) continue;
-      loadingImageCount++;
-      const reader = new FileReader();
-      reader.onload = () => {
-        attachedImages = [
-          ...attachedImages,
-          {
-            id: crypto.randomUUID(),
-            name: file.name || 'pasted-image.png',
-            dataUrl: reader.result as string,
-          },
-        ];
-        loadingImageCount--;
-      };
-      reader.onerror = () => {
-        loadingImageCount--;
-        console.error('Failed to read pasted image');
-        alert('Failed to read pasted image.');
-      };
-      reader.readAsDataURL(file);
+      if (file) files.push(file);
+    }
+    if (files.length === 0) return;
+    event.preventDefault();
+
+    const { images, audio, documents, unsupportedImages } =
+      classifyFiles(files);
+
+    if (unsupportedImages.length > 0) {
+      showErrorToast(
+        'The selected model does not support image inputs. Please select a vision-enabled model to attach images.',
+      );
+    }
+    for (const f of images) readImageFile(f);
+    if (supportsFileUploads) {
+      await uploadAudioFiles(audio);
+      await uploadDocumentFiles(documents);
     }
   }
 
@@ -434,36 +687,20 @@
     const target = event.target as HTMLInputElement;
     const files = target.files;
     if (!files || files.length === 0) return;
-
-    isUploading = true;
     try {
-      for (const file of files) {
-        const content = new Uint8Array(await file.arrayBuffer());
-        const elements = (await privatemodeAIClient!.unstructured(
-          [{ name: file.name, content, contentType: file.type }],
-          { strategy: 'fast' },
-        )) as Array<{ text: string }>;
-
-        const extractedText = elements.map((el) => el.text).join('\n\n');
-
-        attachedFiles = [
-          ...attachedFiles,
-          {
-            name: file.name,
-            content: extractedText,
-          },
-        ];
-      }
-    } catch (error) {
-      console.error('Error uploading file:', error);
-      let errorMessage = `Failed to upload file: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      if (error instanceof Error && (error as any).status === 401) {
-        errorMessage +=
-          '\n\nYour API key may be invalid or expired. Please update your API key in settings.';
-      }
-      alert(errorMessage);
+      await uploadDocumentFiles(Array.from(files));
     } finally {
-      isUploading = false;
+      target.value = '';
+    }
+  }
+
+  async function handleAudioSelect(event: Event) {
+    const target = event.target as HTMLInputElement;
+    const files = target.files;
+    if (!files || files.length === 0) return;
+    try {
+      await uploadAudioFiles(Array.from(files));
+    } finally {
       target.value = '';
     }
   }
@@ -477,25 +714,7 @@
     const files = target.files;
     if (!files || files.length === 0) return;
     for (const file of files) {
-      loadingImageCount++;
-      const reader = new FileReader();
-      reader.onload = () => {
-        attachedImages = [
-          ...attachedImages,
-          {
-            id: crypto.randomUUID(),
-            name: file.name,
-            dataUrl: reader.result as string,
-          },
-        ];
-        loadingImageCount--;
-      };
-      reader.onerror = () => {
-        loadingImageCount--;
-        console.error('Failed to read image:', file.name);
-        alert(`Failed to read image: ${file.name}`);
-      };
-      reader.readAsDataURL(file);
+      readImageFile(file);
     }
     target.value = '';
   }
@@ -512,9 +731,25 @@
     }
 
     if (supportsThinkingToggle) {
-      thinkingEnabled = !thinkingEnabled;
-      localStorage.setItem(THINKING_ENABLED_KEY, String(thinkingEnabled));
+      const nextThinkingEnabled = !activeThinkingEnabled;
+      if (activeModel) {
+        thinkingEnabledByModel = {
+          ...thinkingEnabledByModel,
+          [activeModel]: nextThinkingEnabled,
+        };
+        localStorage.setItem(
+          `${THINKING_ENABLED_KEY_PREFIX}${activeModel}`,
+          String(nextThinkingEnabled),
+        );
+        return;
+      }
+      thinkingEnabled = nextThinkingEnabled;
+      localStorage.setItem(THINKING_ENABLED_KEY, String(nextThinkingEnabled));
     }
+  }
+
+  function copyText(text: string) {
+    navigator.clipboard.writeText(text).catch(() => {});
   }
 
   async function handleDrop(event: DragEvent) {
@@ -526,86 +761,30 @@
     const files = event.dataTransfer?.files;
     if (!files || files.length === 0) return;
 
-    const droppedImages: globalThis.File[] = [];
-    const droppedOther: globalThis.File[] = [];
-    const droppedUnsupportedImages: globalThis.File[] = [];
-    for (const f of files) {
-      if (isSupportedImage(f.type)) {
-        if (supportsVision) {
-          droppedImages.push(f);
-        } else {
-          droppedUnsupportedImages.push(f);
-        }
-      } else {
-        droppedOther.push(f);
-      }
-    }
+    const { images, audio, documents, unsupportedImages } =
+      classifyFiles(files);
 
-    if (droppedUnsupportedImages.length > 0) {
-      alert(
+    if (unsupportedImages.length > 0) {
+      showErrorToast(
         'The selected model does not support image inputs. Please select a vision-enabled model to attach images.',
       );
     }
 
-    for (const f of droppedImages) {
-      loadingImageCount++;
-      const reader = new FileReader();
-      reader.onload = () => {
-        attachedImages = [
-          ...attachedImages,
-          {
-            id: crypto.randomUUID(),
-            name: f.name,
-            dataUrl: reader.result as string,
-          },
-        ];
-        loadingImageCount--;
-      };
-      reader.onerror = () => {
-        loadingImageCount--;
-        console.error('Failed to read image:', f.name);
-        alert(`Failed to read image: ${f.name}`);
-      };
-      reader.readAsDataURL(f);
-    }
+    for (const f of images) readImageFile(f);
 
-    if (droppedOther.length > 0 && supportsFileUploads) {
-      isUploading = true;
-      try {
-        for (const f of droppedOther) {
-          const content = new Uint8Array(await f.arrayBuffer());
-          const elements = (await privatemodeAIClient!.unstructured(
-            [{ name: f.name, content, contentType: f.type }],
-            { strategy: 'fast' },
-          )) as Array<{ text: string }>;
-
-          const extractedText = elements.map((el) => el.text).join('\n\n');
-
-          attachedFiles = [
-            ...attachedFiles,
-            {
-              name: f.name,
-              content: extractedText,
-            },
-          ];
-        }
-      } catch (error) {
-        console.error('Error uploading file:', error);
-        let errorMessage = `Failed to upload file: ${error instanceof Error ? error.message : 'Unknown error'}`;
-        if (error instanceof Error && (error as any).status === 401) {
-          errorMessage +=
-            '\n\nYour API key may be invalid or expired. Please update your API key in settings.';
-        }
-        alert(errorMessage);
-      } finally {
-        isUploading = false;
-      }
+    if (supportsFileUploads) {
+      await uploadAudioFiles(audio);
+      await uploadDocumentFiles(documents);
     }
   }
 </script>
 
 <svelte:window
-  onkeydown={(e) => e.key === 'Escape' && previewImage && (previewImage = null)}
+  onkeydown={(e) => {
+    if (e.key !== 'Escape') return;
+    previewImage = null;
+    previewTranscription = null;
+  }}
 />
 
 {#if isDragging}
@@ -713,8 +892,19 @@
         {/each}
         {#each attachedFiles as file, index}
           <div class="file-chip">
-            <File size={16} />
-            <span class="file-name">{file.name}</span>
+            {#if file.kind === 'audio-transcription'}
+              <button
+                class="file-preview-button"
+                type="button"
+                onclick={() => (previewTranscription = file)}
+              >
+                <Mic size={16} />
+                <span class="file-name">{file.name}</span>
+              </button>
+            {:else}
+              <File size={16} />
+              <span class="file-name">{file.name}</span>
+            {/if}
             <Tooltip text="Remove file">
               <button
                 class="remove-file"
@@ -761,17 +951,45 @@
         onchange={handleImageSelect}
         style="display: none;"
       />
+      <input
+        type="file"
+        multiple
+        accept="audio/*"
+        bind:this={audioInput}
+        onchange={handleAudioSelect}
+        style="display: none;"
+      />
       <div class="left-buttons">
         <Tooltip text={attachButtonTitle}>
           <button
             class="attach-button"
             type="button"
-            disabled={isGenerating || isUploading || !supportsFileUploads}
+            disabled={isGenerating ||
+              isUploadingDocuments ||
+              !supportsFileUploads}
             onclick={() => fileInput?.click()}
           >
             <Paperclip size={18} />
             <span class="attach-label"
-              >{isUploading ? 'Uploading...' : 'Attach documents'}</span
+              >{isUploadingDocuments
+                ? 'Uploading...'
+                : 'Attach documents'}</span
+            >
+          </button>
+        </Tooltip>
+        <Tooltip text={audioButtonTitle}>
+          <button
+            class="attach-button"
+            type="button"
+            disabled={isGenerating ||
+              isUploadingAudio ||
+              !supportsFileUploads ||
+              !selectedTranscriptionModel}
+            onclick={() => audioInput?.click()}
+          >
+            <Mic size={18} />
+            <span class="attach-label"
+              >{isUploadingAudio ? 'Uploading...' : 'Attach audio'}</span
             >
           </button>
         </Tooltip>
@@ -851,10 +1069,7 @@
               class="send-button"
               type="button"
               onclick={sendMessage}
-              disabled={!message.trim() ||
-                !activeModel ||
-                wouldExceedLimit ||
-                isUploading}
+              disabled={!canSend}
             >
               <ArrowUp size={20} />
             </button>
@@ -891,6 +1106,43 @@
         alt={previewImage.name}
         class="image-preview-full"
       />
+    </div>
+  </div>
+{/if}
+
+{#if previewTranscription}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="image-preview-overlay"
+    onclick={() => (previewTranscription = null)}
+  >
+    <button
+      class="image-preview-close"
+      type="button"
+      onclick={() => (previewTranscription = null)}
+    >
+      <X size={24} />
+    </button>
+
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="transcription-preview-container"
+      onclick={(e) => e.stopPropagation()}
+    >
+      <div class="transcription-preview-header">
+        <h2>{previewTranscription.name}</h2>
+        <button
+          class="transcription-copy-button"
+          type="button"
+          onclick={() => copyText(previewTranscription!.content)}
+          aria-label="Copy transcription"
+        >
+          <Copy size={16} />
+        </button>
+      </div>
+      <p>{previewTranscription.content}</p>
     </div>
   </div>
 {/if}
@@ -1130,6 +1382,22 @@
     color: var(--color-text-primary);
   }
 
+  .file-preview-button {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .file-preview-button:hover {
+    color: var(--color-accent);
+  }
+
   .image-chip {
     display: flex;
     align-items: center;
@@ -1221,6 +1489,59 @@
     max-height: 90vh;
     object-fit: contain;
     border-radius: 0.5rem;
+  }
+
+  .transcription-preview-container {
+    width: min(720px, calc(100vw - 2rem));
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 1.25rem;
+    border-radius: 0.5rem;
+    background-color: var(--color-bg-surface);
+    color: var(--color-text-primary);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  }
+
+  .transcription-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .transcription-preview-header h2 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .transcription-copy-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    padding: 0.375rem;
+    border: none;
+    border-radius: 0.375rem;
+    background: none;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition:
+      background-color 0.2s,
+      color 0.2s;
+  }
+
+  .transcription-copy-button:hover {
+    background-color: var(--color-bg-hover);
+    color: var(--color-text-primary);
+  }
+
+  .transcription-preview-container p {
+    margin: 0;
+    white-space: pre-wrap;
+    line-height: 1.6;
+    color: var(--color-text-secondary);
   }
 
   .file-name {
