@@ -273,6 +273,24 @@ func TestUsageExtraction(t *testing.T) {
 			}(),
 			wantUsage: usage.Stats{PromptTokens: 10, CompletionTokens: 5},
 		},
+		"unary with cached tokens": {
+			contentType: "application/json",
+			serverResponse: func() string {
+				res, err := json.Marshal(anthropic.MessagesResponse{
+					ID:   "msg_123",
+					Type: "message",
+					Usage: anthropic.Usage{
+						InputTokens:              10,
+						OutputTokens:             3,
+						CacheReadInputTokens:     20,
+						CacheCreationInputTokens: 5,
+					},
+				})
+				require.NoError(t, err)
+				return string(res)
+			}(),
+			wantUsage: usage.Stats{PromptTokens: 15, CachedPromptTokens: 20, CompletionTokens: 3},
+		},
 		"streaming": {
 			contentType: "text/event-stream",
 			serverResponse: strings.Join([]string{
@@ -282,6 +300,16 @@ func TestUsageExtraction(t *testing.T) {
 				"event: message_stop\ndata: {}",
 			}, "\n\n") + "\n\n",
 			wantUsage: usage.Stats{PromptTokens: 50, CompletionTokens: 100},
+		},
+		"streaming with cached tokens": {
+			contentType: "text/event-stream",
+			serverResponse: strings.Join([]string{
+				"event: message_start\ndata: " + `{"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0,"cache_read_input_tokens":20,"cache_creation_input_tokens":5}}}`,
+				"event: content_block_delta\ndata: " + `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`,
+				"event: message_delta\ndata: " + `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":10,"output_tokens":3,"cache_read_input_tokens":20,"cache_creation_input_tokens":5}}`,
+				"event: message_stop\ndata: {}",
+			}, "\n\n") + "\n\n",
+			wantUsage: usage.Stats{PromptTokens: 15, CachedPromptTokens: 20, CompletionTokens: 3},
 		},
 	}
 

@@ -27,7 +27,8 @@ func New(tlsConfig *tls.Config) *Dialer {
 
 // NewConn creates a new grpc client connection to the given target using TLS.
 func (d *Dialer) NewConn(target string) (*grpc.ClientConn, error) {
-	return grpc.NewClient(target,
+	return grpc.NewClient(
+		target,
 		// Use custom aTLS credentials to secure this connection
 		grpc.WithTransportCredentials(credentials.NewTLS(d.tlsConfig)),
 		grpc.WithConnectParams(grpc.ConnectParams{

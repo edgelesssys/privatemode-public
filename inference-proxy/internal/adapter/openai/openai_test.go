@@ -547,6 +547,47 @@ func TestUsageExtraction(t *testing.T) {
 			}, "\n\n") + "\n\n",
 			wantUsage: usage.Stats{PromptTokens: 50, CompletionTokens: 100},
 		},
+		"unary with cached tokens": {
+			contentType: "application/json",
+			serverResponse: func() string {
+				res, err := json.Marshal(openai.EncryptedChatResponse{
+					Usage: openai.Usage{
+						PromptTokens:        50,
+						CompletionTokens:    100,
+						TotalTokens:         150,
+						PromptTokensDetails: &openai.PromptTokensDetails{CachedTokens: 20},
+					},
+				})
+				require.NoError(t, err)
+				return string(res)
+			}(),
+			wantUsage: usage.Stats{PromptTokens: 30, CachedPromptTokens: 20, CompletionTokens: 100},
+		},
+		"unary with cached tokens exceeding prompt tokens": {
+			contentType: "application/json",
+			serverResponse: func() string {
+				res, err := json.Marshal(openai.EncryptedChatResponse{
+					Usage: openai.Usage{
+						PromptTokens:        50,
+						CompletionTokens:    100,
+						TotalTokens:         150,
+						PromptTokensDetails: &openai.PromptTokensDetails{CachedTokens: 80},
+					},
+				})
+				require.NoError(t, err)
+				return string(res)
+			}(),
+			wantUsage: usage.Stats{PromptTokens: 0, CachedPromptTokens: 80, CompletionTokens: 100},
+		},
+		"streaming with cached tokens": {
+			contentType: "text/event-stream",
+			serverResponse: strings.Join([]string{
+				`data: {"choices":[{"delta":{"content":"Hello"}}]}`,
+				`data: {"choices":[],"usage":{"prompt_tokens":50,"completion_tokens":100,"total_tokens":150,"prompt_tokens_details":{"cached_tokens":20}}}`,
+				"data: [DONE]",
+			}, "\n\n") + "\n\n",
+			wantUsage: usage.Stats{PromptTokens: 30, CachedPromptTokens: 20, CompletionTokens: 100},
+		},
 	}
 
 	for name, tc := range testCases {

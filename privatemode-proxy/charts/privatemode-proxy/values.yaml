@@ -1,11 +1,18 @@
 replicaCount: 1
 image:
-  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.40.1-pre
+  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.41.1-pre
   pullPolicy: IfNotPresent
   restartPolicy: Always
 service:
   type: ClusterIP
   port: 8080
+probes:
+  startup:
+    failureThreshold: 60
+    periodSeconds: 2
+  readiness:
+    failureThreshold: 3
+    periodSeconds: 2
 resources: {}
 nodeSelector:
   kubernetes.io/arch: amd64

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import ChatInput from '$lib/components/ChatInput.svelte';
-  import ChatPanel from '$lib/components/ChatPanel.svelte';
+  import ChatInput from '$lib/components/chat/ChatInput.svelte';
+  import ChatPanel from '$lib/components/chat/ChatPanel.svelte';
   import { chatStore } from '$lib/chatStore';
   import type { Message } from '$lib/chatStore';
   import {

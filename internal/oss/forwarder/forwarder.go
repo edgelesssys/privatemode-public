@@ -192,14 +192,16 @@ func (f *Forwarder) Forward(
 		if len(shardKey) > constants.CacheSaltHashLength {
 			shardKey = shardKey[:constants.CacheSaltHashLength] + "..."
 		}
-		f.log.Info("Forwarding finished successfully",
+		f.log.Info(
+			"Forwarding finished successfully",
 			"requestID", requestID(req),
 			"responseStatus", statusCode,
 			"shardKey", shardKey,
 		)
 	} else {
 		// No shard key present
-		f.log.Info("Forwarding finished successfully",
+		f.log.Info(
+			"Forwarding finished successfully",
 			"requestID", requestID(req),
 			"responseStatus", statusCode,
 		)

@@ -23,6 +23,16 @@ spec:
             - name: http
               containerPort: {{ .Values.config.port }}
               protocol: TCP
+          startupProbe:
+            tcpSocket:
+              port: http
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+          readinessProbe:
+            tcpSocket:
+              port: http
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
           args:
             {{- if .Values.config.apiKey.enabled }}
             - "--apiKey=@/etc/apiKey/apiKey"

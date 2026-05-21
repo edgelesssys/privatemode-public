@@ -1,6 +1,6 @@
 <script lang="ts">
-  import Sidebar from '$lib/components/Sidebar.svelte';
-  import Toast from '$lib/components/Toast.svelte';
+  import Sidebar from '$lib/components/sidebar/Sidebar.svelte';
+  import Toast from '$lib/components/common/Toast.svelte';
   import { Menu } from 'lucide-svelte';
   import { chatStore } from '$lib/chatStore';
   import { initTheme } from '$lib/themeStore';

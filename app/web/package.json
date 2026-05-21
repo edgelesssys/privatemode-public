@@ -17,34 +17,34 @@
     "test:debug": "playwright test --debug"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.0",
-    "@eslint/compat": "2.0.5",
-    "@eslint/js": "9.39.4",
+    "@eslint/compat": "2.1.0",
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "^1.60.0",
     "@sveltejs/adapter-static": "3.0.10",
-    "@sveltejs/kit": "2.58.0",
-    "@sveltejs/vite-plugin-svelte": "7.0.0",
-    "@types/node": "24",
-    "eslint": "9.39.4",
+    "@sveltejs/kit": "2.60.1",
+    "@sveltejs/vite-plugin-svelte": "7.1.2",
+    "@types/node": "^24.12.4",
+    "eslint": "10.4.0",
     "eslint-plugin-svelte": "3.17.1",
-    "globals": "17.5.0",
+    "globals": "17.6.0",
     "lucide-svelte": "1.0.1",
-    "svelte": "5.55.5",
-    "svelte-check": "4.4.6",
+    "svelte": "5.55.7",
+    "svelte-check": "4.4.8",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.59.1",
-    "vite": "8.0.10"
+    "typescript-eslint": "8.59.3",
+    "vite": "8.0.13"
   },
   "overrides": {
     "cookie": "1.1.1",
     "vite": "$vite"
   },
   "dependencies": {
-    "@clerk/clerk-js": "^6.3.0",
-    "@clerk/ui": "^1.2.1",
+    "@clerk/clerk-js": "^6.11.1",
+    "@clerk/ui": "^1.11.0",
     "@fontsource-variable/inter": "5.2.8",
-    "dompurify": "^3.2.7",
+    "dompurify": "^3.4.3",
     "highlight.js": "11.11.1",
-    "marked": "^17.0.0",
+    "marked": "^17.0.6",
     "privatemode-ai": "link:../../sdk/js"
   }
 }

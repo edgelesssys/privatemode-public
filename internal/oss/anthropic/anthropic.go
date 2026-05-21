@@ -103,8 +103,8 @@ type Usage struct {
 // ToUsageStats converts an Anthropic [Usage] to a [usage.Stats].
 func (u Usage) ToUsageStats() usage.Stats {
 	return usage.Stats{
-		PromptTokens:       int64(u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens),
-		CachedPromptTokens: int64(u.CacheCreationInputTokens),
+		PromptTokens:       int64(u.InputTokens + u.CacheCreationInputTokens),
+		CachedPromptTokens: int64(u.CacheReadInputTokens),
 		CompletionTokens:   int64(u.OutputTokens),
 	}
 }

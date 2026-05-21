@@ -9,8 +9,7 @@ manifest=$1
 ### SNP
 
 # remove bloat introduced in Contrast 1.19
-# TODO: Decide which entries to keep for multi CPU support
-yq eval -i '.ReferenceValues.snp |= map(select(.CPUs == 1))' "$manifest"
+yq eval -i '.ReferenceValues.snp |= map(select(.CPUs == 1 or .CPUs == 4 or .CPUs == 8))' "$manifest"
 
 # set TCB versions and mitigation vector
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.BootloaderVersion=10' "$manifest"

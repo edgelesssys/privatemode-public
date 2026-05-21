@@ -59,17 +59,6 @@ func (s *Secrets) Delete(key string) {
 	delete(s.inferenceSecrets, key)
 }
 
-// Keys returns the keys of the secrets.
-func (s *Secrets) Keys() []string {
-	s.rwLock.RLock()
-	defer s.rwLock.RUnlock()
-	var keys []string
-	for key := range s.inferenceSecrets {
-		keys = append(keys, key)
-	}
-	return keys
-}
-
 type secretGetter interface {
 	GetSecret(ctx context.Context, key string) ([]byte, error)
 }

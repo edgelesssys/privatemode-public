@@ -18,6 +18,11 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+const (
+	// restartBackoff is the time to wait before restarting a watch after an error.
+	restartBackoff = time.Second * 5
+)
+
 // Etcd is a client to interact with etcd.
 type Etcd struct {
 	client etcdClient
@@ -90,18 +95,7 @@ func (e *Etcd) GetSecret(ctx context.Context, key string) ([]byte, error) {
 }
 
 func (e *Etcd) watchSecrets(ctx context.Context, secrets *secrets.Secrets, watchRevision int64) {
-	startWatch := func(ctx context.Context, revision int64) (clientv3.WatchChan, func()) {
-		e.log.Info("Starting watch", "revision", revision)
-		watchCtx, cancel := context.WithCancel(ctx)
-		return e.client.Watch(
-			clientv3.WithRequireLeader(watchCtx),
-			constants.EtcdInferenceSecretPrefix,
-			clientv3.WithPrefix(),
-			clientv3.WithRev(revision),
-			clientv3.WithProgressNotify(),
-		), cancel
-	}
-	watchChan, cancel := startWatch(ctx, watchRevision)
+	watchChan, cancel := e.startWatch(ctx, watchRevision, 0) // Start the first watcher immediately
 	defer cancel()
 
 	for {
@@ -111,13 +105,21 @@ func (e *Etcd) watchSecrets(ctx context.Context, secrets *secrets.Secrets, watch
 		case <-e.closeChan:
 			return
 
-		case event := <-watchChan:
+		case event, ok := <-watchChan:
+			if !ok {
+				e.log.Error("Watch channel closed")
+				e.log.Info("Restarting watch")
+
+				cancel()
+				watchChan, cancel = e.startWatch(ctx, watchRevision, restartBackoff)
+				continue
+			}
 			if event.Err() != nil {
 				e.log.Error("Error watching etcd", "error", event.Err())
 				e.log.Info("Restarting watch")
 
 				cancel()
-				watchChan, cancel = startWatch(ctx, watchRevision)
+				watchChan, cancel = e.startWatch(ctx, watchRevision, restartBackoff)
 				continue
 			}
 			if event.Canceled {
@@ -125,9 +127,13 @@ func (e *Etcd) watchSecrets(ctx context.Context, secrets *secrets.Secrets, watch
 				e.log.Info("Restarting watch")
 
 				cancel()
-				watchChan, cancel = startWatch(ctx, watchRevision)
+				watchChan, cancel = e.startWatch(ctx, watchRevision, restartBackoff)
 				continue
 			}
+
+			watchRevision = event.Header.Revision + 1
+			e.log.Info("Updating revision", "revision", watchRevision)
+
 			if event.IsProgressNotify() {
 				e.log.Info("Watch still alive")
 				continue
@@ -145,10 +151,6 @@ func (e *Etcd) watchSecrets(ctx context.Context, secrets *secrets.Secrets, watch
 					e.log.Info("Deleted secret", "key", string(ev.Kv.Key))
 				}
 			}
-
-			// Update target revision to the next revision after this one.
-			watchRevision = event.Header.Revision
-			e.log.Info("Updating revision", "revision", watchRevision, "keys", secrets.Keys())
 		}
 	}
 }
@@ -176,6 +178,24 @@ func (e *Etcd) fetchSecrets(ctx context.Context) (*secrets.Secrets, int64, error
 func (e *Etcd) close() {
 	e.closeChan <- struct{}{}
 	_ = e.client.Close()
+}
+
+func (e *Etcd) startWatch(ctx context.Context, revision int64, delay time.Duration) (clientv3.WatchChan, func()) {
+	select {
+	case <-ctx.Done():
+		return nil, func() {}
+	case <-time.After(delay):
+	}
+
+	e.log.Info("Starting watch", "revision", revision)
+	watchCtx, cancel := context.WithCancel(ctx)
+	return e.client.Watch(
+		clientv3.WithRequireLeader(watchCtx),
+		constants.EtcdInferenceSecretPrefix,
+		clientv3.WithPrefix(),
+		clientv3.WithRev(revision),
+		clientv3.WithProgressNotify(),
+	), cancel
 }
 
 // getEndpointsFromHosts adds etcd client ports to the given hosts.

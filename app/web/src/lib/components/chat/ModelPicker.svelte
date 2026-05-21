@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { ChevronUp, ChevronDown } from 'lucide-svelte';
-  import Tooltip from './Tooltip.svelte';
+  import Tooltip from '../common/Tooltip.svelte';
   import type { Model } from '$lib/clientStore';
   import { modelConfig, DEFAULT_MODEL_ID } from '$lib/models';
   import {

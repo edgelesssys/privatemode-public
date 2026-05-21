@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { saveImage, loadImage, deleteImages } from './imageStore';
+import type { PrivatemodeAI } from 'privatemode-ai';
 
 export interface AttachedFile {
   name: string;
@@ -47,6 +48,63 @@ export function countWords(text: string): number {
     .trim()
     .split(/\s+/)
     .filter((word) => word.length > 0).length;
+}
+
+export interface SendOptions {
+  client: PrivatemodeAI;
+  chatId: string;
+  modelId: string;
+  userMessage: string;
+  attachedFiles?: AttachedFile[];
+  attachedImages?: AttachedImage[];
+  systemPrompt?: string;
+  reasoningEffort?: 'medium' | 'high';
+  thinkingToggle?: { paramName: string; enabled: boolean };
+  signal: AbortSignal;
+}
+
+type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+interface ApiMessage {
+  role: string;
+  content: string | ContentPart[];
+}
+
+function buildApiMessages(
+  messages: Message[],
+  systemPrompt: string | undefined,
+): ApiMessage[] {
+  const result: ApiMessage[] = [];
+  if (systemPrompt) {
+    result.push({ role: 'system', content: systemPrompt });
+  }
+  for (const msg of messages) {
+    if (msg.attachedFiles && msg.attachedFiles.length > 0) {
+      for (const file of msg.attachedFiles) {
+        const content =
+          file.kind === 'audio-transcription'
+            ? `The user attached an audio file named "${file.name}". The following is the speech-to-text transcription of that audio:\n\n${file.content}`
+            : `[File: ${file.name}]\n\n${file.content}`;
+        result.push({ role: msg.role, content });
+      }
+    }
+    const hasImages = msg.attachedImages && msg.attachedImages.length > 0;
+    if (hasImages) {
+      const parts: ContentPart[] = [];
+      for (const img of msg.attachedImages!) {
+        parts.push({ type: 'image_url', image_url: { url: img.dataUrl } });
+      }
+      if (msg.content.trim()) {
+        parts.push({ type: 'text', text: msg.content });
+      }
+      result.push({ role: msg.role, content: parts });
+    } else if (msg.content.trim()) {
+      result.push({ role: msg.role, content: msg.content });
+    }
+  }
+  return result;
 }
 
 function createChatStore() {
@@ -447,6 +505,203 @@ function createChatStore() {
     getChat: (chatId: string): Chat | undefined => {
       const chats = get({ subscribe });
       return chats.find((chat) => chat.id === chatId);
+    },
+
+    send: async function (options: SendOptions): Promise<void> {
+      const {
+        client,
+        chatId,
+        modelId,
+        userMessage,
+        attachedFiles,
+        attachedImages,
+        systemPrompt,
+        reasoningEffort,
+        thinkingToggle,
+        signal,
+      } = options;
+
+      const now = Date.now();
+      const userMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: userMessage,
+        attachedFiles:
+          attachedFiles && attachedFiles.length > 0 ? attachedFiles : undefined,
+        attachedImages:
+          attachedImages && attachedImages.length > 0
+            ? attachedImages
+            : undefined,
+        timestamp: now,
+      };
+      const assistantMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: '',
+        timestamp: now + 1,
+      };
+
+      update((chats) => {
+        const updated = chats.map((chat) => {
+          if (chat.id !== chatId) return chat;
+          const updatedMessages = [...chat.messages, userMsg, assistantMsg];
+          const titleSeed =
+            chat.messages.length === 0
+              ? userMessage.trim().slice(0, 50) ||
+                attachedFiles?.[0]?.name ||
+                attachedImages?.[0]?.name ||
+                'New chat'
+              : chat.title;
+          return {
+            ...chat,
+            title: titleSeed,
+            modelId: chat.modelId ?? modelId,
+            messages: updatedMessages,
+            updatedAt: now,
+            lastUserMessageAt: now,
+            wordCount: calculateChatWordCount(updatedMessages),
+            isStreaming: true,
+          };
+        });
+        saveToStorage(updated);
+        return updated;
+      });
+
+      const assistantMessageId = assistantMsg.id;
+      const startedAt = Date.now();
+      let accumulatedContent = '';
+      let accumulatedReasoning = '';
+
+      const writeMessage = (
+        content: string,
+        reasoning: string,
+        thoughtDurationMs?: number,
+      ) => {
+        update((chats) => {
+          const updated = chats.map((chat) => {
+            if (chat.id !== chatId) return chat;
+            const updatedMessages = chat.messages.map((m) => {
+              if (m.id !== assistantMessageId) return m;
+              const next: Message = { ...m, content };
+              if (reasoning) next.reasoning = reasoning;
+              else delete next.reasoning;
+              if (thoughtDurationMs !== undefined) {
+                next.thoughtDurationMs = thoughtDurationMs;
+              }
+              return next;
+            });
+            return {
+              ...chat,
+              messages: updatedMessages,
+              updatedAt: Date.now(),
+              wordCount: calculateChatWordCount(updatedMessages),
+            };
+          });
+          saveToStorage(updated);
+          return updated;
+        });
+      };
+
+      try {
+        const chat = get({ subscribe }).find((c) => c.id === chatId);
+        if (!chat) throw new Error('Chat not found');
+        const messagesToSend = chat.messages.filter(
+          (m) => m.id !== assistantMessageId,
+        );
+
+        const requestBody: Record<string, unknown> = {
+          model: modelId,
+          messages: buildApiMessages(messagesToSend, systemPrompt),
+          stream: true,
+        };
+        if (reasoningEffort) {
+          requestBody.reasoning_effort = reasoningEffort;
+        }
+        if (thinkingToggle) {
+          requestBody.chat_template_kwargs = {
+            [thinkingToggle.paramName]: thinkingToggle.enabled,
+          };
+        }
+
+        const UPDATE_THROTTLE_MS = 100;
+        let lastUpdate = 0;
+
+        for await (const chunk of client.streamChatCompletions(requestBody, {
+          signal,
+        })) {
+          const parsed = chunk as {
+            choices: Array<{
+              delta: { content?: string; reasoning?: string };
+            }>;
+          };
+          const delta = parsed.choices[0]?.delta;
+          if (delta?.reasoning) accumulatedReasoning += delta.reasoning;
+          if (delta?.content) accumulatedContent += delta.content;
+          if (delta?.content || delta?.reasoning) {
+            const t = Date.now();
+            if (t - lastUpdate >= UPDATE_THROTTLE_MS) {
+              writeMessage(accumulatedContent, accumulatedReasoning);
+              lastUpdate = t;
+            }
+          }
+        }
+
+        const thoughtDurationMs =
+          accumulatedReasoning.trim().length > 0
+            ? Date.now() - startedAt
+            : undefined;
+        writeMessage(
+          accumulatedContent,
+          accumulatedReasoning,
+          thoughtDurationMs,
+        );
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
+        let errorMessage = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        if (
+          error &&
+          typeof error === 'object' &&
+          'status' in error &&
+          (error as { status: unknown }).status === 401
+        ) {
+          errorMessage +=
+            '\n\nYour API key may be invalid or expired. You can try to [update your API key](/settings).';
+        }
+        update((chats) => {
+          const updated = chats.map((chat) => {
+            if (chat.id !== chatId) return chat;
+            const updatedMessages = chat.messages.map((m) => {
+              if (m.id !== assistantMessageId) return m;
+              const next: Message = {
+                ...m,
+                content: errorMessage,
+                isError: true,
+              };
+              delete next.reasoning;
+              delete next.thoughtDurationMs;
+              return next;
+            });
+            return {
+              ...chat,
+              hasError: true,
+              messages: updatedMessages,
+              updatedAt: Date.now(),
+              wordCount: calculateChatWordCount(updatedMessages),
+            };
+          });
+          saveToStorage(updated);
+          return updated;
+        });
+        throw error;
+      } finally {
+        update((chats) =>
+          chats.map((c) =>
+            c.id === chatId ? { ...c, isStreaming: false } : c,
+          ),
+        );
+      }
     },
 
     clear: () => {

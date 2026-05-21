@@ -258,7 +258,8 @@ func (r *Report) ValidateMeasurements(vbiosRefs, driverRefs *rim.SoftwareIdentit
 		}
 		if !matched {
 			errs = append(errs,
-				fmt.Errorf("no matching measurement found in %s for index %d: %s",
+				fmt.Errorf(
+					"no matching measurement found in %s for index %d: %s",
 					goldenMeasurement, idx, hex.EncodeToString(reportedMeasurement.Measurement.Value),
 				))
 		}

@@ -390,7 +390,7 @@ func TestTools(t *testing.T) {
 
 				for i, call := range toolCalls {
 					// Compare ignoring field ordering
-					expected := (tc.expectedToolCalls)[i]
+					expected := tc.expectedToolCalls[i]
 					assert.JSONEq(expected, call.(string))
 				}
 			}

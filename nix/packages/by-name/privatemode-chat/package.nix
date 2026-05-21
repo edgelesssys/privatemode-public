@@ -2,7 +2,7 @@
   lib,
   stdenv,
   nodejs,
-  pnpm_10,
+  pnpm_11,
   pnpmConfigHook,
   fetchPnpmDeps,
   sdk,
@@ -21,13 +21,13 @@ stdenv.mkDerivation (finalAttrs: {
     inherit (finalAttrs) pname version src;
     fetcherVersion = 3;
     sourceRoot = "${finalAttrs.src.name}/app/web";
-    hash = "sha256-0tTqczTPbGSC4cxBWNwJlG/6xcpVr9NSmNlprzY8HFo=";
+    hash = "sha256-HOk5/cipiX75CdndoFEHRq/zpVUT+7rGCjpJsrUqdKI=";
   };
 
   nativeBuildInputs = [
     nodejs
     pnpmConfigHook
-    pnpm_10
+    pnpm_11
   ];
 
   buildPhase = ''
@@ -63,4 +63,6 @@ stdenv.mkDerivation (finalAttrs: {
 
     runHook postInstall
   '';
+
+  passthru.deps = finalAttrs.pnpmDeps;
 })

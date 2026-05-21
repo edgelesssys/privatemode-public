@@ -34,7 +34,8 @@ func BootstrapCluster(ctx context.Context, k8sNamespace, serverCrt, serverKey, c
 	cfg, err := newClusterConfig(
 		k8sNamespace,
 		hostname, // Not strictly necessary, but useful to correlate an etcd member to a specific node
-		serverCrt, serverKey, caCrt)
+		serverCrt, serverKey, caCrt,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("creating etcd bootstrap config: %w", err)
 	}

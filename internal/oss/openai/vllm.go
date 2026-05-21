@@ -269,6 +269,9 @@ func (u Usage) ToUsageStats() usage.Stats {
 	if u.PromptTokensDetails != nil {
 		cachedPromptTokens = int64(u.PromptTokensDetails.CachedTokens)
 		promptTokens -= cachedPromptTokens
+		if promptTokens < 0 {
+			promptTokens = 0
+		}
 	}
 	return usage.Stats{
 		PromptTokens:       promptTokens,
