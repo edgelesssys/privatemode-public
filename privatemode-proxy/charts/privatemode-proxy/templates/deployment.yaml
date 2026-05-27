@@ -51,6 +51,9 @@ spec:
             - "--tlsCertPath=/etc/tls/tls.crt"
             - "--tlsKeyPath=/etc/tls/tls.key"
             {{- end }}
+            {{- if .Values.config.insecureAPIConnection }}
+            - "--insecureAPIConnection=true"
+            {{- end }}
           {{- if or .Values.config.customCA.enabled .Values.config.extraEnv }}
           env:
             {{- if .Values.config.customCA.enabled }}

@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
+	"github.com/edgelesssys/continuum/internal/model"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
@@ -25,8 +26,8 @@ type Adapter struct {
 }
 
 // New creates a new InferenceAdapter for the OpenAI API.
-func New(workloadTasks []string, cipher inference.ResponseCipherCreator, ocspStatusFile string, forwarder inference.MutatingForwarder, log *slog.Logger) (*Adapter, error) {
-	baseAdapter, err := inference.New(workloadTasks, cipher, ocspStatusFile, forwarder, log)
+func New(workloadTasks []string, cipher inference.ResponseCipherCreator, ocspStatusFile string, forwarder inference.MutatingForwarder, reporter inference.UsageReporter, log *slog.Logger) (*Adapter, error) {
+	baseAdapter, err := inference.New(workloadTasks, cipher, ocspStatusFile, forwarder, reporter, log)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +109,7 @@ func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Reques
 	a.Forwarder.Forward(
 		w, r,
 		forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainEmbeddingsRequestFields, a.Log),
-		a.ResponseMapper(encryptMutator, extractOpenAIUsage, extractOpenAIUsage),
+		a.ResponseMapper(r, encryptMutator, extractOpenAIUsage, extractOpenAIUsage),
 	)
 }
 
@@ -122,7 +123,7 @@ func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Re
 			forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), openai.PlainTranscriptionRequestFields, a.Log),
 			a.mutators.AudioStreamUsageReportingInjector,
 		),
-		a.ResponseMapper(encryptMutator, extractTranscriptionUsage, extractOpenAIUsage),
+		a.ResponseMapper(r, encryptMutator, extractUnaryTranscriptionUsage, a.extractStreamingTranscriptionUsage),
 	)
 }
 
@@ -145,7 +146,7 @@ func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 			a.mutators.MediaContentValidator,
 			a.mutators.StreamUsageReportingInjector,
 		),
-		a.ResponseMapper(encryptMutator, extractOpenAIUsage, extractOpenAIUsage),
+		a.ResponseMapper(r, encryptMutator, extractOpenAIUsage, extractOpenAIUsage),
 	)
 }
 
@@ -196,9 +197,24 @@ func extractOpenAIUsage(body []byte) (usage.Stats, error) {
 	return parsed.Usage.ToUsageStats(), nil
 }
 
-func extractTranscriptionUsage(body []byte) (usage.Stats, error) {
+func extractUnaryTranscriptionUsage(body []byte) (usage.Stats, error) {
+	var resp openai.TranscriptionUsageResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return usage.Stats{}, err
+	}
+
+	audioSeconds := int64(max(resp.Duration, resp.Usage.Seconds))
+	if audioSeconds <= 0 {
+		return usage.Stats{}, inference.ErrNoUsage
+	}
+
+	return usage.Stats{AudioSeconds: audioSeconds}, nil
+}
+
+func (a *Adapter) extractStreamingTranscriptionUsage(body []byte) (usage.Stats, error) {
 	var parsed struct {
-		Usage *openai.AudioUsage `json:"usage"`
+		Model string        `json:"model"`
+		Usage *openai.Usage `json:"usage"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return usage.Stats{}, err
@@ -206,5 +222,20 @@ func extractTranscriptionUsage(body []byte) (usage.Stats, error) {
 	if parsed.Usage == nil {
 		return usage.Stats{}, inference.ErrNoUsage
 	}
-	return parsed.Usage.ToUsageStats(), nil
+
+	baseUsage := parsed.Usage.ToUsageStats()
+	modelName := model.Resolve(parsed.Model)
+
+	var audioSeconds int64
+	switch modelName {
+	case model.OpenAIWhisperLargeV3:
+		audioSeconds = baseUsage.PromptTokens / model.TokensPerAudioSecondWhisper
+	case model.VoxtralMini3b:
+		audioSeconds = (baseUsage.PromptTokens - model.TokenOverheadVoxtral) / model.TokensPerAudioSecondVoxtral
+	default:
+		a.Log.Warn("Unknown transcription model, falling back to Voxtral billing formula", "model", parsed.Model)
+		audioSeconds = (baseUsage.PromptTokens - model.TokenOverheadVoxtral) / model.TokensPerAudioSecondVoxtral
+	}
+
+	return usage.Stats{AudioSeconds: max(0, audioSeconds)}, nil
 }

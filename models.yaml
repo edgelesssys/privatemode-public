@@ -114,3 +114,14 @@ data:
       "veritysetup_version": "2.8.4",
       "file_hash_sha256": "0d6c66927e4758f7d860b40fee4ca69146df9c87d001c34a89faff0b9588fc38"
     }
+  nvidia-kimi-k2-6-nvfp4: |-
+    {
+      "model_source": "https://huggingface.co/nvidia/Kimi-K2.6-NVFP4",
+      "commit_hash": "2fd3a800dedd098b8327eb49e93ebc75f85da19f",
+      "excluded_files": "",
+      "root_hash": "37edc6df557bed56c1f8e6191f6098fbf93a4b30a017cc1c3f931d61120c3049",
+      "hash_offset": "595219173376",
+      "erofs_version": "1.9",
+      "veritysetup_version": "2.8.6",
+      "file_hash_sha256": "f31d74aaebccea1fa99d88fbad598e1c11901fc75e8e8a566de904f4b8088b40"
+    }

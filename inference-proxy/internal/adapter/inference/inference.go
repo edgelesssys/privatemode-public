@@ -18,7 +18,9 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
+	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/edgelesssys/continuum/internal/oss/sse"
+	"github.com/edgelesssys/continuum/internal/usagecollector"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -42,10 +44,16 @@ type MutatingForwarder interface {
 	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts)
 }
 
+// UsageReporter is a client for submitting usage reports (via RPC).
+type UsageReporter interface {
+	Submit(ctx context.Context, req usagecollector.SubmitUsageReportRequest) error
+}
+
 // Adapter contains common functionality shared by all inference API adapters.
 type Adapter struct {
 	Cipher        ResponseCipherCreator
 	Forwarder     MutatingForwarder
+	UsageReporter UsageReporter
 	WorkloadTasks []string
 	OCSPStatus    []ocsp.StatusInfo
 	Log           *slog.Logger
@@ -53,7 +61,7 @@ type Adapter struct {
 
 // New creates a new base Adapter with common functionality.
 func New(workloadTasks []string, cipher ResponseCipherCreator, ocspStatusFile string,
-	forwarder MutatingForwarder, log *slog.Logger,
+	forwarder MutatingForwarder, reporter UsageReporter, log *slog.Logger,
 ) (*Adapter, error) {
 	if len(workloadTasks) == 0 {
 		return nil, errors.New("no workload tasks provided")
@@ -77,6 +85,7 @@ func New(workloadTasks []string, cipher ResponseCipherCreator, ocspStatusFile st
 	return &Adapter{
 		Cipher:        cipher,
 		Forwarder:     forwarder,
+		UsageReporter: reporter,
 		WorkloadTasks: workloadTasks,
 		OCSPStatus:    ocspStatus,
 		Log:           log,
@@ -161,25 +170,65 @@ func addOCSPStatusMetric(index int, component string, status ocsp.Status) {
 	ocspStatusMetrics.WithLabelValues(fmt.Sprintf("gpu_index_%d", index), component).Set(statusFloat)
 }
 
+// usageContext contains details from the request for [usagecollector.SubmitUsageReportRequest].
+type usageContext struct {
+	requestID string
+	usageID   string
+	entryTime time.Time
+}
+
+// parseUsageContext parses usage details from r and returns (nil, nil) for requests without any
+// usage-related information (i.e. non-billable requests).
+func parseUsageContext(r *http.Request) (*usageContext, error) {
+	usageID := r.Header.Get(usagecollector.PrivatemodeUsageIDHeader)
+	if usageID == "" {
+		return nil, nil
+	}
+	requestID := requestid.FromHeader(r.Header)
+	if requestID == requestid.Unknown {
+		return nil, fmt.Errorf("missing request ID in header %q", requestid.Header)
+	}
+	return &usageContext{
+		requestID: requestID,
+		usageID:   usageID,
+		entryTime: time.Now(),
+	}, nil
+}
+
+func (u *usageContext) applyTo(req usagecollector.SubmitUsageReportRequest) usagecollector.SubmitUsageReportRequest {
+	req.RequestID = u.requestID
+	req.Timestamp = u.entryTime
+	req.UsageID = u.usageID
+	return req
+}
+
 // ResponseMapper returns a mapper that handles both unary and streaming vLLM responses.
-// It performs usage report extraction and encryption.
+// It performs usage report extraction, encryption, and out-of-band usage report submission.
 func (a *Adapter) ResponseMapper(
+	r *http.Request,
 	encryptMutator *forwarder.MutatingReader,
 	extractUnaryUsage UsageExtractor,
 	extractStreamingUsage UsageExtractor,
 ) forwarder.ResponseMapper {
+	uc, err := parseUsageContext(r)
+	if err != nil {
+		a.Log.Error("Failed to parse usage header; skipping usage reporting", "error", err)
+	}
+	ctx := r.Context()
 	return func(resp *http.Response) (forwarder.Response, error) {
 		if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
-			return a.streamingResponse(resp, encryptMutator, extractStreamingUsage), nil
+			return a.streamingResponse(ctx, resp, encryptMutator, extractStreamingUsage, uc), nil
 		}
-		return a.unaryResponse(resp, encryptMutator, extractUnaryUsage)
+		return a.unaryResponse(ctx, resp, encryptMutator, extractUnaryUsage, uc)
 	}
 }
 
 func (a *Adapter) unaryResponse(
+	ctx context.Context,
 	usResp *http.Response,
 	encryptMutator *forwarder.MutatingReader,
 	extractUsage UsageExtractor,
+	uc *usageContext,
 ) (*forwarder.UnaryResponse, error) {
 	dsResp, err := forwarder.ReadUnaryResponse(usResp, constants.MaxUnaryResponseBodyBytes)
 	if err != nil {
@@ -188,13 +237,23 @@ func (a *Adapter) unaryResponse(
 
 	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
 
-	// Extract usage from the pre-encryption body (only for successful responses).
 	if dsResp.StatusCode < 400 {
 		stats, err := extractUsage(dsResp.Body)
 		if err != nil {
 			a.Log.Warn("Failed to extract usage from response", "error", err)
 		} else {
-			a.Log.Info("Extracted usage stats from response", "usage", stats, "response_type", "unary")
+			hasUsageContext := uc != nil
+			a.Log.Info(
+				"Extracted usage stats from response", "usage", stats, "responseType", "unary",
+				"hasUsageContext", hasUsageContext,
+			)
+			if hasUsageContext {
+				a.dispatchReport(ctx, uc.applyTo(usagecollector.SubmitUsageReportRequest{
+					Stats:     stats,
+					Completed: true,
+					Streaming: false,
+				}))
+			}
 		}
 	}
 
@@ -208,9 +267,11 @@ func (a *Adapter) unaryResponse(
 }
 
 func (a *Adapter) streamingResponse(
+	ctx context.Context,
 	usResp *http.Response,
 	encryptMutator *forwarder.MutatingReader,
 	extractUsage UsageExtractor,
+	uc *usageContext,
 ) *forwarder.StreamingResponse {
 	dsResp := forwarder.NewStreamingResponse(usResp)
 	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
@@ -240,10 +301,20 @@ func (a *Adapter) streamingResponse(
 				break
 			}
 		}
+		latest := usageReader.LatestUsage()
+		hasUsageContext := uc != nil
 		a.Log.Info(
-			"Extracted usage stats from response", "usage", usageReader.LatestUsage(),
-			"response_type", "streaming", "stream_completed", streamCompleted,
+			"Extracted usage stats from response", "usage", latest,
+			"responseType", "streaming", "streamCompleted", streamCompleted,
+			"hasUsageContext", hasUsageContext,
 		)
+		if hasUsageContext {
+			a.dispatchReport(ctx, uc.applyTo(usagecollector.SubmitUsageReportRequest{
+				Stats:     latest,
+				Completed: streamCompleted,
+				Streaming: true,
+			}))
+		}
 		// Drain remaining clone data to prevent blocking the main flow.
 		_, _ = io.Copy(io.Discard, clone)
 	}()
@@ -253,6 +324,20 @@ func (a *Adapter) streamingResponse(
 	dsResp.Body = encryptedBody
 
 	return dsResp
+}
+
+// dispatchReport asynchronously submits a usage report on a context detached from ctx.
+func (a *Adapter) dispatchReport(ctx context.Context, report usagecollector.SubmitUsageReportRequest) {
+	go func() {
+		log := a.Log.With("reportRequestID", report.RequestID, "report", report)
+		detachedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := a.UsageReporter.Submit(detachedCtx, report); err != nil {
+			log.Warn("Failed to submit usage report", "error", err)
+		} else {
+			log.Info("Submitted usage report")
+		}
+	}()
 }
 
 // cloneReader returns two readers over the same byte stream.

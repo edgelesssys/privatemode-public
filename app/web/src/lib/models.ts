@@ -48,14 +48,6 @@ export const modelConfig: Record<string, ModelInfo> = {
     supportsVision: true,
     maxWords: 70000,
   },
-  'qwen3-coder-30b-a3b': {
-    displayName: 'Qwen3 Coder 30B',
-    subtitle: 'Coding-specialized model for programming tasks',
-    systemPrompt: getSystemPrompt('Qwen3 Coder 30B'),
-    supportsFileUploads: true,
-    supportsVision: false,
-    maxWords: 70000,
-  },
   'kimi-k2.6': {
     displayName: 'Kimi K2.6',
     subtitle: 'Reasoning model with a large context window',

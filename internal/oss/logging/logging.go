@@ -5,9 +5,11 @@
 package logging
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -15,6 +17,36 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
+
+type contextKey string
+
+const loggerContextKey contextKey = "logger"
+
+// ContextWithLogger stores the scoped (e.g. request-scoped) logger in ctx.
+func ContextWithLogger(ctx context.Context, log *slog.Logger) context.Context {
+	return context.WithValue(ctx, loggerContextKey, log)
+}
+
+// FromContext retrieves the scoped logger from ctx. Falls back to [slog.Default] if no logger is
+// stored in the context.
+func FromContext(ctx context.Context) *slog.Logger {
+	if log, ok := ctx.Value(loggerContextKey).(*slog.Logger); ok && log != nil {
+		return log
+	}
+	return slog.Default()
+}
+
+// FromRequest retrieves the request-scoped logger from r's context. Falls back to [slog.Default] if
+// no logger is stored in the context.
+func FromRequest(r *http.Request) *slog.Logger {
+	return FromContext(r.Context())
+}
+
+// RequestWithLogger returns a new [http.Request] with a the request-scoped log stored in its
+// context. It is a convenience wrapper around [ContextWithLogger].
+func RequestWithLogger(r *http.Request, log *slog.Logger) *http.Request {
+	return r.WithContext(ContextWithLogger(r.Context(), log))
+}
 
 const (
 	// Flag is the flag name for setting the logging level.

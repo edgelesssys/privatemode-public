@@ -25,9 +25,9 @@ type Adapter struct {
 }
 
 // New creates a new [Adapter] for the Anthropic API.
-func New(workloadTasks []string, cipher inference.ResponseCipherCreator, ocspStatusFile string, forwarder inference.MutatingForwarder, log *slog.Logger) (*Adapter, error) {
+func New(workloadTasks []string, cipher inference.ResponseCipherCreator, ocspStatusFile string, forwarder inference.MutatingForwarder, reporter inference.UsageReporter, log *slog.Logger) (*Adapter, error) {
 	// No endpoints are excluded from OCSP verification for Anthropic
-	baseAdapter, err := inference.New(workloadTasks, cipher, ocspStatusFile, forwarder, log)
+	baseAdapter, err := inference.New(workloadTasks, cipher, ocspStatusFile, forwarder, reporter, log)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request)
 			a.cacheSaltValidator,
 			a.mediaContentValidator,
 		),
-		a.ResponseMapper(encryptMutator, extractAnthropicUsage, extractAnthropicUsage),
+		a.ResponseMapper(r, encryptMutator, extractAnthropicUsage, extractAnthropicUsage),
 	)
 }
 

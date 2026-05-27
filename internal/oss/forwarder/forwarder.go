@@ -194,7 +194,7 @@ func (f *Forwarder) Forward(
 		}
 		f.log.Info(
 			"Forwarding finished successfully",
-			"requestID", requestID(req),
+			"requestID", requestID(req.Header),
 			"responseStatus", statusCode,
 			"shardKey", shardKey,
 		)
@@ -202,7 +202,7 @@ func (f *Forwarder) Forward(
 		// No shard key present
 		f.log.Info(
 			"Forwarding finished successfully",
-			"requestID", requestID(req),
+			"requestID", requestID(req.Header),
 			"responseStatus", statusCode,
 		)
 	}
@@ -261,7 +261,7 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 		return false, nil, fmt.Errorf("mutating request: %w", err)
 	}
 
-	requestID := requestID(req)
+	requestID := requestID(req.Header)
 
 	resp, err := f.client.Do(req)
 	if err != nil {
@@ -402,7 +402,7 @@ func (f *Forwarder) logMsg(logFn func(msg string, args ...any), msg string, err 
 		"remoteAddress", req.RemoteAddr,
 		"method", req.Method,
 		"path", req.URL.RequestURI(), // full url not available here, so we use RequestURI
-		"requestID", requestID(req),
+		"requestID", requestID(req.Header),
 		"userAgent", req.UserAgent(),
 		"clientVersion", req.Header.Get(constants.PrivatemodeVersionHeader),
 		"clientOS", req.Header.Get(constants.PrivatemodeOSHeader),
@@ -672,9 +672,9 @@ func writeHeaderTo(dst, src http.Header) {
 	}
 }
 
-func requestID(r *http.Request) string {
-	if id := requestid.FromHeader(r); id != requestid.Unknown {
+func requestID(header http.Header) string {
+	if id := requestid.FromHeader(header); id != requestid.Unknown {
 		return id
 	}
-	return requestid.FromUserHeader(r)
+	return requestid.FromUserHeader(header)
 }

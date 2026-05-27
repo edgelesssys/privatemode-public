@@ -1,9 +1,11 @@
 {
+  lib,
   linkFarmFromDrvs,
   writeShellScriptBin,
   writeShellApplication,
   pkgsCross,
   crane,
+  docker,
   mkMultiplatformOCIImage,
   toOciImage,
   replaceVars,
@@ -83,12 +85,36 @@ let
       }
     );
   };
+
+  proxy-oci = linkFarmFromDrvs "privatemode-proxy-oci" [ privatemode-proxy-multiplatform ];
+
+  push-and-load-proxy = writeShellApplication {
+    name = "push-and-load-proxy";
+    runtimeInputs = [
+      crane
+      docker
+    ];
+    text =
+      builtins.readFile (
+        replaceVars ./push-container-images.sh {
+          IMAGE_DIR = proxy-oci;
+        }
+      )
+      + ''
+        echo "Loading privatemode-proxy image for current platform..."
+        docker load < ${linuxPkgs.privatemode-proxy.image}
+
+        echo "Tagging loaded image with pushed name..."
+        docker tag "privatemode-proxy:${lib.continuumVersion}" "''${REGISTRY}/privatemode-proxy:''${TARGET_TAG}"
+      '';
+  };
 in
 oci-images
 // {
   inherit
     load-images
     push-images
+    push-and-load-proxy
     docker-images
     oss-oci-images
     ;

@@ -147,6 +147,7 @@ func (s *Server) inferenceHandler(
 
 		requestID := newRequestID()
 		attempt := 0
+		r.Header.Set(requestid.UserHeader, requestID) // Add request ID to header so its logged by "Forward"
 
 		// Set up retry logic for specific status codes
 		//nolint:contextcheck // retryCallback is only called within the Forward() call so r.Context() does not leak

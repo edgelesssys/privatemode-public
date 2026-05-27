@@ -21,7 +21,7 @@ stdenv.mkDerivation (finalAttrs: {
     inherit (finalAttrs) pname version src;
     fetcherVersion = 3;
     sourceRoot = "${finalAttrs.src.name}/app/web";
-    hash = "sha256-HOk5/cipiX75CdndoFEHRq/zpVUT+7rGCjpJsrUqdKI=";
+    hash = "sha256-3rzI4cyZazzb4WM6fsFI8vCAAI6KevtfiWn2O1kurtE=";
   };
 
   nativeBuildInputs = [

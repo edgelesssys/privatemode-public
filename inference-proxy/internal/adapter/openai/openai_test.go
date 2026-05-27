@@ -22,7 +22,9 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
+	"github.com/edgelesssys/continuum/internal/usagecollector"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -148,7 +150,7 @@ func TestForwardModelsRequest(t *testing.T) {
 
 			log := slog.Default()
 			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
-			adapter, err := New(tc.workloadTasks, nil, ocspFile, forwarder, log)
+			adapter, err := New(tc.workloadTasks, nil, ocspFile, forwarder, &stubUsageReporter{}, log)
 			require.NoError(err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
@@ -229,7 +231,7 @@ func TestForwardSpecificModelRequest(t *testing.T) {
 
 			log := slog.Default()
 			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
-			adapter, err := New(tc.workloadTasks, nil, ocspFile, forwarder, log)
+			adapter, err := New(tc.workloadTasks, nil, ocspFile, forwarder, &stubUsageReporter{}, log)
 			require.NoError(err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
@@ -364,7 +366,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 
 			log := slog.Default()
 			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
-			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, forwarder, log)
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, forwarder, &stubUsageReporter{}, log)
 			require.NoError(err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(tc.clientRequest))
@@ -425,7 +427,7 @@ func TestForwardChatCompletionsRequestDuplicatesReasoningContent(t *testing.T) {
 
 			log := slog.Default()
 			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
-			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, forwarder, log)
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, forwarder, &stubUsageReporter{}, log)
 			require.NoError(err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"some-model","messages":[{"role":"user","content":"hello"}],"cache_salt":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
@@ -592,9 +594,6 @@ func TestUsageExtraction(t *testing.T) {
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			capture := &usageLogHandler{}
-			log := slog.New(slog.NewMultiHandler(capture, slog.NewTextHandler(os.Stderr, nil)))
-
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tc.contentType)
 				_, _ = w.Write([]byte(tc.serverResponse))
@@ -606,11 +605,14 @@ func TestUsageExtraction(t *testing.T) {
 			ocspFile := filepath.Join(t.TempDir(), "ocsp.json")
 			require.NoError(t, os.WriteFile(ocspFile, ocspStatus, 0o644))
 
-			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
-			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, log)
+			reporter := &stubUsageReporter{}
+			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default())
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, reporter, slog.Default())
 			require.NoError(t, err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(clientRequest))
+			request.Header.Set(usagecollector.PrivatemodeUsageIDHeader, "test-usage-id")
+			request.Header.Set(requestid.Header, "test-request-id")
 			responseRecorder := httptest.NewRecorder()
 
 			adapter.forwardChatCompletionsRequest(responseRecorder, request)
@@ -618,8 +620,8 @@ func TestUsageExtraction(t *testing.T) {
 			assert.Equal(t, http.StatusOK, responseRecorder.Code)
 
 			assert.Eventually(t, func() bool {
-				stats, ok := capture.latestUsage()
-				return ok && stats == tc.wantUsage
+				report, ok := reporter.latestReport()
+				return ok && report.Stats == tc.wantUsage
 			}, time.Second, 10*time.Millisecond)
 		})
 	}
@@ -631,30 +633,49 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 		serverResponse string
 		wantUsage      usage.Stats
 	}{
-		"unary": {
+		"unary with usage seconds": {
 			contentType:    "application/json",
-			serverResponse: `{"text":"hello","duration":"34","usage":{"type":"duration","seconds":35}}`,
-			wantUsage:      usage.Stats{AudioSeconds: 35},
+			serverResponse: `{"text":"hello","usage":{"type":"duration","seconds":25}}`,
+			wantUsage:      usage.Stats{AudioSeconds: 25},
 		},
-		"streaming returns zero usage because vLLM uses token-based usage in streams": {
+		"unary with top-level duration": {
+			contentType:    "application/json",
+			serverResponse: `{"text":"hello","duration":"42.3"}`,
+			wantUsage:      usage.Stats{AudioSeconds: 43},
+		},
+		"unary with duration and usage.seconds uses max": {
+			contentType:    "application/json",
+			serverResponse: `{"text":"hello","duration":"30","usage":{"type":"duration","seconds":25}}`,
+			wantUsage:      usage.Stats{AudioSeconds: 30},
+		},
+		"streaming whisper": {
 			contentType: "text/event-stream",
 			serverResponse: strings.Join([]string{
-				`data: {"choices":[{"delta":{"content":"Hello"}}],"usage":{"prompt_tokens":100,"total_tokens":101,"completion_tokens":1}}`,
-				`data: {"choices":[{"delta":{"content":" world"}}],"usage":{"prompt_tokens":100,"total_tokens":102,"completion_tokens":2}}`,
-				"data: [DONE]",
+				`data: {"model":"openai/whisper-large-v3","choices":[{"delta":{"content":"Hello"}}],"usage":{"prompt_tokens":4000,"completion_tokens":1,"total_tokens":4001}}`,
+				`data: [DONE]`,
 			}, "\n\n") + "\n\n",
-			wantUsage: usage.Stats{
-				PromptTokens:     100,
-				CompletionTokens: 2,
-			},
+			wantUsage: usage.Stats{AudioSeconds: 40},
+		},
+		"streaming voxtral": {
+			contentType: "text/event-stream",
+			serverResponse: strings.Join([]string{
+				`data: {"model":"voxtral-mini-3b","choices":[{"delta":{"content":"Hello"}}],"usage":{"prompt_tokens":1073,"completion_tokens":1,"total_tokens":1074}}`,
+				`data: [DONE]`,
+			}, "\n\n") + "\n\n",
+			wantUsage: usage.Stats{AudioSeconds: 30},
+		},
+		"streaming unknown model uses voxtral fallback": {
+			contentType: "text/event-stream",
+			serverResponse: strings.Join([]string{
+				`data: {"model":"some-unknown-model","choices":[{"delta":{"content":"Hello"}}],"usage":{"prompt_tokens":1073,"completion_tokens":1,"total_tokens":1074}}`,
+				`data: [DONE]`,
+			}, "\n\n") + "\n\n",
+			wantUsage: usage.Stats{AudioSeconds: 30},
 		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			capture := &usageLogHandler{}
-			log := slog.New(slog.NewMultiHandler(capture, slog.NewTextHandler(os.Stderr, nil)))
-
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tc.contentType)
 				_, _ = w.Write([]byte(tc.serverResponse))
@@ -666,8 +687,9 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 			ocspFile := filepath.Join(t.TempDir(), "ocsp.json")
 			require.NoError(t, os.WriteFile(ocspFile, ocspStatus, 0o644))
 
-			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
-			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, log)
+			reporter := &stubUsageReporter{}
+			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default())
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, reporter, slog.Default())
 			require.NoError(t, err)
 
 			// Build multipart form request with a model field.
@@ -678,6 +700,8 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, openai.TranscriptionsEndpoint, &body)
 			request.Header.Set("Content-Type", writer.FormDataContentType())
+			request.Header.Set(usagecollector.PrivatemodeUsageIDHeader, "test-usage-id")
+			request.Header.Set(requestid.Header, "test-request-id")
 			responseRecorder := httptest.NewRecorder()
 
 			adapter.forwardTranscriptionsRequest(responseRecorder, request)
@@ -685,43 +709,30 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 			assert.Equal(t, http.StatusOK, responseRecorder.Code)
 
 			assert.Eventually(t, func() bool {
-				stats, ok := capture.latestUsage()
-				return ok && stats == tc.wantUsage
+				report, ok := reporter.latestReport()
+				return ok && report.Stats == tc.wantUsage
 			}, time.Second, 10*time.Millisecond)
 		})
 	}
 }
 
-// usageLogHandler captures the last usage.Stats value logged with a "usage" key.
-type usageLogHandler struct {
-	mu    sync.Mutex
-	stats *usage.Stats
+type stubUsageReporter struct {
+	mu     sync.Mutex
+	latest *usagecollector.SubmitUsageReportRequest
 }
 
-func (h *usageLogHandler) Enabled(context.Context, slog.Level) bool { return true }
-
-func (h *usageLogHandler) Handle(_ context.Context, r slog.Record) error {
-	r.Attrs(func(a slog.Attr) bool {
-		if a.Key == "usage" {
-			if stats, ok := a.Value.Any().(usage.Stats); ok {
-				h.mu.Lock()
-				h.stats = &stats
-				h.mu.Unlock()
-			}
-		}
-		return true
-	})
+func (r *stubUsageReporter) Submit(_ context.Context, req usagecollector.SubmitUsageReportRequest) error {
+	r.mu.Lock()
+	r.latest = &req
+	r.mu.Unlock()
 	return nil
 }
 
-func (h *usageLogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
-func (h *usageLogHandler) WithGroup(string) slog.Handler      { return h }
-
-func (h *usageLogHandler) latestUsage() (usage.Stats, bool) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.stats == nil {
-		return usage.Stats{}, false
+func (r *stubUsageReporter) latestReport() (usagecollector.SubmitUsageReportRequest, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.latest == nil {
+		return usagecollector.SubmitUsageReportRequest{}, false
 	}
-	return *h.stats, true
+	return *r.latest, true
 }

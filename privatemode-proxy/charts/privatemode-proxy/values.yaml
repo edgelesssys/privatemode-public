@@ -1,6 +1,6 @@
 replicaCount: 1
 image:
-  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.41.1-pre
+  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.42.1-pre
   pullPolicy: IfNotPresent
   restartPolicy: Always
 service:
@@ -51,3 +51,5 @@ config:
     fileName: 'ca-bundle.crt'
   # Extra environment variables
   extraEnv: []
+  # Set to true to allow the proxy to accept self-signed certificates from the backend
+  insecureAPIConnection: false

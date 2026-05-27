@@ -18,6 +18,7 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/etcd"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/server"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/usagereporter"
 	"github.com/edgelesssys/continuum/internal/mtls"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -58,12 +59,14 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.identityCAPath, "identity-ca-path", "", "path to the workload identity CA bundle (used to verify peer identity certs)")
 	cmd.Flags().StringVar(&cfg.workloadTasks, "workload-tasks", "", "comma separated list of tasks the workload supports")
 	cmd.Flags().StringVar(&cfg.ocspStatusFile, "ocsp-status-file", constants.OCSPStatusFile(), "path to read the OCSP status file from")
+	cmd.Flags().StringVar(&cfg.ucEndpoint, "usage-collector-endpoint", "", "host:port of the API gateway's usage collector RPC")
 	cmd.Flags().StringVar(&cfg.logLevel, logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
 
 	must(cmd.MarkFlagRequired("workload-address"))
 	must(cmd.MarkFlagRequired("identity-cert-path"))
 	must(cmd.MarkFlagRequired("identity-key-path"))
 	must(cmd.MarkFlagRequired("identity-ca-path"))
+	must(cmd.MarkFlagRequired("usage-collector-endpoint"))
 
 	cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 		log := logging.NewLogger(cfg.logLevel)
@@ -90,6 +93,7 @@ type runConfig struct {
 	identityCAPath   string
 	workloadTasks    string
 	ocspStatusFile   string
+	ucEndpoint       string
 	logLevel         string
 }
 
@@ -132,13 +136,19 @@ func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
 
 	forwarder := forwarder.New(&http.Client{}, net.JoinHostPort(cfg.workloadAddress, cfg.workloadPort), forwarder.SchemeHTTP, log)
 
-	adapters, err := adapter.New(cfg.adapterTypes, tasks, cipher.New(secrets), cfg.ocspStatusFile, forwarder, log)
-	if err != nil {
-		return fmt.Errorf("creating adapters: %w", err)
-	}
 	mtlsIdentity, err := mtls.LoadIdentity(cfg.identityCertPath, cfg.identityKeyPath, cfg.identityCAPath)
 	if err != nil {
 		return fmt.Errorf("loading workload identity: %w", err)
+	}
+
+	usageReporter, err := usagereporter.New(cfg.ucEndpoint, mtlsIdentity)
+	if err != nil {
+		return fmt.Errorf("creating usage reporter: %w", err)
+	}
+
+	adapters, err := adapter.New(cfg.adapterTypes, tasks, cipher.New(secrets), cfg.ocspStatusFile, forwarder, usageReporter, log)
+	if err != nil {
+		return fmt.Errorf("creating adapters: %w", err)
 	}
 	server := server.New(adapters, mtlsIdentity, log)
 

@@ -301,13 +301,6 @@ type AudioUsage struct {
 	CompletionTokens int    `json:"completion_tokens,omitzero"`
 }
 
-// ToUsageStats converts an OpenAI [AudioUsage] to a [usage.Stats].
-func (a AudioUsage) ToUsageStats() usage.Stats {
-	return usage.Stats{
-		AudioSeconds: int64(a.Seconds),
-	}
-}
-
 // APIErrorResponse represents the error response returned by the /v1/chat/completions endpoint.
 //
 // Occurrence:
@@ -352,6 +345,8 @@ func (a *TranscriptionUsageResponse) UnmarshalJSON(data []byte) error {
 
 	a.Usage = aux.Usage
 	if aux.Duration != "" {
+		// For requests with response_format=verbose_json, a top-level `duration` attribute is set
+		// as a string containing a float of the duration in seconds.
 		duration, err := strconv.ParseFloat(aux.Duration, 64)
 		if err != nil {
 			return fmt.Errorf("parsing duration: %w", err)

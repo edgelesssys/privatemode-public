@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/anthropic"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/openai"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/unencrypted"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/unstructured"
@@ -41,7 +42,8 @@ func IsSupportedInferenceAPI(apiType string) bool {
 
 // New creates InferenceAdapters for the given API types.
 func New(
-	apiTypes []string, workloadTasks []string, cipher *cipher.Cipher, ocspStatusFile string, forwarder mutatingForwarder, log *slog.Logger,
+	apiTypes []string, workloadTasks []string, cipher *cipher.Cipher, ocspStatusFile string,
+	forwarder mutatingForwarder, reporter inference.UsageReporter, log *slog.Logger,
 ) ([]InferenceAdapter, error) {
 	var adapters []InferenceAdapter
 	for _, apiType := range apiTypes {
@@ -49,9 +51,9 @@ func New(
 		var err error
 		switch strings.ToLower(apiType) {
 		case InferenceAPIOpenAI:
-			adapter, err = openai.New(workloadTasks, cipher, ocspStatusFile, forwarder, log)
+			adapter, err = openai.New(workloadTasks, cipher, ocspStatusFile, forwarder, reporter, log)
 		case InferenceAPIAnthropic:
-			adapter, err = anthropic.New(workloadTasks, cipher, ocspStatusFile, forwarder, log)
+			adapter, err = anthropic.New(workloadTasks, cipher, ocspStatusFile, forwarder, reporter, log)
 		case InferenceAPIUnstructured:
 			adapter, err = unstructured.New(cipher, forwarder, log)
 		case InferenceAPIUnencrypted:

@@ -23,6 +23,7 @@ import (
 	crypto "github.com/edgelesssys/continuum/internal/oss/crypto"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
+	"github.com/edgelesssys/continuum/internal/usagecollector"
 	"github.com/stretchr/testify/require"
 )
 
@@ -131,7 +132,7 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 	ocspFile := filepath.Join(b.TempDir(), "ocsp.json")
 	require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
 
-	adapters, err := adapter.New([]string{apiType}, []string{"generate"}, c, ocspFile, fw, log)
+	adapters, err := adapter.New([]string{apiType}, []string{"generate"}, c, ocspFile, fw, &stubUsageReporter{}, log)
 	require.NoError(err)
 
 	server := New(adapters, nil, log)
@@ -143,4 +144,10 @@ type stubSecretGetter struct{}
 
 func (s stubSecretGetter) GetSecret(_ context.Context, _ string) ([]byte, error) {
 	return nil, errors.New("not found")
+}
+
+type stubUsageReporter struct{}
+
+func (stubUsageReporter) Submit(_ context.Context, _ usagecollector.SubmitUsageReportRequest) error {
+	return nil
 }

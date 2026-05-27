@@ -75,8 +75,12 @@
       update(newParams: { text: string; delay: number }) {
         params = newParams;
         if (tooltipElement) {
-          tooltipElement.textContent = params.text;
-          positionTooltip();
+          if (!params.text) {
+            hideTooltip();
+          } else {
+            tooltipElement.textContent = params.text;
+            positionTooltip();
+          }
         }
       },
       destroy() {

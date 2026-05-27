@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { LogIn, LogOut } from 'lucide-svelte';
+  import {
+    LogIn,
+    LogOut,
+    CreditCard,
+    Key,
+    ChartColumn,
+    MoreHorizontal,
+  } from 'lucide-svelte';
   import Tooltip from '../common/Tooltip.svelte';
   import OrgSwitcher from './OrgSwitcher.svelte';
   import {
@@ -14,7 +21,48 @@
   } from '$lib/authStore';
 
   export let collapsed: boolean;
+
+  let menuOpen = false;
+  let menuContainerRef: HTMLDivElement | null = null;
+  let menuButtonRef: HTMLButtonElement | null = null;
+  let menuStyle = '';
+
+  function updateMenuPosition() {
+    if (!menuButtonRef) return;
+    const rect = menuButtonRef.getBoundingClientRect();
+    const left = rect.right - 160;
+    const bottom = window.innerHeight - rect.top + 4;
+    menuStyle = `position:fixed;left:${left}px;bottom:${bottom}px;width:160px;`;
+  }
+
+  function toggleMenu() {
+    menuOpen = !menuOpen;
+    if (menuOpen) updateMenuPosition();
+  }
+
+  function handleClickOutside(event: MouseEvent) {
+    if (menuContainerRef && !menuContainerRef.contains(event.target as Node)) {
+      menuOpen = false;
+    }
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && menuOpen) {
+      menuOpen = false;
+      menuButtonRef?.focus();
+    }
+  }
+
+  function handleSignOut() {
+    menuOpen = false;
+    signOut();
+  }
 </script>
+
+<svelte:window
+  on:click={handleClickOutside}
+  on:keydown={handleKeydown}
+/>
 
 <div class="auth-section">
   <div class="auth-section-content">
@@ -58,16 +106,64 @@
             <span class="org-subtitle-static">{$orgName}</span>
           {/if}
         </div>
-        <Tooltip text="Sign out">
-          <button
-            class="auth-sign-out-btn collapsible-text"
-            class:hidden={collapsed}
-            type="button"
-            on:click={signOut}
-          >
-            <LogOut size={16} />
-          </button>
-        </Tooltip>
+        <div
+          class="auth-menu collapsible-text"
+          class:hidden={collapsed}
+          bind:this={menuContainerRef}
+        >
+          <Tooltip text={menuOpen ? '' : 'Account menu'}>
+            <button
+              class="auth-menu-btn"
+              type="button"
+              bind:this={menuButtonRef}
+              on:click={toggleMenu}
+              aria-label="Account menu"
+              aria-haspopup="true"
+              aria-expanded={menuOpen}
+            >
+              <MoreHorizontal size={16} />
+            </button>
+          </Tooltip>
+          {#if menuOpen}
+            <div
+              class="auth-menu-dropdown"
+              style={menuStyle}
+              role="menu"
+            >
+              <a
+                class="auth-menu-item"
+                href="https://portal.privatemode.ai/usage"
+                target="_blank"
+                rel="noopener noreferrer"
+                role="menuitem"
+                on:click={() => (menuOpen = false)}
+              >
+                <ChartColumn size={14} />
+                <span>Usage</span>
+              </a>
+              <a
+                class="auth-menu-item"
+                href="https://portal.privatemode.ai/billing"
+                target="_blank"
+                rel="noopener noreferrer"
+                role="menuitem"
+                on:click={() => (menuOpen = false)}
+              >
+                <CreditCard size={14} />
+                <span>Billing</span>
+              </a>
+              <button
+                class="auth-menu-item"
+                type="button"
+                role="menuitem"
+                on:click={handleSignOut}
+              >
+                <LogOut size={14} />
+                <span>Sign out</span>
+              </button>
+            </div>
+          {/if}
+        </div>
       </div>
     {:else}
       <button
@@ -158,7 +254,12 @@
     white-space: nowrap;
   }
 
-  .auth-sign-out-btn {
+  .auth-menu {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .auth-menu-btn {
     background: none;
     border: none;
     color: var(--color-text-secondary);
@@ -167,17 +268,50 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    flex-shrink: 0;
-    opacity: 0;
-    transition: opacity 0.2s;
+    border-radius: 0.25rem;
+    transition:
+      color 0.2s,
+      background-color 0.2s;
   }
 
-  .auth-user:hover .auth-sign-out-btn {
-    opacity: 1;
-  }
-
-  .auth-sign-out-btn:hover {
+  .auth-menu-btn:hover {
     color: var(--color-text-primary);
+    background-color: var(--color-bg-hover);
+  }
+
+  .auth-menu-dropdown {
+    background-color: var(--color-dropdown-bg);
+    border: 1px solid var(--color-dropdown-border);
+    border-radius: 0.375rem;
+    box-shadow: var(--shadow-md);
+    z-index: 1000;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .auth-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+    background: none;
+    border: none;
+    border-radius: 0.25rem;
+    color: var(--color-dropdown-text);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: 6px 8px;
+    cursor: pointer;
+    font-family: 'Inter Variable', sans-serif;
+    text-decoration: none;
+    text-align: left;
+    transition: background-color 0.2s;
+  }
+
+  .auth-menu-item:hover {
+    background-color: var(--color-dropdown-hover);
   }
 
   .auth-btn {

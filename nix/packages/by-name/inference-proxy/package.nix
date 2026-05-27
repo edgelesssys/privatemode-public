@@ -13,9 +13,12 @@ let
       "go.mod"
       "go.sum"
       "inference-proxy"
+      "internal/httprpc"
+      "internal/model"
       "internal/mtls"
-      "internal/oss/compat"
       "internal/oss"
+      "internal/oss/compat"
+      "internal/usagecollector"
     ];
 
     ldflags = [

@@ -54,24 +54,24 @@ func WithContext(ctx context.Context, id string) context.Context {
 // FromHeader returns the request ID for a given request from [Header].
 // Returned values are sanitized for logging.
 // Returns [Unknown] if no request ID is found in the request header.
-func FromHeader(req *http.Request) string {
-	return fromHeaderWithDefault(req, Header)
+func FromHeader(header http.Header) string {
+	return fromHeaderWithDefault(header, Header)
 }
 
 // FromUserHeader returns the user supplied request ID for a given request from [UserHeader].
 // Returned values are sanitized for logging.
 // Returns [Unknown] if no user request ID is found in the request header.
-func FromUserHeader(req *http.Request) string {
+func FromUserHeader(header http.Header) string {
 	// Clients before v1.40 used [Header] to provide a user generated request ID
-	version := req.Header.Get(constants.PrivatemodeVersionHeader)
+	version := header.Get(constants.PrivatemodeVersionHeader)
 	if !compat.AtLeastMajorMinor(version, 1, 40) {
-		return fromHeaderWithDefault(req, Header)
+		return fromHeaderWithDefault(header, Header)
 	}
-	return fromHeaderWithDefault(req, UserHeader)
+	return fromHeaderWithDefault(header, UserHeader)
 }
 
-func fromHeaderWithDefault(req *http.Request, header string) string {
-	if id := req.Header.Get(header); id != "" {
+func fromHeaderWithDefault(header http.Header, key string) string {
+	if id := header.Get(key); id != "" {
 		return sanitizeString(id)
 	}
 	return Unknown
