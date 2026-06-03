@@ -26,6 +26,13 @@ import (
 
 const (
 	defaultHost = "0.0.0.0"
+
+	// noLeaderThreshold is the duration after which the health server is marked as unhealthy
+	// if the etcd cluster has no leader. This causes the Kubernetes liveness probe to fail,
+	// triggering a container restart so the cluster can re-bootstrap and recover quorum.
+	noLeaderThreshold = 2 * time.Minute
+	// noLeaderCheckInterval is how often we check the etcd leader status.
+	noLeaderCheckInterval = 10 * time.Second
 )
 
 func main() {
@@ -89,31 +96,46 @@ func run(config secretServiceConfig, fs afero.Afero, log *slog.Logger) error {
 		return fmt.Errorf("setting up user server: %w", err)
 	}
 	healthServer := health.New(log)
+	httpHealthServer := health.NewHTTP(log)
 
 	var wg sync.WaitGroup
 
 	// Start the servers as Goroutines
 	// If one of them fails, the routine will stop the other server and return the error
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
+		watchLeaderStatus(ctx, etcdServer, healthServer, httpHealthServer, log)
+		cancel()
+	})
+
+	wg.Go(func() {
 		log.Info("Starting user server", "endpoint", net.JoinHostPort(defaultHost, config.port))
 		if srvErr := userServer.Serve(net.JoinHostPort(defaultHost, config.port)); srvErr != nil {
 			err = srvErr
 			healthServer.Stop()
+			cancel()
 		}
-	}()
+	})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		log.Info("Starting health server", "endpoint", net.JoinHostPort(defaultHost, config.healthPort))
 		if srvErr := healthServer.Serve(net.JoinHostPort(defaultHost, config.healthPort)); srvErr != nil {
 			err = srvErr
 			userServer.Stop()
+			cancel()
 		}
-	}()
+	})
+
+	wg.Go(func() {
+		httpEndpoint := net.JoinHostPort(defaultHost, "8080")
+		log.Info("Starting HTTP health server", "endpoint", httpEndpoint)
+		if srvErr := httpHealthServer.Serve(ctx, httpEndpoint); srvErr != nil {
+			err = srvErr
+			userServer.Stop()
+			healthServer.Stop()
+			cancel()
+		}
+	})
 
 	wg.Wait()
 	return err
@@ -182,6 +204,46 @@ func joinOrBootstrapEtcd(
 				return etcdServer, etcdClose, nil
 			}
 			log.Info("Cluster not yet bootstrapped, retrying", "error", err)
+		}
+	}
+}
+
+// watchLeaderStatus periodically checks whether the etcd cluster has a leader.
+// If the cluster has been leaderless for longer than [noLeaderThreshold], the health server
+// is marked as unhealthy, causing the Kubernetes liveness probe to fail and the pod to be restarted.
+func watchLeaderStatus(ctx context.Context, e *etcd.Etcd, h *health.Server, httpHealth *health.HTTPServer, log *slog.Logger) {
+	ticker := time.NewTicker(noLeaderCheckInterval)
+	defer ticker.Stop()
+
+	var leaderlessSince time.Time
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if e.HasLeader() {
+				if !leaderlessSince.IsZero() {
+					log.Info("Etcd cluster has regained a leader")
+					leaderlessSince = time.Time{}
+				}
+				h.SetHealthy()
+				httpHealth.SetHealthy()
+				continue
+			}
+
+			if leaderlessSince.IsZero() {
+				leaderlessSince = time.Now()
+			}
+			leaderlessFor := time.Since(leaderlessSince)
+			log.Warn("Etcd cluster has no leader", "leaderlessFor", leaderlessFor.Seconds(), "threshold", noLeaderThreshold.Seconds())
+
+			if leaderlessFor >= noLeaderThreshold {
+				log.Error("Etcd cluster has been leaderless for too long, marking pod as unhealthy for restart",
+					"leaderlessFor", leaderlessFor.Seconds(), "threshold", noLeaderThreshold.Seconds())
+				h.SetUnhealthy()
+				httpHealth.SetUnhealthy()
+			}
 		}
 	}
 }

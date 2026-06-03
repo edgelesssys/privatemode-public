@@ -1,0 +1,138 @@
+diff --git a/vllm/config/model.py b/vllm/config/model.py
+index 22a1f6a42..bbbc7d7a0 100644
+--- a/vllm/config/model.py
++++ b/vllm/config/model.py
+@@ -1431,6 +1431,7 @@ class ModelConfig:
+ 
+         available_params = [
+             "repetition_penalty",
++            "frequency_penalty",
+             "temperature",
+             "top_k",
+             "top_p",
+diff --git a/vllm/entrypoints/openai/chat_completion/protocol.py b/vllm/entrypoints/openai/chat_completion/protocol.py
+index 03e4678c8..f34589e0c 100644
+--- a/vllm/entrypoints/openai/chat_completion/protocol.py
++++ b/vllm/entrypoints/openai/chat_completion/protocol.py
+@@ -179,7 +179,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
+     # https://platform.openai.com/docs/api-reference/chat/create
+     messages: list[ChatCompletionMessageParam]
+     model: str | None = None
+-    frequency_penalty: float | None = 0.0
++    frequency_penalty: float | None = None
+     logit_bias: dict[str, float] | None = None
+     logprobs: bool | None = False
+     top_logprobs: int | None = 0
+@@ -489,6 +489,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
+ 
+     # Default sampling parameters for chat completion requests
+     _DEFAULT_SAMPLING_PARAMS: dict = {
++        "frequency_penalty": 0.0,
+         "repetition_penalty": 1.0,
+         "temperature": 1.0,
+         "top_p": 1.0,
+@@ -520,6 +521,11 @@ class ChatCompletionRequest(OpenAIBaseModel):
+         default_sampling_params: dict,
+     ) -> SamplingParams:
+         # Default parameters
++        if (frequency_penalty := self.frequency_penalty) is None:
++            frequency_penalty = default_sampling_params.get(
++                "frequency_penalty",
++                self._DEFAULT_SAMPLING_PARAMS["frequency_penalty"],
++            )
+         if (repetition_penalty := self.repetition_penalty) is None:
+             repetition_penalty = default_sampling_params.get(
+                 "repetition_penalty",
+@@ -585,7 +591,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
+         return SamplingParams.from_optional(
+             n=self.n,
+             presence_penalty=self.presence_penalty,
+-            frequency_penalty=self.frequency_penalty,
++            frequency_penalty=frequency_penalty,
+             repetition_penalty=repetition_penalty,
+             temperature=temperature,
+             top_p=top_p,
+diff --git a/vllm/entrypoints/openai/completion/protocol.py b/vllm/entrypoints/openai/completion/protocol.py
+index 7bb3c8d8a..ae3889f20 100644
+--- a/vllm/entrypoints/openai/completion/protocol.py
++++ b/vllm/entrypoints/openai/completion/protocol.py
+@@ -51,7 +51,7 @@ class CompletionRequest(OpenAIBaseModel):
+         | None
+     ) = None
+     echo: bool | None = False
+-    frequency_penalty: float | None = 0.0
++    frequency_penalty: float | None = None
+     logit_bias: dict[str, float] | None = None
+     logprobs: int | None = None
+     max_tokens: int | None = 16
+@@ -192,6 +192,7 @@ class CompletionRequest(OpenAIBaseModel):
+ 
+     # Default sampling parameters for completion requests
+     _DEFAULT_SAMPLING_PARAMS: dict = {
++        "frequency_penalty": 0.0,
+         "repetition_penalty": 1.0,
+         "temperature": 1.0,
+         "top_p": 1.0,
+@@ -229,6 +230,11 @@ class CompletionRequest(OpenAIBaseModel):
+             default_sampling_params = {}
+ 
+         # Default parameters
++        if (frequency_penalty := self.frequency_penalty) is None:
++            frequency_penalty = default_sampling_params.get(
++                "frequency_penalty",
++                self._DEFAULT_SAMPLING_PARAMS["frequency_penalty"],
++            )
+         if (repetition_penalty := self.repetition_penalty) is None:
+             repetition_penalty = default_sampling_params.get(
+                 "repetition_penalty",
+@@ -296,7 +302,7 @@ class CompletionRequest(OpenAIBaseModel):
+         return SamplingParams.from_optional(
+             n=self.n,
+             presence_penalty=self.presence_penalty,
+-            frequency_penalty=self.frequency_penalty,
++            frequency_penalty=frequency_penalty,
+             repetition_penalty=repetition_penalty,
+             temperature=temperature,
+             top_p=top_p,
+diff --git a/vllm/entrypoints/openai/speech_to_text/protocol.py b/vllm/entrypoints/openai/speech_to_text/protocol.py
+index af1aaf086..1981cf3f0 100644
+--- a/vllm/entrypoints/openai/speech_to_text/protocol.py
++++ b/vllm/entrypoints/openai/speech_to_text/protocol.py
+@@ -174,7 +174,7 @@ class TranscriptionRequest(OpenAIBaseModel):
+     seed: int | None = Field(None, ge=_LONG_INFO.min, le=_LONG_INFO.max)
+     """The seed to use for sampling."""
+ 
+-    frequency_penalty: float | None = 0.0
++    frequency_penalty: float | None = None
+     """The frequency penalty to use for sampling."""
+ 
+     repetition_penalty: float | None = None
+@@ -189,6 +189,7 @@ class TranscriptionRequest(OpenAIBaseModel):
+ 
+     # Default sampling parameters for transcription requests.
+     _DEFAULT_SAMPLING_PARAMS: dict = {
++        "frequency_penalty": 0.0,
+         "repetition_penalty": 1.0,
+         "temperature": 1.0,
+         "top_p": 1.0,
+@@ -263,6 +264,11 @@ class TranscriptionRequest(OpenAIBaseModel):
+                 "min_p", self._DEFAULT_SAMPLING_PARAMS["min_p"]
+             )
+ 
++        if (frequency_penalty := self.frequency_penalty) is None:
++            frequency_penalty = default_sampling_params.get(
++                "frequency_penalty",
++                self._DEFAULT_SAMPLING_PARAMS["frequency_penalty"],
++            )
+         if (repetition_penalty := self.repetition_penalty) is None:
+             repetition_penalty = default_sampling_params.get(
+                 "repetition_penalty",
+@@ -276,7 +282,7 @@ class TranscriptionRequest(OpenAIBaseModel):
+             top_p=top_p,
+             top_k=top_k,
+             min_p=min_p,
+-            frequency_penalty=self.frequency_penalty,
++            frequency_penalty=frequency_penalty,
+             repetition_penalty=repetition_penalty,
+             presence_penalty=self.presence_penalty,
+             output_kind=RequestOutputKind.DELTA

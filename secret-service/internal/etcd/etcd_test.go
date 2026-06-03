@@ -149,6 +149,8 @@ func (s *stubEtcdServer) Txn(_ context.Context, req *pb.TxnRequest) (*pb.TxnResp
 	return s.txnResponse, s.err
 }
 
+func (s *stubEtcdServer) HasLeader() bool { return true }
+
 func (s *stubEtcdServer) LeaseGrant(_ context.Context, _ *pb.LeaseGrantRequest) (*pb.LeaseGrantResponse, error) {
 	return nil, nil
 }

@@ -45,3 +45,13 @@ func (s *Server) Serve(endpoint string) error {
 func (s *Server) Stop() {
 	s.grpcHealth.GracefulStop()
 }
+
+// SetHealthy sets the health status of the server.
+func (s *Server) SetHealthy() {
+	s.health.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+}
+
+// SetUnhealthy marks the server as not healthy, which will cause liveness probes to fail.
+func (s *Server) SetUnhealthy() {
+	s.health.SetServingStatus("", grpc_health_v1.HealthCheckResponse_NOT_SERVING)
+}

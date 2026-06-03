@@ -114,6 +114,11 @@ func New(ctx context.Context, joinMethod JoinMethod,
 	return e, e.server.Close, nil
 }
 
+// HasLeader reports whether the etcd cluster currently has a leader.
+func (e *Etcd) HasLeader() bool {
+	return e.server.HasLeader()
+}
+
 // SetSecrets saves the given secrets in the etcd backend.
 // The operation will either succeed for all, or fail for all.
 // If any of the new secrets already exist, the operation will fail.
@@ -276,9 +281,14 @@ func (s *etcdServer) Close() {
 	s.Etcd.Close()
 }
 
+func (s *etcdServer) HasLeader() bool {
+	return s.Server.Leader() != 0
+}
+
 type etcdInf interface {
 	Txn(context.Context, *pb.TxnRequest) (*pb.TxnResponse, error)
 	LeaseGrant(context.Context, *pb.LeaseGrantRequest) (*pb.LeaseGrantResponse, error)
 	LeaseRevoke(context.Context, *pb.LeaseRevokeRequest) (*pb.LeaseRevokeResponse, error)
+	HasLeader() bool
 	Close()
 }

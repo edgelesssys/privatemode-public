@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
@@ -120,23 +119,17 @@ func initialCluster(knownPeers map[string]etcdPeer, k8sNamespace, podName string
 		return "", fmt.Errorf("getting etcd endpoint: %w", err)
 	}
 
-	instanceNumber, err := strconv.Atoi(strings.TrimPrefix(podName, "secret-service-"))
-	if err != nil {
-		return "", fmt.Errorf("parsing instance number from node name %q: %w", podName, err)
-	}
-
-	// Make sure that we get at least all pods up to our current one
-	for i := 0; i <= instanceNumber; i++ {
-		knownPeers[fmt.Sprintf("secret-service-%d", i)] = etcdPeer{
+	if _, exists := knownPeers[podName]; !exists {
+		knownPeers[podName] = etcdPeer{
 			url: fmt.Sprintf(
-				"https://secret-service-%d.%s",
-				i, net.JoinHostPort(headlessServiceName, constants.EtcdPeerPort()),
+				"https://%s.%s",
+				podName, net.JoinHostPort(headlessServiceName, constants.EtcdPeerPort()),
 			),
 			id: 0, // Unknown ID
 		}
 	}
 
-	nodes := make([]string, len(knownPeers))
+	nodes := make([]string, 0, len(knownPeers))
 	for node, peerURL := range knownPeers {
 		nodes = append(nodes, fmt.Sprintf("%s=%s", node, peerURL.url))
 	}
