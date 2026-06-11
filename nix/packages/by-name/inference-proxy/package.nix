@@ -18,6 +18,7 @@ let
       "internal/mtls"
       "internal/oss"
       "internal/oss/compat"
+      "internal/tracing"
       "internal/usagecollector"
     ];
 

@@ -24,9 +24,12 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/edgelesssys/continuum/internal/oss/process"
+	"github.com/edgelesssys/continuum/internal/tracing"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -61,6 +64,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.ocspStatusFile, "ocsp-status-file", constants.OCSPStatusFile(), "path to read the OCSP status file from")
 	cmd.Flags().StringVar(&cfg.ucEndpoint, "usage-collector-endpoint", "", "host:port of the API gateway's usage collector RPC")
 	cmd.Flags().StringVar(&cfg.logLevel, logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
+	cmd.Flags().StringVar(&cfg.otlpEndpoint, tracing.EndpointFlag, "", tracing.EndpointFlagInfo)
 
 	must(cmd.MarkFlagRequired("workload-address"))
 	must(cmd.MarkFlagRequired("identity-cert-path"))
@@ -95,6 +99,7 @@ type runConfig struct {
 	ocspStatusFile   string
 	ucEndpoint       string
 	logLevel         string
+	otlpEndpoint     string
 }
 
 func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
@@ -104,6 +109,15 @@ func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
 		}
 	}
 	log.Info("Starting inference proxy", "port", cfg.listenPort, "workloadPort", cfg.workloadPort, "adapterTypes", cfg.adapterTypes, "workloadAddress", cfg.workloadAddress)
+
+	// The inference-proxy always sits behind the apigateway and never originates
+	// traces itself: Never sample root spans. The ParentBased wrapper still
+	// continues inbound, already-sampled traces forwarded by the apigateway.
+	traceShutdown, err := tracing.Setup(ctx, "inference-proxy", cfg.otlpEndpoint, sdktrace.NeverSample(), log)
+	if err != nil {
+		return fmt.Errorf("setting up tracing: %w", err)
+	}
+	defer traceShutdown()
 
 	ctx, cancel := process.SignalContext(ctx, os.Interrupt)
 	defer cancel()
@@ -134,7 +148,10 @@ func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
 		log.Warn("Skipping etcd set up since the inference proxy is running an unencrypted API adapter")
 	}
 
-	forwarder := forwarder.New(&http.Client{}, net.JoinHostPort(cfg.workloadAddress, cfg.workloadPort), forwarder.SchemeHTTP, log)
+	// Wrap the default transport so outbound calls to vLLM get a client span
+	// and the W3C traceparent header is injected automatically.
+	workloadClient := &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
+	forwarder := forwarder.New(workloadClient, net.JoinHostPort(cfg.workloadAddress, cfg.workloadPort), forwarder.SchemeHTTP, log)
 
 	mtlsIdentity, err := mtls.LoadIdentity(cfg.identityCertPath, cfg.identityKeyPath, cfg.identityCAPath)
 	if err != nil {

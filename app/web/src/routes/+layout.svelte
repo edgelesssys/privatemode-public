@@ -70,7 +70,68 @@
 </script>
 
 <svelte:head>
-  <title>Privatemode</title>
+  <title>Privatemode Chat</title>
+  <meta
+    name="description"
+    content="Privatemode Chat is your confidential AI chat app for sensitive conversations. Use leading AI models while keeping your data protected."
+  />
+
+  <link
+    rel="canonical"
+    href="https://chat.privatemode.ai/"
+  />
+
+  <!-- Open Graph -->
+  <meta
+    property="og:type"
+    content="website"
+  />
+  <meta
+    property="og:site_name"
+    content="Privatemode"
+  />
+  <meta
+    property="og:url"
+    content="https://chat.privatemode.ai/"
+  />
+  <meta
+    property="og:title"
+    content="Privatemode Chat"
+  />
+  <meta
+    property="og:description"
+    content="Privatemode Chat is your confidential AI chat app for sensitive conversations. Use leading AI models while keeping your data protected."
+  />
+  <meta
+    property="og:image"
+    content="https://chat.privatemode.ai/og-image.png"
+  />
+  <meta
+    property="og:image:width"
+    content="2400"
+  />
+  <meta
+    property="og:image:height"
+    content="1260"
+  />
+
+  <!-- Twitter Card -->
+  <meta
+    name="twitter:card"
+    content="summary_large_image"
+  />
+  <meta
+    name="twitter:title"
+    content="Privatemode Chat"
+  />
+  <meta
+    name="twitter:description"
+    content="Privatemode Chat is your confidential AI chat app for sensitive conversations. Use leading AI models while keeping your data protected."
+  />
+  <meta
+    name="twitter:image"
+    content="https://chat.privatemode.ai/og-image.png"
+  />
 </svelte:head>
 
 <main>

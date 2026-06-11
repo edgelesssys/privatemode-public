@@ -383,3 +383,30 @@ func TestForwardRetry(t *testing.T) {
 		})
 	}
 }
+
+// TestForwardDoesNotStripTraceparent verifies that requests entering with a
+// traceparent header have it forwarded to the upstream untouched. This guards
+// against accidental inclusion of traceparent in delHopHeaders.
+func TestForwardDoesNotStripTraceparent(t *testing.T) {
+	const inbound = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
+
+	var gotTraceparent string
+	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTraceparent = r.Header.Get("traceparent")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer stubServer.Close()
+
+	// Use a plain http.Client (no otelhttp) - we only want to assert the
+	// header survives the forwarder's hop-by-hop pruning.
+	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	req.Header.Set("traceparent", inbound)
+	resp := httptest.NewRecorder()
+	fwd.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
+
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Equal(t, inbound, gotTraceparent)
+}

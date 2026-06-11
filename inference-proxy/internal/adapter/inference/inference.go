@@ -23,6 +23,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/usagecollector"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.opentelemetry.io/otel"
 )
 
 const maxSSELineBytes = 1024 * 1024 // 1 MiB
@@ -96,59 +97,71 @@ func New(workloadTasks []string, cipher ResponseCipherCreator, ocspStatusFile st
 // This should be applied per-route by adapters that require OCSP verification.
 func (a *Adapter) VerifyOCSP(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ocspPolicy := r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyHeader)
-		ocspMAC := r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyMACHeader)
-		secretID := r.Header.Get(constants.PrivatemodeSecretIDHeader)
-
-		var acceptedStatuses []ocsp.Status
-		if ocspPolicy == "" && ocspMAC == "" {
-			acceptedStatuses = []ocsp.Status{ocsp.StatusGood} // Old clients won't set the header, only accept good status
-		} else {
-			secret, err := a.Cipher.Secret(r.Context(), secretID)
-			if err != nil {
-				forwarder.HTTPError(w, r, http.StatusInternalServerError, "getting secret for OCSP verification: %s", err)
-				return
-			}
-			if len(secret) != 32 {
-				forwarder.HTTPError(w, r, http.StatusInternalServerError, "invalid secret length for OCSP verification: expected 32 bytes, got %d", len(secret))
-				return
-			}
-
-			requestedOCSPStatus, err := ocspheader.UnmarshalAndVerify(ocspPolicy, ocspMAC, [32]byte(secret))
-			if err != nil {
-				forwarder.HTTPError(w, r, http.StatusInternalServerError, "verifying OCSP header: %s", err)
-				return
-			}
-
-			for _, allowedStatus := range requestedOCSPStatus.AllowedStatuses {
-				switch allowedStatus {
-				case ocspheader.AllowStatusGood:
-					acceptedStatuses = append(acceptedStatuses, ocsp.StatusGood)
-				case ocspheader.AllowStatusUnknown:
-					acceptedStatuses = append(acceptedStatuses, ocsp.StatusUnknown)
-				case ocspheader.AllowStatusRevoked:
-					acceptedStatuses = append(acceptedStatuses, ocsp.StatusRevoked(requestedOCSPStatus.RevokedNbf))
-				}
-			}
+		if !a.verifyOCSP(w, r) {
+			return
 		}
-
-		for _, status := range a.OCSPStatus {
-			if !status.Driver.AcceptedBy(acceptedStatuses) {
-				forwarder.HTTPError(w, r, http.StatusInternalServerError, "GPU attestation returned a driver OCSP status that is not accepted by the client: %s", status.Driver)
-				return
-			}
-			if !status.GPU.AcceptedBy(acceptedStatuses) {
-				forwarder.HTTPError(w, r, http.StatusInternalServerError, "GPU attestation returned a GPU OCSP status that is not accepted by the client: %s", status.GPU)
-				return
-			}
-			if !status.VBIOS.AcceptedBy(acceptedStatuses) {
-				forwarder.HTTPError(w, r, http.StatusInternalServerError, "GPU attestation returned a VBIOS OCSP status that is not accepted by the client: %s", status.VBIOS)
-				return
-			}
-		}
-
 		h.ServeHTTP(w, r)
 	})
+}
+
+// verifyOCSP checks the workload's OCSP statuses against the client's accepted policy.
+// It returns false and writes an HTTP error response if verification fails.
+func (a *Adapter) verifyOCSP(w http.ResponseWriter, r *http.Request) bool {
+	ctx, span := otel.Tracer("inference-proxy/ocsp").Start(r.Context(), "verify-ocsp")
+	defer span.End()
+
+	ocspPolicy := r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyHeader)
+	ocspMAC := r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyMACHeader)
+	secretID := r.Header.Get(constants.PrivatemodeSecretIDHeader)
+
+	var acceptedStatuses []ocsp.Status
+	if ocspPolicy == "" && ocspMAC == "" {
+		acceptedStatuses = []ocsp.Status{ocsp.StatusGood} // Old clients won't set the header, only accept good status
+	} else {
+		secret, err := a.Cipher.Secret(ctx, secretID)
+		if err != nil {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "getting secret for OCSP verification: %s", err)
+			return false
+		}
+		if len(secret) != 32 {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "invalid secret length for OCSP verification: expected 32 bytes, got %d", len(secret))
+			return false
+		}
+
+		requestedOCSPStatus, err := ocspheader.UnmarshalAndVerify(ocspPolicy, ocspMAC, [32]byte(secret))
+		if err != nil {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "verifying OCSP header: %s", err)
+			return false
+		}
+
+		for _, allowedStatus := range requestedOCSPStatus.AllowedStatuses {
+			switch allowedStatus {
+			case ocspheader.AllowStatusGood:
+				acceptedStatuses = append(acceptedStatuses, ocsp.StatusGood)
+			case ocspheader.AllowStatusUnknown:
+				acceptedStatuses = append(acceptedStatuses, ocsp.StatusUnknown)
+			case ocspheader.AllowStatusRevoked:
+				acceptedStatuses = append(acceptedStatuses, ocsp.StatusRevoked(requestedOCSPStatus.RevokedNbf))
+			}
+		}
+	}
+
+	for _, status := range a.OCSPStatus {
+		if !status.Driver.AcceptedBy(acceptedStatuses) {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "GPU attestation returned a driver OCSP status that is not accepted by the client: %s", status.Driver)
+			return false
+		}
+		if !status.GPU.AcceptedBy(acceptedStatuses) {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "GPU attestation returned a GPU OCSP status that is not accepted by the client: %s", status.GPU)
+			return false
+		}
+		if !status.VBIOS.AcceptedBy(acceptedStatuses) {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "GPU attestation returned a VBIOS OCSP status that is not accepted by the client: %s", status.VBIOS)
+			return false
+		}
+	}
+
+	return true
 }
 
 // UnsupportedEndpoint returns 501 Not Implemented.

@@ -12,6 +12,10 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
 	"github.com/edgelesssys/continuum/internal/mtls"
 	"github.com/edgelesssys/continuum/internal/oss/process"
+	"github.com/edgelesssys/continuum/internal/oss/requestid"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Server implements the user facing HTTP REST server.
@@ -53,13 +57,33 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 		a.RegisterRoutes(mux)
 	}
 
+	// Span sampling is governed centrally by the tracer provider's sampler
+	// (ParentBased + NeverSample root, see [tracing.Setup]):
+	// The inference-proxy never originates traces, so parentless spans from
+	// non-propagated internal traffic (e.g heartbeats) are dropped, while
+	// spans continuing an inbound apigateway-sampled trace are recorded.
+	handler := otelhttp.NewHandler(
+		tagRequestID(mux), "inference-proxy",
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+			return r.Method + " " + r.URL.Path
+		}),
+	)
 	server := &http.Server{
 		Addr:      listener.Addr().String(),
-		Handler:   mux,
+		Handler:   handler,
 		TLSConfig: s.mtlsIdentity.ServerConfig(),
 		ErrorLog:  newHTTPLogger(s.log), // Prometheus tries to scrape metrics from this TLS endpoint, causing errors we want to ignore
 	}
 	return process.HTTPServeContext(ctx, server, listener, s.log)
+}
+
+func tagRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if id := requestid.FromHeader(r.Header); id != requestid.Unknown {
+			trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("privatemode.request_id", id))
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type httpLogger struct {
