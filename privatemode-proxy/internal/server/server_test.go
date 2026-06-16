@@ -695,6 +695,20 @@ func TestTargetModelHeader(t *testing.T) {
 	}
 }
 
+func TestReadinessHandler(t *testing.T) {
+	secret := secretmanager.Secret{
+		ID:   "123",
+		Data: bytes.Repeat([]byte{0x42}, 32),
+	}
+	sut := newTestServer(nil, secret, "192.0.2.1:8080", "", false)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/readyz", http.NoBody)
+	resp := httptest.NewRecorder()
+	sut.GetHandler().ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusNoContent, resp.Code)
+}
+
 // newTestServer returns a stub server for testing.
 func newTestServer(apiKey *string, secret secretmanager.Secret, backendAddr string, defaultCacheSalt string, isApp bool) *Server {
 	return &Server{

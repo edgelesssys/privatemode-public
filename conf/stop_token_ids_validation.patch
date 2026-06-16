@@ -1,0 +1,63 @@
+diff --git a/vllm/sampling_params.py b/vllm/sampling_params.py
+index a2ed5e68f..e905f9a75 100644
+--- a/vllm/sampling_params.py
++++ b/vllm/sampling_params.py
+@@ -672,6 +672,7 @@ class SamplingParams(
+         self._validate_logit_bias(model_config)
+         self._validate_logits_processors(model_config)
+         self._validate_allowed_token_ids(tokenizer)
++        self._validate_stop_token_ids(model_config)
+         self._validate_spec_decode(speculative_config)
+         self._validate_structured_outputs(structured_outputs_config, tokenizer)
+ 
+@@ -735,6 +736,27 @@ class SamplingParams(
+                 value=invalid_token_ids,
+             )
+ 
++    def _validate_stop_token_ids(self, model_config: ModelConfig) -> None:
++        """Validate stop_token_ids are within vocabulary range."""
++        if not self.stop_token_ids:
++            return
++
++        vocab_size = model_config.get_vocab_size()
++        invalid_token_ids = [
++            token_id
++            for token_id in self.stop_token_ids
++            if token_id < 0 or token_id >= vocab_size
++        ]
++
++        if invalid_token_ids:
++            raise VLLMValidationError(
++                f"token_id(s) {invalid_token_ids} in stop_token_ids "
++                f"contain out-of-vocab token ids. "
++                f"Vocabulary size: {vocab_size}",
++                parameter="stop_token_ids",
++                value=invalid_token_ids,
++            )
++
+     def _validate_logits_processors(self, model_config: ModelConfig) -> None:
+         from vllm.v1.sample.logits_processor import (
+             validate_logits_processors_parameters,
+diff --git a/vllm/v1/sample/rejection_sampler.py b/vllm/v1/sample/rejection_sampler.py
+index 678654cb7..7fdd6be67 100644
+--- a/vllm/v1/sample/rejection_sampler.py
++++ b/vllm/v1/sample/rejection_sampler.py
+@@ -910,12 +910,17 @@ def sample_recovered_tokens_kernel(
+             other=0.0,
+         )
+ 
+-        # Local tile reduction
++        # Local tile reduction.
++        # Mask out-of-vocabulary entries to -inf so they can never win
++        # the argmax — prevents producing recovered_id >= vocab_size
++        # when all valid entries in the last tile have zero probability.
+         score = prob * inv_q
++        score = tl.where(vocab_mask, score, float("-inf"))
+         local_max, local_id = tl.max(score, axis=0, return_indices=True)
+ 
+         if local_max > max_val:
+             max_val = local_max
+             recovered_id = v + local_id
+ 
++    recovered_id = tl.minimum(recovered_id, vocab_size - 1)
+     tl.store(output_token_ids_ptr + token_idx, recovered_id)

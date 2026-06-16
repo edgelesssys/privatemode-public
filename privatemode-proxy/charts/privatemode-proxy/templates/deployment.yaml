@@ -24,15 +24,22 @@ spec:
               containerPort: {{ .Values.config.port }}
               protocol: TCP
           startupProbe:
-            tcpSocket:
-              port: http
-            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
             periodSeconds: {{ .Values.probes.startup.periodSeconds }}
-          readinessProbe:
-            tcpSocket:
+            successThreshold: {{ .Values.probes.startup.successThreshold }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+            httpGet:
+              path: /readyz
               port: http
-            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+              scheme: {{ ternary "HTTPS" "HTTP" .Values.config.tls.enabled }}
+          readinessProbe:
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            successThreshold: {{ .Values.probes.readiness.successThreshold }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: {{ ternary "HTTPS" "HTTP" .Values.config.tls.enabled }}
           args:
             {{- if .Values.config.apiKey.enabled }}
             - "--apiKey=@/etc/apiKey/apiKey"
@@ -53,6 +60,9 @@ spec:
             {{- end }}
             {{- if .Values.config.insecureAPIConnection }}
             - "--insecureAPIConnection=true"
+            {{- end }}
+            {{- if .Values.config.sharedPromptCache.enabled }}
+            - "--sharedPromptCache"
             {{- end }}
           {{- if or .Values.config.customCA.enabled .Values.config.extraEnv }}
           env:

@@ -20,7 +20,7 @@ func TestEncryptResponse(t *testing.T) {
 	id := "id"
 	nonce := []byte("nonce")
 	secret := bytes.Repeat([]byte{0x42}, 32)
-	secrets := secrets.New(stubSecretGetter{}, nil)
+	secrets := secrets.New(stubSecretGetter{})
 	cipher := New(secrets)
 
 	// No secrets set
@@ -51,7 +51,7 @@ func TestDecryptRequest(t *testing.T) {
 	message := "message"
 	id := "id"
 	secret := bytes.Repeat([]byte{0x42}, 32)
-	secrets := secrets.New(stubSecretGetter{}, nil)
+	secrets := secrets.New(stubSecretGetter{})
 	cipher := New(secrets)
 
 	// Prepare ciphertext
@@ -247,7 +247,7 @@ func TestResponseCipherEncryptDecrypt(t *testing.T) {
 	message := "message"
 	id := "id"
 	secret := bytes.Repeat([]byte{0x42}, 32)
-	secrets := secrets.New(stubSecretGetter{}, nil)
+	secrets := secrets.New(stubSecretGetter{})
 	cipher := New(secrets)
 
 	// Add a secret

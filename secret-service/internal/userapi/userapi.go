@@ -14,6 +14,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	userpb "github.com/edgelesssys/continuum/internal/oss/proto/secret-service/userapi"
 	"github.com/edgelesssys/continuum/internal/oss/secretexchange"
 	"google.golang.org/grpc"
@@ -131,7 +132,7 @@ func (s *Server) ExchangeSecret(ctx context.Context, req *userpb.ExchangeSecretR
 		return nil, status.Errorf(codes.Internal, "exporting secret: %v", err)
 	}
 	secrets := map[string][]byte{secretexchange.ID(req.PublicKey): secret}
-	if err := s.secretStore.SetSecrets(ctx, secrets, int64(time.Hour/time.Second)); err != nil {
+	if err := s.secretStore.SetSecrets(ctx, secrets, int64(constants.InferenceSecretTTL/time.Second)); err != nil {
 		return nil, status.Errorf(codes.Internal, "saving secrets: %s", err)
 	}
 

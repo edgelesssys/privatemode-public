@@ -36,6 +36,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/stripe/stripe-go/v85 v85.2.0
 	github.com/stripe/stripe-go/v86 v86.0.0
+	github.com/svix/svix-webhooks v1.93.0
 	github.com/swaggo/echo-swagger/v2 v2.0.1
 	github.com/swaggo/swag v1.16.6
 	github.com/tidwall/gjson v1.19.0

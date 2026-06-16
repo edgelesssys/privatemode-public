@@ -116,7 +116,9 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 	fw := forwarder.New(http.DefaultClient, workloadEndpoint, forwarder.SchemeHTTP, log)
 
 	secret := []byte(strings.Repeat("a", 32))
-	c := cipher.New(secrets.New(stubSecretGetter{}, map[string][]byte{"test": secret}))
+	secrets := secrets.New(stubSecretGetter{})
+	secrets.Reset(map[string][]byte{"test": secret})
+	c := cipher.New(secrets)
 	requestCipher, err := crypto.NewRequestCipher(secret, "test")
 	require.NoError(err)
 

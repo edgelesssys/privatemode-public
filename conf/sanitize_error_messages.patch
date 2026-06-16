@@ -1,0 +1,83 @@
+diff --git a/vllm/entrypoints/anthropic/api_router.py b/vllm/entrypoints/anthropic/api_router.py
+index 1fe2be899..8aeadd225 100644
+--- a/vllm/entrypoints/anthropic/api_router.py
++++ b/vllm/entrypoints/anthropic/api_router.py
+@@ -20,6 +20,7 @@ from vllm.entrypoints.openai.engine.protocol import ErrorResponse
+ from vllm.entrypoints.openai.utils import validate_json_request
+ from vllm.entrypoints.utils import (
+     load_aware_call,
++    sanitize_message,
+     with_cancellation,
+ )
+ from vllm.logger import init_logger
+@@ -75,7 +76,7 @@ async def create_messages(request: AnthropicMessagesRequest, raw_request: Reques
+             content=AnthropicErrorResponse(
+                 error=AnthropicError(
+                     type="internal_error",
+-                    message=str(e),
++                    message=sanitize_message(str(e)),
+                 )
+             ).model_dump(),
+         )
+@@ -121,7 +122,7 @@ async def count_tokens(request: AnthropicCountTokensRequest, raw_request: Reques
+             content=AnthropicErrorResponse(
+                 error=AnthropicError(
+                     type="internal_error",
+-                    message=str(e),
++                    message=sanitize_message(str(e)),
+                 )
+             ).model_dump(),
+         )
+diff --git a/vllm/entrypoints/anthropic/serving.py b/vllm/entrypoints/anthropic/serving.py
+index 23a8b45b8..1c08a7e9d 100644
+--- a/vllm/entrypoints/anthropic/serving.py
++++ b/vllm/entrypoints/anthropic/serving.py
+@@ -43,6 +43,7 @@ from vllm.entrypoints.openai.engine.protocol import (
+     UsageInfo,
+ )
+ from vllm.entrypoints.openai.models.serving import OpenAIServingModels
++from vllm.entrypoints.utils import sanitize_message
+ 
+ if TYPE_CHECKING:
+     from vllm.entrypoints.serve.render.serving import OpenAIServingRender
+@@ -866,7 +867,9 @@ class AnthropicServingMessages(OpenAIServingChat):
+             logger.exception("Error in message stream converter.")
+             error_response = AnthropicStreamEvent(
+                 type="error",
+-                error=AnthropicError(type="internal_error", message=str(e)),
++                error=AnthropicError(
++                    type="internal_error", message=sanitize_message(str(e))
++                ),
+             )
+             data = error_response.model_dump_json(exclude_unset=True)
+             yield wrap_data_with_event(data, "error")
+diff --git a/vllm/entrypoints/openai/realtime/connection.py b/vllm/entrypoints/openai/realtime/connection.py
+index 58af32905..9579b2800 100644
+--- a/vllm/entrypoints/openai/realtime/connection.py
++++ b/vllm/entrypoints/openai/realtime/connection.py
+@@ -23,6 +23,7 @@ from vllm.entrypoints.openai.realtime.protocol import (
+     TranscriptionDone,
+ )
+ from vllm.entrypoints.openai.realtime.serving import OpenAIServingRealtime
++from vllm.entrypoints.utils import sanitize_message
+ from vllm.exceptions import VLLMValidationError
+ from vllm.logger import init_logger
+ 
+@@ -71,7 +72,7 @@ class RealtimeConnection:
+                     await self.send_error("Invalid JSON", "invalid_json")
+                 except Exception as e:
+                     logger.exception("Error handling event: %s", e)
+-                    await self.send_error(str(e), "processing_error")
++                    await self.send_error(sanitize_message(str(e)), "processing_error")
+         except WebSocketDisconnect:
+             logger.debug("WebSocket disconnected: %s", self.connection_id)
+             self._is_connected = False
+@@ -261,7 +262,7 @@ class RealtimeConnection:
+ 
+         except Exception as e:
+             logger.exception("Error in generation: %s", e)
+-            await self.send_error(str(e), "processing_error")
++            await self.send_error(sanitize_message(str(e)), "processing_error")
+ 
+     async def send(
+         self, event: SessionCreated | TranscriptionDelta | TranscriptionDone

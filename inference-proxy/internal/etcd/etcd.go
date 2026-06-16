@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/spf13/afero"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -27,6 +27,7 @@ const (
 type Etcd struct {
 	client etcdClient
 
+	secrets   *secrets.Secrets
 	closeChan chan struct{}
 	log       *slog.Logger
 }
@@ -67,19 +68,15 @@ func New(hosts []string, etcdMemberCert, etcdMemberKey, etcdCA string, fs afero.
 		closeChan: make(chan struct{}),
 		log:       log,
 	}
+	e.secrets = secrets.New(e)
 
 	return e, e.close, nil
 }
 
 // WatchSecrets starts a watch on the etcd's inference secrets and updates the local secret store on changes.
-func (e *Etcd) WatchSecrets(ctx context.Context) (*secrets.Secrets, error) {
-	secrets, startingRevision, err := e.fetchSecrets(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	go e.watchSecrets(ctx, secrets, startingRevision)
-	return secrets, nil
+func (e *Etcd) WatchSecrets(ctx context.Context) *secrets.Secrets {
+	go e.watchSecrets(ctx)
+	return e.secrets
 }
 
 // GetSecret retrieves a secret from etcd by its key.
@@ -94,8 +91,11 @@ func (e *Etcd) GetSecret(ctx context.Context, key string) ([]byte, error) {
 	return response.Kvs[0].Value, nil
 }
 
-func (e *Etcd) watchSecrets(ctx context.Context, secrets *secrets.Secrets, watchRevision int64) {
-	watchChan, cancel := e.startWatch(ctx, watchRevision, 0) // Start the first watcher immediately
+func (e *Etcd) watchSecrets(ctx context.Context) {
+	watchChan, cancel, err := e.startWatch(ctx, 0)
+	if err != nil {
+		return
+	}
 	defer cancel()
 
 	for {
@@ -111,7 +111,10 @@ func (e *Etcd) watchSecrets(ctx context.Context, secrets *secrets.Secrets, watch
 				e.log.Info("Restarting watch")
 
 				cancel()
-				watchChan, cancel = e.startWatch(ctx, watchRevision, restartBackoff)
+				watchChan, cancel, err = e.startWatch(ctx, restartBackoff)
+				if err != nil {
+					return
+				}
 				continue
 			}
 			if event.Err() != nil {
@@ -119,7 +122,10 @@ func (e *Etcd) watchSecrets(ctx context.Context, secrets *secrets.Secrets, watch
 				e.log.Info("Restarting watch")
 
 				cancel()
-				watchChan, cancel = e.startWatch(ctx, watchRevision, restartBackoff)
+				watchChan, cancel, err = e.startWatch(ctx, restartBackoff)
+				if err != nil {
+					return
+				}
 				continue
 			}
 			if event.Canceled {
@@ -127,12 +133,12 @@ func (e *Etcd) watchSecrets(ctx context.Context, secrets *secrets.Secrets, watch
 				e.log.Info("Restarting watch")
 
 				cancel()
-				watchChan, cancel = e.startWatch(ctx, watchRevision, restartBackoff)
+				watchChan, cancel, err = e.startWatch(ctx, restartBackoff)
+				if err != nil {
+					return
+				}
 				continue
 			}
-
-			watchRevision = event.Header.Revision + 1
-			e.log.Info("Updating revision", "revision", watchRevision)
 
 			if event.IsProgressNotify() {
 				e.log.Info("Watch still alive")
@@ -143,11 +149,11 @@ func (e *Etcd) watchSecrets(ctx context.Context, secrets *secrets.Secrets, watch
 			for _, ev := range event.Events {
 				if ev.IsCreate() || ev.IsModify() {
 					// Save new secret or update existing secret
-					secrets.Set(strings.TrimPrefix(string(ev.Kv.Key), constants.EtcdInferenceSecretPrefix), ev.Kv.Value)
+					e.secrets.Set(strings.TrimPrefix(string(ev.Kv.Key), constants.EtcdInferenceSecretPrefix), ev.Kv.Value)
 					e.log.Info("Updated secret", "key", string(ev.Kv.Key))
 				} else {
 					// Remove existing key
-					secrets.Delete(strings.TrimPrefix(string(ev.Kv.Key), constants.EtcdInferenceSecretPrefix))
+					e.secrets.Delete(strings.TrimPrefix(string(ev.Kv.Key), constants.EtcdInferenceSecretPrefix))
 					e.log.Info("Deleted secret", "key", string(ev.Kv.Key))
 				}
 			}
@@ -155,47 +161,69 @@ func (e *Etcd) watchSecrets(ctx context.Context, secrets *secrets.Secrets, watch
 	}
 }
 
-// fetchSecrets gets the initial secrets from etcd and the revision of their last update.
-func (e *Etcd) fetchSecrets(ctx context.Context) (*secrets.Secrets, int64, error) {
-	e.log.Info("Fetching initial set of inference secret")
-
-	resp, err := e.client.Get(ctx, constants.EtcdInferenceSecretPrefix, clientv3.WithPrefix())
-	if err != nil {
-		return nil, -1, fmt.Errorf("fetching secrets from etcd: %w", err)
-	}
-
-	secretMap := make(map[string][]byte)
-	for _, kv := range resp.Kvs {
-		if kv == nil {
-			return nil, -1, errors.New("nil key-value pair in etcd response")
-		}
-		secretMap[strings.TrimPrefix(string(kv.Key), constants.EtcdInferenceSecretPrefix)] = kv.Value
-	}
-
-	return secrets.New(e, secretMap), resp.Header.Revision + 1, nil
-}
-
 func (e *Etcd) close() {
 	e.closeChan <- struct{}{}
 	_ = e.client.Close()
 }
 
-func (e *Etcd) startWatch(ctx context.Context, revision int64, delay time.Duration) (clientv3.WatchChan, func()) {
-	select {
-	case <-ctx.Done():
-		return nil, func() {}
-	case <-time.After(delay):
-	}
+// startWatch starts a watcher on etcd using the given [context.Context].
+// The function retries until a watch can be successfully established, or the context is canceled,
+// at which point it returns an error.
+// Cancelling the [context.Context], or calling the returned cancel function, stops the watcher.
+func (e *Etcd) startWatch(ctx context.Context, delay time.Duration) (ch clientv3.WatchChan, cancelFunc func(), err error) {
+	backoff := delay
 
-	e.log.Info("Starting watch", "revision", revision)
-	watchCtx, cancel := context.WithCancel(ctx)
-	return e.client.Watch(
-		clientv3.WithRequireLeader(watchCtx),
-		constants.EtcdInferenceSecretPrefix,
-		clientv3.WithPrefix(),
-		clientv3.WithRev(revision),
-		clientv3.WithProgressNotify(),
-	), cancel
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, func() {}, ctx.Err()
+		case <-time.After(backoff):
+			e.log.Info("Starting watch")
+			watchCtx, cancel := context.WithCancel(ctx)
+			watch := e.client.Watch(
+				clientv3.WithRequireLeader(watchCtx),
+				constants.EtcdInferenceSecretPrefix,
+				clientv3.WithPrefix(),
+				clientv3.WithProgressNotify(),
+			)
+
+			// We start the watch without a revision, meaning we need to retrieve the current
+			// secrets list manually to populate our cache before we can properly start
+			getCtx, getCancel := context.WithTimeout(ctx, 10*time.Second) // This should usually be a quick operation
+			resp, err := e.client.Get(getCtx, constants.EtcdInferenceSecretPrefix, clientv3.WithPrefix())
+			getCancel()
+			if err != nil {
+				e.log.Error("Failed retrieving inference secrets from etcd, restarting watch...", "error", err)
+				backoff = restartBackoff
+				cancel()
+				continue
+			}
+
+			secretMap, err := kvsToMap(resp.Kvs)
+			if err != nil {
+				e.log.Error("Failed parsing inference secrets from etcd", "error", err)
+				backoff = restartBackoff
+				cancel()
+				continue
+			}
+
+			// Watch (re)-started successfully, update the secret cache with the current values from etcd
+			e.secrets.Reset(secretMap)
+
+			return watch, cancel, nil
+		}
+	}
+}
+
+func kvsToMap(kvs []*mvccpb.KeyValue) (map[string][]byte, error) {
+	result := make(map[string][]byte)
+	for _, kv := range kvs {
+		if kv == nil {
+			return nil, errors.New("nil key-value pair in etcd response")
+		}
+		result[strings.TrimPrefix(string(kv.Key), constants.EtcdInferenceSecretPrefix)] = kv.Value
+	}
+	return result, nil
 }
 
 // getEndpointsFromHosts adds etcd client ports to the given hosts.

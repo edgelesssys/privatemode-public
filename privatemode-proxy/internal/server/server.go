@@ -103,6 +103,7 @@ func (s *Server) GetHandler() http.Handler {
 	mux.HandleFunc(openai.EmbeddingsEndpoint, s.embeddingsHandler)
 	mux.HandleFunc(openai.TranscriptionsEndpoint, s.transcriptionsHandler)
 	mux.HandleFunc(anthropic.MessagesEndpoint, s.chatRequestHandler(anthropic.PlainMessagesRequestFields, anthropic.PlainMessagesResponseFields))
+	mux.HandleFunc("/readyz", s.readinessHandler)
 
 	// Apply middlewares below, handler holds the chain entrypoint
 	var handler http.Handler = mux
@@ -115,6 +116,10 @@ func (s *Server) GetHandler() http.Handler {
 	}
 
 	return handler
+}
+
+func (s *Server) readinessHandler(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // passAuthToSecretManagerMiddleware extracts the bearer token from the request and passes it to

@@ -1,18 +1,22 @@
 replicaCount: 1
 image:
-  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.44.1-pre
+  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.45.1-pre
   pullPolicy: IfNotPresent
   restartPolicy: Always
 service:
   type: ClusterIP
   port: 8080
+  annotations: {}
 probes:
   startup:
-    failureThreshold: 60
-    periodSeconds: 2
+    failureThreshold: 30
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    successThreshold: 1
   readiness:
     failureThreshold: 3
-    periodSeconds: 2
+    periodSeconds: 30
+    successThreshold: 1
 resources: {}
 nodeSelector:
   kubernetes.io/arch: amd64
@@ -49,6 +53,8 @@ config:
     enabled: false
     secretName: 'privatemode-proxy-custom-ca'
     fileName: 'ca-bundle.crt'
+  sharedPromptCache:
+    enabled: false
   # Extra environment variables
   extraEnv: []
   # Set to true to allow the proxy to accept self-signed certificates from the backend

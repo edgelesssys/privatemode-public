@@ -129,7 +129,7 @@ func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
 		return adapterType != adapter.InferenceAPIUnencrypted
 	})
 
-	secrets := secrets.New(stubSecretGetter{}, nil)
+	secrets := secrets.New(stubSecretGetter{})
 	if needsEtcd {
 		var closeClient func()
 		var err error
@@ -217,11 +217,7 @@ func setUpEtcdSync(ctx context.Context, address, etcdMemberCert, etcdMemberKey, 
 	}
 
 	log.Info("Starting sync of inference secrets")
-	secrets, err := etcdWatcher.WatchSecrets(ctx)
-	if err != nil {
-		closeClient()
-		return nil, nil, fmt.Errorf("starting secrets watcher: %w", err)
-	}
+	secrets := etcdWatcher.WatchSecrets(ctx)
 
 	return secrets, closeClient, nil
 }

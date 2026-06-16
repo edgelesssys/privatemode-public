@@ -3,65 +3,15 @@ package etcd
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"sync"
 	"testing"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/stretchr/testify/assert"
-	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
-
-func TestFetchSecrets(t *testing.T) {
-	testCases := map[string]struct {
-		etcdClient *stubEtcdClient
-		wantErr    bool
-	}{
-		"success": {
-			etcdClient: &stubEtcdClient{
-				getResponse: &clientv3.GetResponse{
-					Header: &etcdserverpb.ResponseHeader{},
-					Kvs: []*mvccpb.KeyValue{
-						{
-							Key:   []byte(constants.EtcdInferenceSecretPrefix + "key1"),
-							Value: []byte("value1"),
-						},
-					},
-				},
-			},
-		},
-		"get error": {
-			etcdClient: &stubEtcdClient{
-				getErr: assert.AnError,
-			},
-			wantErr: true,
-		},
-	}
-
-	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			assert := assert.New(t)
-			etcd := &Etcd{
-				client: tc.etcdClient,
-				log:    slog.Default(),
-			}
-
-			secrets, _, err := etcd.fetchSecrets(t.Context())
-			if tc.wantErr {
-				assert.Error(err)
-				return
-			}
-			assert.NoError(err)
-			for _, kvs := range tc.etcdClient.getResponse.Kvs {
-				_, ok := secrets.Get(t.Context(), strings.TrimPrefix(string(kvs.Key), constants.EtcdInferenceSecretPrefix))
-				assert.True(ok)
-			}
-		})
-	}
-}
 
 func TestGetEndpointFromInstances(t *testing.T) {
 	assert := assert.New(t)
@@ -184,28 +134,53 @@ func TestWatchSecrets(t *testing.T) {
 				assert.Equal(t, "value1", string(secret))
 			},
 		},
+		"remove nonexistent secret": {
+			initialSecrets: nil,
+			events: []clientv3.WatchResponse{
+				{
+					Events: []*clientv3.Event{
+						{
+							Type: mvccpb.DELETE,
+							Kv: &mvccpb.KeyValue{
+								Key: []byte(constants.EtcdInferenceSecretPrefix + "key1"),
+							},
+						},
+					},
+				},
+			},
+			assertions: func(t *testing.T, sec *secrets.Secrets) {
+				_, ok := sec.Get(t.Context(), "key1")
+				assert.False(t, ok)
+			},
+		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
+			initialGet := &clientv3.GetResponse{Kvs: []*mvccpb.KeyValue{}}
+			for k, v := range tc.initialSecrets {
+				initialGet.Kvs = append(initialGet.Kvs, &mvccpb.KeyValue{
+					Key:   []byte(constants.EtcdInferenceSecretPrefix + k),
+					Value: v,
+				})
+			}
 			stubClient := &stubEtcdClient{
-				getResponse:   nil,
-				getErr:        assert.AnError,
+				getResponses:  []*clientv3.GetResponse{initialGet},
+				getErr:        nil,
 				watchResponse: make(chan clientv3.WatchResponse),
 			}
 			etcd := &Etcd{
 				client: stubClient,
 				log:    slog.Default(),
 			}
-			secrets := secrets.New(etcd, tc.initialSecrets)
+			secrets := secrets.New(etcd)
+			etcd.secrets = secrets
 
 			ctx, cancel := context.WithCancel(t.Context())
 			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				etcd.watchSecrets(ctx, secrets, 0)
-			}()
+			wg.Go(func() {
+				etcd.watchSecrets(ctx)
+			})
 
 			for _, event := range tc.events {
 				stubClient.watchResponse <- event
@@ -219,7 +194,7 @@ func TestWatchSecrets(t *testing.T) {
 }
 
 type stubEtcdClient struct {
-	getResponse   *clientv3.GetResponse
+	getResponses  []*clientv3.GetResponse
 	getErr        error
 	watchResponse chan clientv3.WatchResponse
 }
@@ -229,7 +204,14 @@ func (s *stubEtcdClient) Close() error {
 }
 
 func (s *stubEtcdClient) Get(_ context.Context, _ string, _ ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-	return s.getResponse, s.getErr
+	var getResponse *clientv3.GetResponse
+	if len(s.getResponses) > 0 {
+		getResponse = s.getResponses[0]
+		s.getResponses = s.getResponses[1:]
+	} else {
+		getResponse = &clientv3.GetResponse{Kvs: []*mvccpb.KeyValue{}}
+	}
+	return getResponse, s.getErr
 }
 
 func (s *stubEtcdClient) Watch(_ context.Context, _ string, _ ...clientv3.OpOption) clientv3.WatchChan {

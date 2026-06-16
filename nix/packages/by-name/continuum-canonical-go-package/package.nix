@@ -11,7 +11,7 @@ buildGo126Module {
     "go.sum"
   ];
 
-  vendorHash = "sha256-Q38Xa/yITVBUiT5BjEfRdOBZqs9ictt9CICd8tOY2DY=";
+  vendorHash = "sha256-fqCFmEA9nJBEJif11Z497wKuLPYBee13ffcm4H6ByW0=";
 
   doCheck = false;
 

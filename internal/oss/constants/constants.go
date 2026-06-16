@@ -7,6 +7,7 @@ package constants
 import (
 	"os"
 	"path/filepath"
+	"time"
 )
 
 var version = "0.0.0-dev"
@@ -118,6 +119,9 @@ const (
 	ShardKeyThirdBoundaryBlocksPerChar = 32
 	// ShardKeyThirdBoundaryBlocks is the number of cache blocks after the second boundary.
 	ShardKeyThirdBoundaryBlocks = 1_000_000 / CacheBlockSizeTokens
+
+	// InferenceSecretTTL is the time-to-live for inference secrets.
+	InferenceSecretTTL = time.Hour
 
 	// MaxFileSizeBytes is the maximum file size that users may upload.
 	// The user-facing limit is 50 MiB of file content; this higher value (128 MiB)
