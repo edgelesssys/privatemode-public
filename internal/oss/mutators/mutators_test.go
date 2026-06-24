@@ -5,7 +5,6 @@ package mutators
 
 import (
 	"bytes"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -57,7 +56,7 @@ func TestGenerateShardKey(t *testing.T) {
 			assert := assert.New(t)
 			content := string(bytes.Repeat([]byte("a"), tc.contentLength))
 
-			shardKey, err := generateShardKey(cacheSalt, content, slog.Default())
+			shardKey, err := generateShardKey(cacheSalt, content)
 
 			if tc.expectError {
 				require.Error(err)
@@ -88,7 +87,7 @@ func BenchmarkGenerateShardKey_1M(b *testing.B) {
 
 	start := time.Now()
 	for b.Loop() {
-		if _, err := generateShardKey(cacheSalt, content, slog.Default()); err != nil {
+		if _, err := generateShardKey(cacheSalt, content); err != nil {
 			b.Fatalf("unexpected error: %v", err)
 		}
 	}

@@ -62,7 +62,7 @@ func Setup(ctx context.Context, serviceName, endpoint string, rootSampler sdktra
 	))
 
 	if endpoint == "" {
-		log.Info("Tracing disabled (no OTLP endpoint configured)")
+		log.InfoContext(ctx, "Tracing disabled (no OTLP endpoint configured)")
 		return func() {}, nil
 	}
 
@@ -100,13 +100,13 @@ func Setup(ctx context.Context, serviceName, endpoint string, rootSampler sdktra
 	)
 	otel.SetTracerProvider(tp)
 
-	log.Info("Tracing enabled", "endpoint", endpoint, "service", serviceName)
+	log.InfoContext(ctx, "Tracing enabled", "endpoint", endpoint, "service", serviceName)
 	return func() { //nolint:contextcheck
 		// Use a fresh context because the parent may already be cancelled by signal handling.
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		if err := tp.Shutdown(shutdownCtx); err != nil {
-			log.Warn("Shutting down tracer", "error", err)
+			log.WarnContext(shutdownCtx, "Shutting down tracer", "error", err)
 		}
 	}, nil
 }

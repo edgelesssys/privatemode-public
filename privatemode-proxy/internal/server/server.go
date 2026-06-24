@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -19,7 +20,9 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/edgelesssys/continuum/internal/oss/middleware"
 	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
@@ -63,6 +66,12 @@ type apiForwarder interface {
 	)
 }
 
+type secretManager interface {
+	LatestSecret(ctx context.Context) (secretmanager.Secret, error)
+	ForceUpdate(ctx context.Context) error
+	OfferAPIKey(context.Context, string) error
+}
+
 // New sets up a new Server.
 func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Server {
 	log.Info("Version", slog.String("version", constants.Version()))
@@ -96,13 +105,13 @@ func (s *Server) Serve(ctx context.Context, lis net.Listener, tlsConfig *tls.Con
 // GetHandler returns an HTTP handler that routes requests to the appropriate handler.
 func (s *Server) GetHandler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc(openai.ChatCompletionsEndpoint, s.chatRequestHandler(openai.PlainCompletionsRequestFields, openai.PlainCompletionsResponseFields))
-	mux.HandleFunc(openai.LegacyCompletionsEndpoint, s.chatRequestHandler(openai.PlainCompletionsRequestFields, openai.PlainCompletionsResponseFields))
+	mux.HandleFunc(openai.ChatCompletionsEndpoint, s.chatRequestHandler)
+	mux.HandleFunc(openai.LegacyCompletionsEndpoint, s.chatRequestHandler)
 	mux.HandleFunc("/unstructured/", s.unstructuredHandler)
-	mux.HandleFunc(openai.ModelsEndpoint, s.noEncryptionHandler)
+	mux.HandleFunc(openai.ModelsEndpoint, s.forwardUnencrypted)
 	mux.HandleFunc(openai.EmbeddingsEndpoint, s.embeddingsHandler)
 	mux.HandleFunc(openai.TranscriptionsEndpoint, s.transcriptionsHandler)
-	mux.HandleFunc(anthropic.MessagesEndpoint, s.chatRequestHandler(anthropic.PlainMessagesRequestFields, anthropic.PlainMessagesResponseFields))
+	mux.HandleFunc(anthropic.MessagesEndpoint, s.chatRequestHandler)
 	mux.HandleFunc("/readyz", s.readinessHandler)
 
 	// Apply middlewares below, handler holds the chain entrypoint
@@ -115,11 +124,24 @@ func (s *Server) GetHandler() http.Handler {
 		handler = middleware.DumpRequestAndResponse(handler, s.log, s.dumpRequestsDir)
 	}
 
+	handler = middleware.LogRequestSummary(handler, s.log, true)
+
+	handler = addRequestID(handler)
+
 	return handler
 }
 
 func (s *Server) readinessHandler(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// addRequestID generates a fresh request ID and stores it in the request context.
+func addRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := requestid.New()
+		ctx := requestid.WithContext(r.Context(), requestID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 // passAuthToSecretManagerMiddleware extracts the bearer token from the request and passes it to
@@ -136,62 +158,85 @@ func passAuthToSecretManagerMiddleware(next http.Handler, sm secretManager) http
 	})
 }
 
-func (s *Server) inferenceHandler(
-	requestMutator func(*RenewableRequestCipher) forwarder.RequestMutator,
-	responseMapper func(*RenewableRequestCipher) forwarder.ResponseMapper,
-) func(w http.ResponseWriter, r *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.setStaticRequestHeaders(r)
+func (s *Server) forwardEncrypted(
+	w http.ResponseWriter, r *http.Request,
+	requestMutator forwarder.RequestMutator,
+) {
+	var ce *encbody.ClientExchange
+	ctx := r.Context()
+	// request ID is always stored in context by middleware
+	requestID, _ := requestid.FromContext(ctx)
+	attempt := 0
 
-		rc, err := NewRenewableRequestCipher(r.Context(), s.sm)
-		if err != nil {
-			forwarder.HTTPError(w, r, http.StatusInternalServerError, "creating request cipher: %s", err)
-			return
-		}
-		suppliedRequestMutator := requestMutator(rc)
+	// Set up retry logic for specific status codes
+	retryCallback := func(statusCode int, errMsg string, callbackAttempt int) (bool, time.Duration) {
+		attempt = callbackAttempt
 
-		requestID := newRequestID()
-		attempt := 0
-		r.Header.Set(requestid.UserHeader, requestID) // Add request ID to header so its logged by "Forward"
-
-		// Set up retry logic for specific status codes
-		//nolint:contextcheck // retryCallback is only called within the Forward() call so r.Context() does not leak
-		retryCallback := func(statusCode int, errMsg string, callbackAttempt int) (bool, time.Duration) {
-			attempt = callbackAttempt
-			switch {
-			case attempt <= 1 && (statusCode == 500 && strings.Contains(errMsg, constants.ErrorNoSecretForID)):
-				return s.noSecretForIDCallback(r.Context(), rc)
-			case attempt <= 1 && strings.Contains(errMsg, "read: connection reset by peer"):
-				return s.connectionResetCallback(r.Context(), rc)
-			default:
-				return false, 0
-			}
+		if callbackAttempt > 1 {
+			return false, 0
 		}
 
-		fullRequestMutator := func(req *http.Request) error {
-			secret, err := rc.GetSecret()
-			if err != nil {
-				return fmt.Errorf("getting exchange secret: %w", err)
-			}
-
-			if err := s.setDynamicHeaders(req, secret, requestID, attempt); err != nil {
-				return fmt.Errorf("setting headers on upstream request: %w", err)
-			}
-
-			if err := suppliedRequestMutator(req); err != nil {
-				return err
-			}
-
-			return nil
+		switch {
+		case (statusCode == 400 || statusCode == 500) && strings.Contains(errMsg, constants.ErrorNoSecretForID):
+			return s.noSecretForIDCallback(ctx)
+		case strings.Contains(errMsg, "read: connection reset by peer"):
+			// The encrypted exchange is rebuilt per attempt in fullRequestMutator, so
+			// just back off briefly and retry with the same secret.
+			return true, 50 * time.Millisecond
+		default:
+			return false, 0
 		}
-
-		s.forwarder.Forward(
-			w, r,
-			fullRequestMutator,
-			responseMapper(rc),
-			forwarder.WithRetryCallback(retryCallback),
-		)
 	}
+
+	fullRequestMutator := func(req *http.Request) error {
+		secret, err := s.sm.LatestSecret(req.Context())
+		if err != nil {
+			return fmt.Errorf("getting latest secret: %w", err)
+		}
+
+		ce, err = encbody.InitializeClientExchange(secret.Data)
+		if err != nil {
+			return fmt.Errorf("initializing encrypted exchange: %w", err)
+		}
+
+		if err := requestMutator(req); err != nil {
+			return fmt.Errorf("applying endpoint-specific mutator: %w", err)
+		}
+
+		if err := ce.EncryptRequest(req); err != nil {
+			return fmt.Errorf("encrypting request: %w", err)
+		}
+
+		s.setStaticRequestHeaders(req)
+
+		if err := s.setEncryptionHeaders(req, secret, requestID, attempt); err != nil {
+			return fmt.Errorf("setting headers on upstream request: %w", err)
+		}
+
+		return nil
+	}
+
+	fullResponseMapper := func(resp *http.Response) (forwarder.Response, error) {
+		logging.AddSummaryAttrs(ctx, "backendRequestID", requestid.FromHeader(resp.Header))
+
+		dsResp, err := ce.DecryptResponse(resp, constants.MaxEncryptedFrameSize)
+		if err != nil {
+			if errors.Is(err, encbody.ErrNotEncrypted) && resp.StatusCode >= 400 {
+				// Error responses originating outside the TCB are unencrypted
+				return forwarder.PassthroughResponseMapper(resp)
+			}
+			return nil, fmt.Errorf("decrypting response: %w", err)
+		}
+
+		return dsResp, nil
+	}
+
+	s.forwarder.Forward(
+		w, r,
+		fullRequestMutator,
+		fullResponseMapper,
+		forwarder.WithRetryCallback(retryCallback),
+	)
 }
 
 func modelFromRequest(req *http.Request) (string, error) {
@@ -210,43 +255,27 @@ func modelFromRequest(req *http.Request) (string, error) {
 	return msg.Model, nil
 }
 
-func (s *Server) chatRequestHandler(
-	plainReqFields, plainRespFields forwarder.FieldSelector,
-) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		s.inferenceHandler(
-			func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-				return forwarder.RequestMutatorChain(
-					mutators.ShardKeyInjector(s.defaultCacheSalt, s.log), // we don't want a shard key for random cache salts, so we inject before
-					openai.CacheSaltInjector(func() string {
-						if s.defaultCacheSalt == "" {
-							return openai.RandomPromptCacheSalt()
-						}
-						return s.defaultCacheSalt
-					}, s.log),
-					mutators.ModelHeaderInjector(modelFromRequest),
-					forwarder.WithJSONRequestMutation(cw.Encrypt, plainReqFields, s.log),
-				)
-			},
-			func(cw *RenewableRequestCipher) forwarder.ResponseMapper {
-				return forwarder.JSONResponseMapper(cw.DecryptResponse, plainRespFields)
-			},
-		)(w, r)
-	}
+func (s *Server) chatRequestHandler(w http.ResponseWriter, r *http.Request) {
+	s.forwardEncrypted(
+		w, r,
+		forwarder.RequestMutatorChain(
+			mutators.ShardKeyInjector(s.defaultCacheSalt), // we don't want a shard key for random cache salts, so we inject before
+			openai.CacheSaltInjector(func() string {
+				if s.defaultCacheSalt == "" {
+					return openai.RandomPromptCacheSalt()
+				}
+				return s.defaultCacheSalt
+			}, s.log),
+			mutators.ModelHeaderInjector(modelFromRequest),
+		),
+	)
 }
 
 func (s *Server) embeddingsHandler(w http.ResponseWriter, r *http.Request) {
-	s.inferenceHandler(
-		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-			return forwarder.RequestMutatorChain(
-				mutators.ModelHeaderInjector(modelFromRequest),
-				forwarder.WithJSONRequestMutation(cw.Encrypt, openai.PlainEmbeddingsRequestFields, s.log),
-			)
-		},
-		func(cw *RenewableRequestCipher) forwarder.ResponseMapper {
-			return forwarder.JSONResponseMapper(cw.DecryptResponse, openai.PlainEmbeddingsResponseFields)
-		},
-	)(w, r)
+	s.forwardEncrypted(
+		w, r,
+		mutators.ModelHeaderInjector(modelFromRequest),
+	)
 }
 
 func (s *Server) transcriptionsHandler(w http.ResponseWriter, r *http.Request) {
@@ -269,34 +298,24 @@ func (s *Server) transcriptionsHandler(w http.ResponseWriter, r *http.Request) {
 		return modelName, nil
 	}
 
-	s.inferenceHandler(
-		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-			return forwarder.RequestMutatorChain(
-				mutators.ModelHeaderInjector(modelExtractor),
-				forwarder.WithFormRequestMutation(cw.Encrypt, openai.PlainTranscriptionRequestFields, s.log),
-			)
-		},
-		func(cw *RenewableRequestCipher) forwarder.ResponseMapper {
-			return forwarder.JSONResponseMapper(cw.DecryptResponse, openai.PlainTranscriptionResponseFields)
-		},
-	)(w, r)
+	s.forwardEncrypted(
+		w, r,
+		mutators.ModelHeaderInjector(modelExtractor),
+	)
 }
 
 func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
-	s.inferenceHandler(
-		func(cw *RenewableRequestCipher) forwarder.RequestMutator {
-			return forwarder.WithRawRequestMutation(cw.Encrypt, s.log)
-		},
-		func(cw *RenewableRequestCipher) forwarder.ResponseMapper {
-			// currently only json response mutation is supported
-			return forwarder.JSONResponseMapper(cw.DecryptResponse, nil)
-		},
-	)(w, r)
+	s.forwardEncrypted(
+		w, r,
+		forwarder.NoRequestMutation,
+	)
 }
 
-func (s *Server) noEncryptionHandler(w http.ResponseWriter, r *http.Request) {
+func (s *Server) forwardUnencrypted(w http.ResponseWriter, r *http.Request) {
 	s.setStaticRequestHeaders(r)
-	r.Header.Set(requestid.UserHeader, newRequestID())
+	// request ID is always stored in context by middleware
+	requestID, _ := requestid.FromContext(r.Context())
+	r.Header.Set(requestid.UserHeader, "proxy_"+requestID)
 
 	s.forwarder.Forward(
 		w, r,
@@ -325,8 +344,8 @@ func (s *Server) setStaticRequestHeaders(r *http.Request) {
 	r.Header.Set(constants.PrivatemodeClientHeader, s.getClientHeader())
 }
 
-// setDynamicHeaders sets the dynamic headers for the request.
-func (s *Server) setDynamicHeaders(r *http.Request, secret secretmanager.Secret, requestID string, attempt int) error {
+// setEncryptionHeaders sets the encryption-related headers for the request.
+func (s *Server) setEncryptionHeaders(r *http.Request, secret secretmanager.Secret, requestID string, attempt int) error {
 	ocspAllowedStatuses := []ocspheader.AllowStatus{ocspheader.AllowStatusGood}
 	if s.nvidiaOCSPRevokedGracePeriod > 0 {
 		// In theory, we could always add the `revoked` status, since it will render
@@ -353,29 +372,14 @@ func (s *Server) setDynamicHeaders(r *http.Request, secret secretmanager.Secret,
 	r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyHeader, ocspPolicyHeader)
 	r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyMACHeader, ocspMACHeader)
 	r.Header.Set(constants.PrivatemodeSecretIDHeader, secret.ID)
-	r.Header.Set(requestid.UserHeader, fmt.Sprintf("%s_%d", requestID, attempt))
+	r.Header.Set(requestid.UserHeader, fmt.Sprintf("proxy_%s_%d", requestID, attempt))
 	return nil
 }
 
-func (s *Server) connectionResetCallback(
-	ctx context.Context, rc *RenewableRequestCipher,
-) (bool, time.Duration) {
-	// Force a new rc for the next attempt, but keep the same secret
-	if err := rc.Reinitialize(ctx); err != nil {
-		s.log.Error("Resetting request cipher", "error", err)
-		return false, 0
-	}
-
-	// Wait a short duration before retrying
-	return true, 50 * time.Millisecond
-}
-
-func (s *Server) noSecretForIDCallback(
-	ctx context.Context, rc *RenewableRequestCipher,
-) (bool, time.Duration) {
-	// Force a new rc for the next attempt
-	if err := rc.ResetSecret(ctx); err != nil {
-		s.log.Error("Resetting request cipher", "error", err)
+func (s *Server) noSecretForIDCallback(ctx context.Context) (bool, time.Duration) {
+	// Force a fresh secret for the next attempt; the mutator picks it up via LatestSecret.
+	if err := s.sm.ForceUpdate(ctx); err != nil {
+		s.log.ErrorContext(ctx, "Forcing secret update", "error", err)
 		return false, 0
 	}
 
@@ -400,10 +404,6 @@ func getOcspHeaders(allowedStatuses []ocspheader.AllowStatus, revocNbf time.Time
 	}
 
 	return policyHeader, policyMACHeader, nil
-}
-
-func newRequestID() string {
-	return "proxy_" + requestid.New()
 }
 
 // unmarshalJSONBody uses [persist.ReadBodyUnlimited] to read r's body and then unmarshals it.

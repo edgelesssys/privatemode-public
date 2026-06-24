@@ -11,6 +11,7 @@ import (
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
 	"github.com/edgelesssys/continuum/internal/mtls"
+	"github.com/edgelesssys/continuum/internal/oss/middleware"
 	"github.com/edgelesssys/continuum/internal/oss/process"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -57,17 +58,27 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 		a.RegisterRoutes(mux)
 	}
 
+	// Apply middlewares below, handler holds the chain entrypoint
+	var handler http.Handler = mux
+
+	handler = tagRequestID(handler)
+
 	// Span sampling is governed centrally by the tracer provider's sampler
 	// (ParentBased + NeverSample root, see [tracing.Setup]):
 	// The inference-proxy never originates traces, so parentless spans from
 	// non-propagated internal traffic (e.g heartbeats) are dropped, while
 	// spans continuing an inbound apigateway-sampled trace are recorded.
-	handler := otelhttp.NewHandler(
-		tagRequestID(mux), "inference-proxy",
+	handler = otelhttp.NewHandler(
+		handler, "inference-proxy",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			return r.Method + " " + r.URL.Path
 		}),
 	)
+
+	handler = middleware.LogRequestSummary(handler, s.log, true)
+
+	handler = s.addRequestID(handler)
+
 	server := &http.Server{
 		Addr:      listener.Addr().String(),
 		Handler:   handler,
@@ -77,11 +88,33 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	return process.HTTPServeContext(ctx, server, listener, s.log)
 }
 
+// addRequestID retrieves the request ID from the incoming request's header and stores it in the
+// request context. If absent it logs a warning and generates a fresh request ID.
+func (s *Server) addRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := requestid.FromHeader(r.Header)
+		missing := requestID == requestid.Unknown
+		if missing {
+			requestID = requestid.New()
+		}
+
+		ctx := requestid.WithContext(r.Context(), requestID)
+		if missing {
+			s.log.WarnContext(
+				ctx,
+				"Generated fresh request ID because header is missing from incoming request",
+			)
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func tagRequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if id := requestid.FromHeader(r.Header); id != requestid.Unknown {
-			trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("privatemode.request_id", id))
+		if requestID, ok := requestid.FromContext(r.Context()); ok {
+			trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("privatemode.request_id", requestID))
 		}
+
 		next.ServeHTTP(w, r)
 	})
 }

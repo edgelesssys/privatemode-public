@@ -7,14 +7,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"strconv"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
-	"github.com/edgelesssys/continuum/internal/oss/crypto"
-	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 )
 
@@ -61,16 +60,8 @@ func (c *Client) TranscribeAudio(ctx context.Context, file AudioFile, opts Audio
 	if opts.ResponseFormat != "" && opts.ResponseFormat != "json" && opts.ResponseFormat != "verbose_json" {
 		return nil, fmt.Errorf("unsupported response format %q: only JSON transcription responses are supported", opts.ResponseFormat)
 	}
-	if len(c.currentSecret.Data) == 0 {
-		return nil, fmt.Errorf("no secret available: call Initialize() and UpdateSecret() first")
-	}
 
-	cipher, err := crypto.NewRequestCipher(c.currentSecret.Data, c.currentSecret.ID)
-	if err != nil {
-		return nil, fmt.Errorf("creating request cipher: %w", err)
-	}
-
-	body, contentType, err := buildAudioTranscriptionBody(file, opts, cipher)
+	body, contentType, err := buildAudioTranscriptionBody(file, opts)
 	if err != nil {
 		return nil, fmt.Errorf("building request body: %w", err)
 	}
@@ -82,22 +73,21 @@ func (c *Client) TranscribeAudio(ctx context.Context, file AudioFile, opts Audio
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set(constants.PrivatemodeTargetModel, opts.Model)
 
-	respBody, err := c.doAPIRequestAndReadBody(req)
+	resp, err := c.doEncryptedAPIRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("sending request: %w", tryDecryptResponseError(err, cipher, openai.PlainTranscriptionResponseFields))
+		return nil, fmt.Errorf("sending request: %w", err)
 	}
+	defer resp.Body.Close()
 
-	decrypted, err := forwarder.MutateJSONFields(respBody, cipher.DecryptResponse, openai.PlainTranscriptionResponseFields)
+	decrypted, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("decrypting response: %w", err)
+		return nil, fmt.Errorf("reading decrypted response: %w", err)
 	}
 
 	return decrypted, nil
 }
 
-func buildAudioTranscriptionBody(
-	file AudioFile, opts AudioTranscriptionOptions, cipher *crypto.RequestCipher,
-) ([]byte, string, error) {
+func buildAudioTranscriptionBody(file AudioFile, opts AudioTranscriptionOptions) ([]byte, string, error) {
 	buf := &bytes.Buffer{}
 	writer := multipart.NewWriter(buf)
 
@@ -105,23 +95,23 @@ func buildAudioTranscriptionBody(
 		return nil, "", fmt.Errorf("writing model field: %w", err)
 	}
 	if opts.Language != "" {
-		if err := writeEncryptedField(writer, "language", opts.Language, cipher); err != nil {
-			return nil, "", err
+		if err := writer.WriteField("language", opts.Language); err != nil {
+			return nil, "", fmt.Errorf("writing language field: %w", err)
 		}
 	}
 	if opts.Prompt != "" {
-		if err := writeEncryptedField(writer, "prompt", opts.Prompt, cipher); err != nil {
-			return nil, "", err
+		if err := writer.WriteField("prompt", opts.Prompt); err != nil {
+			return nil, "", fmt.Errorf("writing prompt field: %w", err)
 		}
 	}
 	if opts.ResponseFormat != "" {
-		if err := writeEncryptedField(writer, "response_format", opts.ResponseFormat, cipher); err != nil {
-			return nil, "", err
+		if err := writer.WriteField("response_format", opts.ResponseFormat); err != nil {
+			return nil, "", fmt.Errorf("writing response_format field: %w", err)
 		}
 	}
 	if opts.Temperature != nil {
-		if err := writeEncryptedField(writer, "temperature", strconv.FormatFloat(float64(*opts.Temperature), 'f', -1, 32), cipher); err != nil {
-			return nil, "", err
+		if err := writer.WriteField("temperature", strconv.FormatFloat(float64(*opts.Temperature), 'f', -1, 32)); err != nil {
+			return nil, "", fmt.Errorf("writing temperature field: %w", err)
 		}
 	}
 
@@ -134,11 +124,7 @@ func buildAudioTranscriptionBody(
 	if err != nil {
 		return nil, "", fmt.Errorf("creating file part: %w", err)
 	}
-	encryptedFile, err := cipher.Encrypt(string(file.Content))
-	if err != nil {
-		return nil, "", fmt.Errorf("encrypting file: %w", err)
-	}
-	if _, err := part.Write([]byte(encryptedFile)); err != nil {
+	if _, err := part.Write(file.Content); err != nil {
 		return nil, "", fmt.Errorf("writing file content: %w", err)
 	}
 
@@ -147,15 +133,4 @@ func buildAudioTranscriptionBody(
 	}
 
 	return buf.Bytes(), writer.FormDataContentType(), nil
-}
-
-func writeEncryptedField(writer *multipart.Writer, name, value string, cipher *crypto.RequestCipher) error {
-	encrypted, err := cipher.Encrypt(value)
-	if err != nil {
-		return fmt.Errorf("encrypting field %q: %w", name, err)
-	}
-	if err := writer.WriteField(name, encrypted); err != nil {
-		return fmt.Errorf("writing field %q: %w", name, err)
-	}
-	return nil
 }

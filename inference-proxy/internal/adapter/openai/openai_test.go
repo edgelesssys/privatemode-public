@@ -610,9 +610,9 @@ func TestUsageExtraction(t *testing.T) {
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, reporter, slog.Default())
 			require.NoError(t, err)
 
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(clientRequest))
+			ctx := requestid.WithContext(t.Context(), "test-request-id")
+			request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", strings.NewReader(clientRequest))
 			request.Header.Set(usagecollector.PrivatemodeUsageIDHeader, "test-usage-id")
-			request.Header.Set(requestid.Header, "test-request-id")
 			responseRecorder := httptest.NewRecorder()
 
 			adapter.forwardChatCompletionsRequest(responseRecorder, request)
@@ -698,10 +698,10 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 			require.NoError(t, writer.WriteField("model", defaultModel))
 			require.NoError(t, writer.Close())
 
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, openai.TranscriptionsEndpoint, &body)
+			ctx := requestid.WithContext(t.Context(), "test-request-id")
+			request := httptest.NewRequestWithContext(ctx, http.MethodPost, openai.TranscriptionsEndpoint, &body)
 			request.Header.Set("Content-Type", writer.FormDataContentType())
 			request.Header.Set(usagecollector.PrivatemodeUsageIDHeader, "test-usage-id")
-			request.Header.Set(requestid.Header, "test-request-id")
 			responseRecorder := httptest.NewRecorder()
 
 			adapter.forwardTranscriptionsRequest(responseRecorder, request)

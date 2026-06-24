@@ -56,11 +56,9 @@ func (w *ResponseRecorder) Write(b []byte) (int, error) {
 	return w.Body.Write(b)
 }
 
-// Flush implements http.Flusher by delegating to the underlying ResponseWriter if it supports flushing.
-func (w *ResponseRecorder) Flush() {
-	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
-		flusher.Flush()
-	}
+// Unwrap exposes the wrapped writer for compatibility with [http.NewResponseController].
+func (w *ResponseRecorder) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 // DumpRequestAndResponse is an HTTP middleware that writes the raw request to a file,

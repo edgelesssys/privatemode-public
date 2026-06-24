@@ -11,21 +11,25 @@ func TestResolve(t *testing.T) {
 		input    string
 		expected string
 	}{
-		"qwen3 stays unchanged": {
-			input:    "qwen3-coder-30b-a3b",
-			expected: "qwen3-coder-30b-a3b",
+		"gemma latest to current": {
+			input:    "gemma-latest",
+			expected: "gemma-4-31b",
+		},
+		"gpt oss latest to current": {
+			input:    "gpt-oss-latest",
+			expected: "openai/gpt-oss-120b",
+		},
+		"kimi latest to current": {
+			input:    "kimi-latest",
+			expected: "kimi-k2.6",
 		},
 		"whisper short to full": {
 			input:    "whisper-large-v3",
 			expected: "openai/whisper-large-v3",
 		},
-		"whisper full stays unchanged": {
-			input:    "openai/whisper-large-v3",
-			expected: "openai/whisper-large-v3",
-		},
-		"unknown stays unchanged": {
-			input:    "some-random-model",
-			expected: "some-random-model",
+		"gpt oss short to full": {
+			input:    "gpt-oss-120b",
+			expected: "openai/gpt-oss-120b",
 		},
 	}
 

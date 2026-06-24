@@ -26,9 +26,9 @@ type Client struct {
 }
 
 // New creates a new RIMClient.
-func New(baseURL string, log *slog.Logger) *Client {
+func New(httpClient *http.Client, baseURL string, log *slog.Logger) *Client {
 	return &Client{
-		httpClient: &http.Client{},
+		httpClient: httpClient,
 		baseURL:    baseURL,
 		log:        log,
 	}

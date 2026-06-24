@@ -54,7 +54,7 @@ func (c *caAdapter) GetMeshCA(ctx context.Context, apiKey string) (*x509.Certifi
 	if err != nil {
 		return nil, fmt.Errorf("fetching manifest: %w", err)
 	}
-	c.log.Info("Coordinator manifest fetched successfully")
+	c.log.InfoContext(ctx, "Coordinator manifest fetched successfully")
 
 	if err := c.mfLogger.Log(expectedMfBytes); err != nil {
 		return nil, fmt.Errorf("logging manifest: %w", err)

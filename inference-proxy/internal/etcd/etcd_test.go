@@ -178,8 +178,9 @@ func TestWatchSecrets(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(t.Context())
 			var wg sync.WaitGroup
+			var watchErr error
 			wg.Go(func() {
-				etcd.watchSecrets(ctx)
+				watchErr = etcd.WatchSecrets(ctx)
 			})
 
 			for _, event := range tc.events {
@@ -187,6 +188,7 @@ func TestWatchSecrets(t *testing.T) {
 			}
 			cancel()
 			wg.Wait()
+			assert.ErrorIs(t, watchErr, context.Canceled)
 
 			tc.assertions(t, secrets)
 		})

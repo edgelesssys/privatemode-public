@@ -53,7 +53,9 @@ func New(ssClient ssClient, caGetter CAGetter, log *slog.Logger) *Updater {
 
 // UpdateSecret implements how to update prompt secrets when the underlying Privatemode deployment is updated.
 func (s *Updater) UpdateSecret(ctx context.Context, apiKey string) (id string, data []byte, retErr error) {
-	if err := retry.New(s.retryOpts...).Do(func() error {
+	// retry.Context aborts the inter-attempt backoff on cancellation (e.g. shutdown); it's per-call so it's added here.
+	opts := append([]retry.Option{retry.Context(ctx)}, s.retryOpts...)
+	if err := retry.New(opts...).Do(func() error {
 		if ctx.Err() != nil {
 			return retry.Unrecoverable(ctx.Err())
 		}
@@ -67,7 +69,7 @@ func (s *Updater) UpdateSecret(ctx context.Context, apiKey string) (id string, d
 		if err == nil {
 			return nil
 		}
-		s.log.Error("Set secrets", "error", err)
+		s.log.ErrorContext(ctx, "Set secrets", "error", err)
 		if err := s.updateCA(ctx, apiKey); err != nil {
 			return err
 		}

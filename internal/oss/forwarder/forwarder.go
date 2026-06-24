@@ -21,7 +21,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/persist"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
 )
@@ -115,10 +114,17 @@ func (f *Forwarder) Forward(
 		opt(options)
 	}
 
-	f.logInfo("Forwarding request", req)
+	ctx := req.Context()
+	log := f.log.With(
+		"remoteAddress", req.RemoteAddr,
+		"method", req.Method,
+		"path", req.URL.RequestURI(), // full url not available here, so we use RequestURI
+	)
+
+	log.InfoContext(ctx, "Forwarding request")
 
 	// Clone a base request reused across forwarding attempts. Also enforces body size limits.
-	baseReq, ok := f.cloneIncomingRequest(w, req, options)
+	baseReq, ok := f.cloneIncomingRequest(w, req, options, log)
 	if !ok {
 		return
 	}
@@ -136,20 +142,24 @@ func (f *Forwarder) Forward(
 	resp, err := f.sendWithRetry(baseReq, requestMutator, options.retryCallback)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			f.logWarning("Connection closed by client before request could be fully forwarded", err, req)
+			log.WarnContext(ctx, "Connection closed by client before request could be fully forwarded", "error", err)
 		} else {
-			f.logError("Failed to forward request", err, req)
+			log.ErrorContext(ctx, "Failed to forward request", "error", err)
 		}
 		HTTPError(w, req, http.StatusInternalServerError, "forwarding request: %s", err)
 		return
 	}
 	// Response body closing happens below, dependent on the mapper.
 
+	if upstreamRequestID := requestid.FromHeader(resp.Header); upstreamRequestID != requestid.Unknown {
+		log = log.With("upstreamRequestID", upstreamRequestID)
+	}
+
 	// Produce the downstream response from the upstream response.
 	dsResp, err := responseMapper(resp)
 	if err != nil {
 		_ = resp.Body.Close()
-		f.logError("Failed to map upstream response to downstream response", err, req)
+		log.ErrorContext(ctx, "Failed to map upstream response to downstream response", "error", err)
 		HTTPError(w, req, http.StatusInternalServerError, "mapping response: %s", err)
 		return
 	}
@@ -162,15 +172,15 @@ func (f *Forwarder) Forward(
 		resp.Body.Close()
 	default:
 		// Unexpected type! Close http.Response after sending at least
-		f.logWarning(fmt.Sprintf("Unexpected type of mapped response %T", dsResp), nil, req)
+		log.WarnContext(ctx, fmt.Sprintf("Unexpected type of mapped response %T", dsResp))
 		defer resp.Body.Close()
 	}
 
 	if err := SendResponse(w, dsResp); err != nil {
-		if errors.Is(err, context.Canceled) || req.Context().Err() == context.Canceled {
-			f.logWarning("Connection closed by client before forwarding finished", err, req)
+		if errors.Is(err, context.Canceled) || ctx.Err() == context.Canceled {
+			log.WarnContext(ctx, "Connection closed by client before forwarding finished", "error", err)
 		} else {
-			f.logError("Failed sending response to downstream client", err, req)
+			log.ErrorContext(ctx, "Failed sending response to downstream client", "error", err)
 		}
 		return
 	}
@@ -178,42 +188,26 @@ func (f *Forwarder) Forward(
 	// Log error status codes
 	statusCode := dsResp.GetStatusCode()
 	if statusCode := statusCode; statusCode >= 400 {
-		logger := f.log.Warn
+		level := slog.LevelWarn
 		if statusCode >= 500 {
-			logger = f.log.Error
+			level = slog.LevelError
 		}
-		f.logMsg(logger, "Upstream returned an error status code", nil, req, "statusCode", statusCode)
+		log.Log(ctx, level, "Upstream returned an error status code", "statusCode", statusCode)
 	}
 
-	// If a shard key is present we append it (trimmed) to the log entry.
-	shardKey := req.Header.Get(constants.PrivatemodeShardKeyHeader)
-	if shardKey != "" {
-		// Trim the shard key the same way as the other logs.
-		if len(shardKey) > constants.CacheSaltHashLength {
-			shardKey = shardKey[:constants.CacheSaltHashLength] + "..."
-		}
-		f.log.Info(
-			"Forwarding finished successfully",
-			"requestID", requestID(req.Header),
-			"responseStatus", statusCode,
-			"shardKey", shardKey,
-		)
-	} else {
-		// No shard key present
-		f.log.Info(
-			"Forwarding finished successfully",
-			"requestID", requestID(req.Header),
-			"responseStatus", statusCode,
-		)
-	}
+	log.InfoContext(
+		ctx,
+		"Forwarding finished successfully",
+		"responseStatus", statusCode,
+	)
 }
 
 // applyBackoffDelay applies the configured backoff delay before retrying.
-func (f *Forwarder) applyBackoffDelay(ctx context.Context, delay time.Duration, attempt int, requestID string) error {
+func (f *Forwarder) applyBackoffDelay(ctx context.Context, delay time.Duration, attempt int) error {
 	if delay <= 0 {
 		return nil
 	}
-	f.log.Debug("Retrying request after delay", "attempt", attempt, "delay", delay, "requestID", requestID)
+	f.log.DebugContext(ctx, "Retrying request after delay", "attempt", attempt, "delay", delay)
 
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -228,17 +222,18 @@ func (f *Forwarder) applyBackoffDelay(ctx context.Context, delay time.Duration, 
 
 // cloneIncomingRequest clones req and persists its body to memory.
 // It enforces [opts.maxBodyBytes] if > 0. For any error, it responds with a HTTP error and returns ok=false.
-func (f *Forwarder) cloneIncomingRequest(w http.ResponseWriter, req *http.Request, options *opts) (baseReq *http.Request, ok bool) {
+func (f *Forwarder) cloneIncomingRequest(w http.ResponseWriter, req *http.Request, options *opts, log *slog.Logger) (baseReq *http.Request, ok bool) {
+	ctx := req.Context()
 	var err error
 	if options.maxBodyBytes > 0 {
 		baseReq, err = persist.CloneRequest(w, req, options.maxBodyBytes)
 		if err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
-				f.logWarning("Request body too large", err, req)
+				log.WarnContext(ctx, "Request body too large", "error", err)
 				HTTPError(w, req, http.StatusRequestEntityTooLarge, "%s", options.maxBodyExceededMsg)
 			} else {
-				f.logError("Failed to read request body", err, req)
+				log.ErrorContext(ctx, "Failed to read request body", "error", err)
 				HTTPError(w, req, http.StatusInternalServerError, "reading request body: %s", err)
 			}
 			return nil, false
@@ -246,7 +241,7 @@ func (f *Forwarder) cloneIncomingRequest(w http.ResponseWriter, req *http.Reques
 	} else {
 		baseReq, err = persist.CloneRequestUnlimited(req)
 		if err != nil {
-			f.logError("Failed to read request body", err, req)
+			log.ErrorContext(ctx, "Failed to read request body", "error", err)
 			HTTPError(w, req, http.StatusInternalServerError, "reading request body: %s", err)
 			return nil, false
 		}
@@ -261,11 +256,9 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 		return false, nil, fmt.Errorf("mutating request: %w", err)
 	}
 
-	requestID := requestID(req.Header)
-
 	resp, err := f.client.Do(req)
 	if err != nil {
-		shouldRetry, retryErr := f.shouldRetry(req.Context(), retryCallback, err.Error(), -1, requestID, attempt)
+		shouldRetry, retryErr := f.shouldRetry(req.Context(), retryCallback, err.Error(), -1, attempt)
 		return shouldRetry, nil, errors.Join(err, retryErr)
 	}
 
@@ -283,7 +276,7 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
 
-	shouldRetry, retryErr := f.shouldRetry(req.Context(), retryCallback, string(bodyBytes), resp.StatusCode, requestID, attempt)
+	shouldRetry, retryErr := f.shouldRetry(req.Context(), retryCallback, string(bodyBytes), resp.StatusCode, attempt)
 	return shouldRetry, resp, errors.Join(readErr, retryErr)
 }
 
@@ -317,26 +310,25 @@ func (f *Forwarder) sendWithRetry(req *http.Request, requestMutator RequestMutat
 
 func (f *Forwarder) shouldRetry(
 	ctx context.Context, retryCallback RetryCallback,
-	errMsg string, statusCode int, requestID string, attempt int,
+	errMsg string, statusCode int, attempt int,
 ) (bool, error) {
 	if retryCallback == nil {
 		return false, nil
 	}
 
 	shouldRetry, delay := retryCallback(statusCode, errMsg, attempt)
-	f.log.Warn("Request failed, checking retry conditions",
+	f.log.WarnContext(ctx, "Request failed, checking retry conditions",
 		"message", errMsg,
 		"statusCode", statusCode,
 		"attempt", attempt,
 		"shouldRetry", shouldRetry,
-		"delay", delay,
-		"requestID", requestID)
+		"delay", delay)
 
 	if !shouldRetry {
 		return false, nil
 	}
 
-	if err := f.applyBackoffDelay(ctx, delay, attempt, requestID); err != nil {
+	if err := f.applyBackoffDelay(ctx, delay, attempt); err != nil {
 		return false, fmt.Errorf("request cancelled during backoff: %w", err)
 	}
 	return true, nil
@@ -385,47 +377,6 @@ func HTTPError(w http.ResponseWriter, r *http.Request, code int, msg string, arg
 	fmt.Fprint(w, formattedMsg)
 }
 
-func (f *Forwarder) logInfo(msg string, req *http.Request) {
-	f.logMsg(f.log.Info, msg, nil, req)
-}
-
-func (f *Forwarder) logError(msg string, err error, req *http.Request) {
-	f.logMsg(f.log.Error, msg, err, req)
-}
-
-func (f *Forwarder) logWarning(msg string, err error, req *http.Request) {
-	f.logMsg(f.log.Warn, msg, err, req)
-}
-
-func (f *Forwarder) logMsg(logFn func(msg string, args ...any), msg string, err error, req *http.Request, extraArgs ...any) {
-	args := []any{
-		"remoteAddress", req.RemoteAddr,
-		"method", req.Method,
-		"path", req.URL.RequestURI(), // full url not available here, so we use RequestURI
-		"requestID", requestID(req.Header),
-		"userAgent", req.UserAgent(),
-		"clientVersion", req.Header.Get(constants.PrivatemodeVersionHeader),
-		"clientOS", req.Header.Get(constants.PrivatemodeOSHeader),
-		"clientArch", req.Header.Get(constants.PrivatemodeArchitectureHeader),
-		"clientType", req.Header.Get(constants.PrivatemodeClientHeader),
-		// shardKey can be very long (cache salt hash + potentially large content hash); truncate for logs.
-		"shardKey", func() string {
-			sh := req.Header.Get(constants.PrivatemodeShardKeyHeader)
-			if len(sh) > constants.CacheSaltHashLength {
-				return sh[:constants.CacheSaltHashLength] + "..."
-			}
-			return sh
-		}(),
-		"contentLength", req.ContentLength,
-		"contentType", req.Header.Get("Content-Type"),
-	}
-	if err != nil {
-		args = append(args, "error", err)
-	}
-	args = append(args, extraArgs...)
-	logFn(msg, args...)
-}
-
 // delHopHeaders deletes hop-by-hop headers which should not be forwarded.
 // See the HTTP RFC for more details: https://datatracker.ietf.org/doc/html/rfc9110#name-message-forwarding
 func delHopHeaders(header http.Header) {
@@ -466,6 +417,21 @@ func defaultOpts(fw *Forwarder) *opts {
 		host:               fw.host,
 		retryCallback:      NoRetry,
 		maxBodyExceededMsg: "request body too large",
+	}
+}
+
+// extractFlusher extracts the [http.Flusher] for w by traversing the Unwrap chain, like
+// [http.ResponseController].
+func extractFlusher(w http.ResponseWriter) (http.Flusher, bool) {
+	for {
+		if f, ok := w.(http.Flusher); ok {
+			return f, true
+		}
+		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return nil, false
+		}
+		w = u.Unwrap()
 	}
 }
 
@@ -604,6 +570,9 @@ type Response interface {
 // The upstream response is treated as read-only input and the returned [Response] must be an
 // independent value through deep-copying all input fields.
 //
+// The caller closes resp.Body in all paths; for a [StreamingResponse], ownership transfers to the
+// returned wrapper, whose Close must cascade to resp.Body.
+//
 // The mapper may apply a pipeline of mutators, where each mutator addresses a single concern.
 // Mutators modify the response in place. Example:
 //
@@ -647,7 +616,7 @@ func SendResponse(w http.ResponseWriter, resp Response) error {
 			return fmt.Errorf("writing response body: %w", err)
 		}
 	case *StreamingResponse:
-		flusher, ok := w.(http.Flusher)
+		flusher, ok := extractFlusher(w)
 		if !ok {
 			return errors.New("ResponseWriter does not support flushing")
 		}
@@ -670,11 +639,4 @@ func writeHeaderTo(dst, src http.Header) {
 		// after are trailers on distinct keys.
 		dst[k] = vs
 	}
-}
-
-func requestID(header http.Header) string {
-	if id := requestid.FromHeader(header); id != requestid.Unknown {
-		return id
-	}
-	return requestid.FromUserHeader(header)
 }

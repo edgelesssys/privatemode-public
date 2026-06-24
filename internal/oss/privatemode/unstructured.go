@@ -8,13 +8,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"strconv"
-
-	"github.com/edgelesssys/continuum/internal/oss/crypto"
-	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 )
 
 // UnstructuredFile represents a file to be sent to the unstructured
@@ -85,49 +83,37 @@ func (c *Client) Unstructured(ctx context.Context, files []UnstructuredFile, opt
 	if len(files) == 0 {
 		return nil, fmt.Errorf("at least one file is required")
 	}
-	if len(c.currentSecret.Data) == 0 {
-		return nil, fmt.Errorf("no secret available: call Initialize() and UpdateSecret() first")
-	}
 
 	body, contentType, err := buildUnstructuredBody(files, opts)
 	if err != nil {
 		return nil, fmt.Errorf("building request body: %w", err)
 	}
 
-	cipher, err := crypto.NewRequestCipher(c.currentSecret.Data, c.currentSecret.ID)
-	if err != nil {
-		return nil, fmt.Errorf("creating request cipher: %w", err)
-	}
-
-	encrypted, err := cipher.Encrypt(body)
-	if err != nil {
-		return nil, fmt.Errorf("encrypting request body: %w", err)
-	}
-
 	reqURL := c.apiBaseURL + "/unstructured/general/v0/general"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader([]byte(encrypted)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", contentType)
 
-	respBody, err := c.doAPIRequestAndReadBody(req)
+	resp, err := c.doEncryptedAPIRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("sending request: %w", tryDecryptResponseError(err, cipher, nil))
+		return nil, fmt.Errorf("sending request: %w", err)
 	}
+	defer resp.Body.Close()
 
-	decrypted, err := forwarder.MutateJSONFields(respBody, cipher.DecryptResponse, nil)
+	decrypted, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("decrypting response: %w", err)
+		return nil, fmt.Errorf("reading decrypted response: %w", err)
 	}
 
 	return decrypted, nil
 }
 
 // buildUnstructuredBody builds a multipart/form-data body from the
-// given files and options. It returns the encoded body string and the
+// given files and options. It returns the encoded body bytes and the
 // Content-Type header value (including boundary).
-func buildUnstructuredBody(files []UnstructuredFile, opts *UnstructuredOptions) (string, string, error) {
+func buildUnstructuredBody(files []UnstructuredFile, opts *UnstructuredOptions) ([]byte, string, error) {
 	buf := &bytes.Buffer{}
 	writer := multipart.NewWriter(buf)
 
@@ -139,30 +125,30 @@ func buildUnstructuredBody(files []UnstructuredFile, opts *UnstructuredOptions) 
 		}
 		part, err := writer.CreatePart(partHeader)
 		if err != nil {
-			return "", "", fmt.Errorf("creating file part: %w", err)
+			return nil, "", fmt.Errorf("creating file part: %w", err)
 		}
 		if _, err := part.Write(f.Content); err != nil {
-			return "", "", fmt.Errorf("writing file content: %w", err)
+			return nil, "", fmt.Errorf("writing file content: %w", err)
 		}
 	}
 
 	if opts != nil {
 		formFields, err := unstructuredFormFields(opts)
 		if err != nil {
-			return "", "", fmt.Errorf("building form fields: %w", err)
+			return nil, "", fmt.Errorf("building form fields: %w", err)
 		}
 		for field, value := range formFields {
 			if err := writer.WriteField(field, value); err != nil {
-				return "", "", fmt.Errorf("writing field %q: %w", field, err)
+				return nil, "", fmt.Errorf("writing field %q: %w", field, err)
 			}
 		}
 	}
 
 	if err := writer.Close(); err != nil {
-		return "", "", fmt.Errorf("closing multipart writer: %w", err)
+		return nil, "", fmt.Errorf("closing multipart writer: %w", err)
 	}
 
-	return buf.String(), writer.FormDataContentType(), nil
+	return buf.Bytes(), writer.FormDataContentType(), nil
 }
 
 // unstructuredFormFields returns a map of non-empty form fields for the

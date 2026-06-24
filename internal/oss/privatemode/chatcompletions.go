@@ -15,7 +15,6 @@ import (
 	"strings"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
-	"github.com/edgelesssys/continuum/internal/oss/crypto"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
@@ -29,28 +28,28 @@ import (
 // Use [Client.StreamChatCompletions] to create one.
 // The stream must be closed after use.
 type ChatCompletionsStream struct {
-	reader  *sse.Reader
-	decrypt func([]byte) ([]byte, error)
-	resp    *http.Response
-	done    bool
+	reader *sse.Reader
+	body   io.ReadCloser
+	done   bool
 }
 
 // ChatCompletions sends an encrypted chat completions request and
 // returns the decrypted response.
 func (c *Client) ChatCompletions(ctx context.Context, body []byte) ([]byte, error) {
-	req, cipher, err := c.prepareChatCompletionsRequest(ctx, body)
+	req, err := c.prepareChatCompletionsRequest(ctx, body)
 	if err != nil {
 		return nil, err
 	}
 
-	respBody, err := c.doAPIRequestAndReadBody(req)
+	resp, err := c.doEncryptedAPIRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("sending request: %w", tryDecryptResponseError(err, cipher, openai.PlainCompletionsResponseFields))
+		return nil, fmt.Errorf("sending request: %w", err)
 	}
+	defer resp.Body.Close()
 
-	decrypted, err := forwarder.MutateJSONFields(respBody, cipher.DecryptResponse, openai.PlainCompletionsResponseFields)
+	decrypted, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("decrypting response: %w", err)
+		return nil, fmt.Errorf("reading decrypted response: %w", err)
 	}
 
 	return decrypted, nil
@@ -63,14 +62,14 @@ func (c *Client) ChatCompletions(ctx context.Context, body []byte) ([]byte, erro
 // The request body should include `"stream": true“. The caller must
 // close the returned stream when done.
 func (c *Client) StreamChatCompletions(ctx context.Context, body []byte) (*ChatCompletionsStream, error) {
-	req, cipher, err := c.prepareChatCompletionsRequest(ctx, body)
+	req, err := c.prepareChatCompletionsRequest(ctx, body)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := c.doAPIRequest(req)
+	resp, err := c.doEncryptedAPIRequest(req)
 	if err != nil {
-		return nil, tryDecryptResponseError(err, cipher, openai.PlainCompletionsResponseFields)
+		return nil, err
 	}
 
 	if !strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
@@ -80,28 +79,16 @@ func (c *Client) StreamChatCompletions(ctx context.Context, body []byte) (*ChatC
 
 	return &ChatCompletionsStream{
 		reader: sse.NewReader(resp.Body, constants.MaxSSELineBytes),
-		decrypt: func(data []byte) ([]byte, error) {
-			return forwarder.MutateJSONFields(data, cipher.DecryptResponse, openai.PlainCompletionsResponseFields)
-		},
-		resp: resp,
+		body:   resp.Body,
 	}, nil
 }
 
-// prepareChatCompletionsRequest validates the secret, creates a cipher,
-// builds the HTTP request, and applies the relevant mutators.
-func (c *Client) prepareChatCompletionsRequest(ctx context.Context, body []byte) (*http.Request, *crypto.RequestCipher, error) {
-	if len(c.currentSecret.Data) == 0 {
-		return nil, nil, fmt.Errorf("no secret available: call Initialize() and UpdateSecret() first")
-	}
-
-	cipher, err := crypto.NewRequestCipher(c.currentSecret.Data, c.currentSecret.ID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("creating request cipher: %w", err)
-	}
-
+// prepareChatCompletionsRequest builds the plain HTTP request and applies
+// the relevant request mutators.
+func (c *Client) prepareChatCompletionsRequest(ctx context.Context, body []byte) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, nil, fmt.Errorf("creating request: %w", err)
+		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -118,16 +105,15 @@ func (c *Client) prepareChatCompletionsRequest(ctx context.Context, body []byte)
 		return plainData.Model, nil
 	}
 	mutator := forwarder.RequestMutatorChain(
-		mutators.ShardKeyInjector(c.promptCacheSalt, c.log),
+		mutators.ShardKeyInjector(c.promptCacheSalt),
 		openai.CacheSaltInjector(func() string { return c.promptCacheSalt }, c.log),
 		mutators.ModelHeaderInjector(chatModelExtractor),
-		forwarder.WithJSONRequestMutation(cipher.Encrypt, openai.PlainCompletionsRequestFields, c.log),
 	)
 	if err := mutator(req); err != nil {
-		return nil, nil, fmt.Errorf("mutating request: %w", err)
+		return nil, fmt.Errorf("mutating request: %w", err)
 	}
 
-	return req, cipher, nil
+	return req, nil
 }
 
 // Next returns the next decrypted chunk from the stream.
@@ -160,12 +146,7 @@ func (s *ChatCompletionsStream) Next() ([]byte, error) {
 				return nil, io.EOF
 			}
 
-			decrypted, err := s.decrypt(line.Value)
-			if err != nil {
-				return nil, fmt.Errorf("decrypting chunk: %w", err)
-			}
-
-			return decrypted, nil
+			return line.Value, nil
 		}
 	}
 }
@@ -191,5 +172,5 @@ func (s *ChatCompletionsStream) All() iter.Seq2[[]byte, error] {
 
 // Close closes the stream and its underlying connection.
 func (s *ChatCompletionsStream) Close() error {
-	return s.resp.Body.Close()
+	return s.body.Close()
 }

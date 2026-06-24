@@ -2,7 +2,6 @@ package inference
 
 import (
 	"errors"
-	"log/slog"
 
 	"github.com/edgelesssys/continuum/internal/oss/sse"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
@@ -15,6 +14,9 @@ var ErrNoUsage = errors.New("no usage in response")
 // Returns [ErrNoUsage] if the body does not contain extractable usage.
 type UsageExtractor func(body []byte) (usage.Stats, error)
 
+// WarnFunc reports a non-fatal anomaly encountered while processing the stream.
+type WarnFunc func(msg string, args ...any)
+
 type sseReader interface {
 	Next() (sse.Line, error)
 }
@@ -26,7 +28,7 @@ type sseReader interface {
 // incorrect results.
 type UsageSSEReader struct {
 	sse          sseReader
-	log          *slog.Logger
+	warn         WarnFunc
 	extractUsage UsageExtractor
 
 	// Cross-event state:
@@ -42,10 +44,10 @@ type UsageSSEReader struct {
 }
 
 // NewUsageSSEReader creates a new UsageSSEReader.
-func NewUsageSSEReader(sseReader sseReader, extractUsage UsageExtractor, log *slog.Logger) *UsageSSEReader {
+func NewUsageSSEReader(sseReader sseReader, extractUsage UsageExtractor, warn WarnFunc) *UsageSSEReader {
 	return &UsageSSEReader{
 		sse:          sseReader,
-		log:          log,
+		warn:         warn,
 		extractUsage: extractUsage,
 	}
 }
@@ -66,7 +68,7 @@ func (r *UsageSSEReader) Next() (sse.Line, error) {
 			// First data line already parsed successfully
 			// Only incorrect behaviour possible here, because the first line has already been
 			// thrown away. chosen: keep extracted usage stats but skip subsequent data lines.
-			r.log.Warn("Skipping unexpected additional data line in SSE event after successful usage extraction")
+			r.warn("Skipping unexpected additional data line in SSE event after successful usage extraction")
 		case len(r.multiLineData) == 0:
 			// First data line in this event: try optimistic single-line parse.
 			stats, err := r.extractUsage(line.Value)

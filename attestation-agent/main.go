@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -18,7 +19,9 @@ import (
 	"github.com/edgelesssys/continuum/attestation-agent/internal/ocsp"
 	"github.com/edgelesssys/continuum/attestation-agent/internal/rim"
 	"github.com/edgelesssys/continuum/internal/crypto"
+	"github.com/edgelesssys/continuum/internal/mtls"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/httputil"
 	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/edgelesssys/continuum/internal/oss/process"
 	"github.com/spf13/cobra"
@@ -28,6 +31,7 @@ import (
 
 var (
 	logLevel       string
+	identityCAPath string
 	driverVersions []string
 	vbiosVersions  []string
 )
@@ -47,6 +51,8 @@ func execute() error {
 	}
 
 	cmd.Flags().StringVar(&logLevel, logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
+	cmd.Flags().StringVar(&identityCAPath, "identity-ca-path", "", "path to the workload identity CA bundle (used to verify peer identity certs)")
+	must(cmd.MarkFlagRequired("identity-ca-path"))
 
 	// GPU policy flags
 	cmd.Flags().StringSliceVar(&driverVersions, "gpu-driver-versions", nil, "List of allowed GPU driver versions")
@@ -97,7 +103,14 @@ func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOCSP.Stat
 	}
 	gpuIssuers := attestation.NewIssuers(availableGPUs, log)
 
-	rimClient := rim.New("https://rim-cache/", log) // Use the local RIM cache
+	// set up RIM client
+	rimTransport := httputil.NewTransport()
+	rimTransport.TLSClientConfig, err = mtls.ClientConfigWithoutCert(identityCAPath)
+	if err != nil {
+		return nil, fmt.Errorf("creating RIM TLS config: %w", err)
+	}
+	rimClient := rim.New(&http.Client{Transport: rimTransport}, "https://rim-cache/", log) // Use the local RIM cache
+
 	ocspClient := ocsp.New(log)
 
 	statusInfos := make([]internalOCSP.StatusInfo, len(gpuIssuers))

@@ -334,9 +334,9 @@ func TestUsageExtraction(t *testing.T) {
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, reporter, slog.Default())
 			require.NoError(t, err)
 
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, anthropic.MessagesEndpoint, strings.NewReader(clientRequest))
+			ctx := requestid.WithContext(t.Context(), "test-request-id")
+			request := httptest.NewRequestWithContext(ctx, http.MethodPost, anthropic.MessagesEndpoint, strings.NewReader(clientRequest))
 			request.Header.Set(usagecollector.PrivatemodeUsageIDHeader, "test-usage-id")
-			request.Header.Set(requestid.Header, "test-request-id")
 			responseRecorder := httptest.NewRecorder()
 
 			adapter.forwardMessagesRequest(responseRecorder, request)

@@ -105,8 +105,8 @@ type Sealer struct {
 	// err, once non-nil, captures the stream's terminal state. For a clean close, that
 	// is [ErrStreamClosed].
 	err error
-	// aadBuf is a reusable buffer for per-message AAD. Its capacity is aadSize.
-	aadBuf []byte
+	// aadBuf is a reusable buffer for per-message AAD.
+	aadBuf [aadSize]byte
 }
 
 // SealMessage encrypts plaintext as the next message in the stream, appending the sealed message
@@ -145,8 +145,8 @@ type Opener struct {
 	// err, once non-nil, captures the stream's terminal state. For a clean close, that
 	// is [ErrStreamClosed].
 	err error
-	// aadBuf is a reusable buffer for per-message AAD. Its capacity is aadSize.
-	aadBuf []byte
+	// aadBuf is a reusable buffer for per-message AAD.
+	aadBuf [aadSize]byte
 }
 
 // OpenMessage decrypts sealed as the next message in the stream, appending the plaintext to dst
@@ -358,10 +358,7 @@ func newSealer(key []byte) (*Sealer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Sealer{
-		aead:   aead,
-		aadBuf: make([]byte, aadSize),
-	}, nil
+	return &Sealer{aead: aead}, nil
 }
 
 func newOpener(key []byte) (*Opener, error) {
@@ -369,10 +366,7 @@ func newOpener(key []byte) (*Opener, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Opener{
-		aead:   aead,
-		aadBuf: make([]byte, aadSize),
-	}, nil
+	return &Opener{aead: aead}, nil
 }
 
 func newAEAD(key []byte) (cipher.AEAD, error) {

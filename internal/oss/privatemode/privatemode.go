@@ -5,6 +5,7 @@
 package privatemode
 
 import (
+	"bytes"
 	"context"
 	"crypto/x509"
 	"errors"
@@ -18,7 +19,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/attest"
 	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
-	"github.com/edgelesssys/continuum/internal/oss/crypto"
+	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
@@ -29,10 +30,10 @@ import (
 )
 
 // ResponseError is returned when the API responds with a non-2xx
-// status code. It preserves the raw response body so callers can
-// attempt decryption.
+// status code. It preserves the response body and headers.
 type ResponseError struct {
 	StatusCode int
+	Header     http.Header
 	Body       []byte
 }
 
@@ -40,21 +41,42 @@ func (e *ResponseError) Error() string {
 	return fmt.Sprintf("unexpected status code %d: %s", e.StatusCode, e.Body)
 }
 
-// tryDecryptResponseError checks whether err wraps a [ResponseError]
-// and, if so, attempts to decrypt the response body using the given
-// cipher and field selector. If decryption succeeds the returned error
-// contains the decrypted body; otherwise the original error is
-// returned unchanged.
-func tryDecryptResponseError(err error, cipher *crypto.RequestCipher, skipFields forwarder.FieldSelector) error {
-	respErr, ok := errors.AsType[*ResponseError](err)
-	if !ok {
-		return err
+// newResponseError reads the response body and wraps it as a [ResponseError].
+func newResponseError(resp *http.Response) (*ResponseError, error) {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading error response for status code %s: %w", resp.Status, err)
 	}
-	decrypted, decryptErr := forwarder.MutateJSONFields(respErr.Body, cipher.DecryptResponse, skipFields)
-	if decryptErr != nil {
-		return err
+	return &ResponseError{StatusCode: resp.StatusCode, Header: resp.Header, Body: body}, nil
+}
+
+// decryptResponseErrorBody attempts to decrypt the body of respErr via ce
+// when the response declares an encrypted body. It returns a new ResponseError
+// with the decrypted body on success, or respErr unchanged if not encrypted.
+// On decryption or read failure, it returns a non-nil error.
+func decryptResponseErrorBody(respErr *ResponseError, ce *encbody.ClientExchange) (*ResponseError, error) {
+	if !encbody.IsEncrypted(respErr.Header) {
+		return respErr, nil
 	}
-	return &ResponseError{StatusCode: respErr.StatusCode, Body: decrypted}
+	encResp := &http.Response{
+		StatusCode: respErr.StatusCode,
+		Header:     respErr.Header,
+		Body:       io.NopCloser(bytes.NewReader(respErr.Body)),
+	}
+	decResp, err := ce.DecryptResponse(encResp, constants.MaxEncryptedFrameSize)
+	if err != nil {
+		return nil, err
+	}
+	plainBody, err := io.ReadAll(decResp.Body)
+	_ = decResp.Body.Close()
+	if err != nil {
+		return nil, err
+	}
+	return &ResponseError{
+		StatusCode: respErr.StatusCode,
+		Header:     decResp.Header,
+		Body:       plainBody,
+	}, nil
 }
 
 // Client is a client for interacting with a Privatemode deployment.
@@ -152,7 +174,7 @@ func (c *Client) FetchManifest(ctx context.Context) ([]byte, error) {
 	// Random query parameter is required to circumvent browser caching when called from the web app.
 	// TODO(msanft): Consider disabling browser caching via response headers in S3 instead.
 	manifestURL := c.cdnBaseURL + "/manifest.json?t=" + fmt.Sprint(time.Now().UnixMilli())
-	c.log.Debug("Fetching manifest from CDN", "url", manifestURL)
+	c.log.DebugContext(ctx, "Fetching manifest from CDN", "url", manifestURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
@@ -182,7 +204,7 @@ func (c *Client) FetchManifest(ctx context.Context) ([]byte, error) {
 // This needs to be called before any crypto-requiring operations, such
 // as inference requests, and may be called again to re-initialize the client with a new manifest.
 func (c *Client) Initialize(ctx context.Context, expectedManifest []byte) error {
-	c.log.Debug("Initializing Privatemode client")
+	c.log.DebugContext(ctx, "Initializing Privatemode client")
 
 	apiURL, err := url.Parse(c.apiBaseURL)
 	if err != nil {
@@ -202,7 +224,7 @@ func (c *Client) Initialize(ctx context.Context, expectedManifest []byte) error 
 
 	c.secretManager = secretmanager.New(secretUpdater.UpdateSecret, apiKeyDropOnUnauthorized)
 
-	c.log.Debug("Offering API key")
+	c.log.DebugContext(ctx, "Offering API key")
 	if err := c.secretManager.OfferAPIKey(ctx, c.apiKey); err != nil {
 		return fmt.Errorf("offering API key to secret manager: %w", err)
 	}
@@ -260,13 +282,6 @@ func (c *Client) ListModels(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	return c.doAPIRequestAndReadBody(req)
-}
-
-// doAPIRequestAndReadBody sets common Privatemode headers on req,
-// sends it, and returns the full response body. If the body should
-// not be fully read into memory, use [Client.doAPIRequest] instead.
-func (c *Client) doAPIRequestAndReadBody(req *http.Request) ([]byte, error) {
 	resp, err := c.doAPIRequest(req)
 	if err != nil {
 		return nil, err
@@ -283,8 +298,7 @@ func (c *Client) doAPIRequestAndReadBody(req *http.Request) ([]byte, error) {
 
 // doAPIRequest sets common Privatemode headers on req, sends it, and
 // returns the response. The caller is responsible for closing the
-// response body. An error is returned for non-2xx status codes,
-// in which case the response body is closed by this function.
+// response body. An [ResponseError] is returned for non-2xx status codes.
 func (c *Client) doAPIRequest(req *http.Request) (*http.Response, error) {
 	req.Header.Set("Authorization", fmt.Sprintf("%s %s", auth.Bearer, c.apiKey))
 	req.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
@@ -299,17 +313,55 @@ func (c *Client) doAPIRequest(req *http.Request) (*http.Response, error) {
 
 	if !(200 <= resp.StatusCode && resp.StatusCode < 300) {
 		defer resp.Body.Close()
-		respBody, readErr := io.ReadAll(resp.Body)
-		if readErr != nil {
-			return nil, errors.Join(
-				fmt.Errorf("unexpected status code %d", resp.StatusCode),
-				fmt.Errorf("reading response body: %w", readErr),
-			)
+		respErr, err := newResponseError(resp)
+		if err != nil {
+			return nil, err
 		}
-		return nil, &ResponseError{StatusCode: resp.StatusCode, Body: respBody}
+		return nil, respErr
 	}
 
 	return resp, nil
+}
+
+// doEncryptedAPIRequest sends a request while applying the full encrypted-body
+// request/response pipeline. Sending is performed by [Client.doAPIRequest].
+// The caller is responsible for closing the response body.
+// A [ResponseError] is returned for non-2xx status codes, and the error
+// response is decrypted.
+func (c *Client) doEncryptedAPIRequest(req *http.Request) (*forwarder.StreamingResponse, error) {
+	if len(c.currentSecret.Data) == 0 {
+		return nil, fmt.Errorf("no secret available: call Initialize() and UpdateSecret() first")
+	}
+
+	ce, err := encbody.InitializeClientExchange(c.currentSecret.Data)
+	if err != nil {
+		return nil, fmt.Errorf("initializing encrypted exchange: %w", err)
+	}
+	if err := ce.EncryptRequest(req); err != nil {
+		return nil, fmt.Errorf("encrypting request: %w", err)
+	}
+
+	resp, err := c.doAPIRequest(req)
+	if err != nil {
+		if respErr, ok := errors.AsType[*ResponseError](err); ok {
+			decryptedErr, decryptErr := decryptResponseErrorBody(respErr, ce)
+			if decryptErr != nil {
+				return nil, fmt.Errorf(
+					"decrypting error response for status code %d: %w",
+					respErr.StatusCode, decryptErr,
+				)
+			}
+			return nil, decryptedErr
+		}
+		return nil, err
+	}
+
+	plainResp, err := ce.DecryptResponse(resp, constants.MaxEncryptedFrameSize)
+	if err != nil {
+		resp.Body.Close()
+		return nil, fmt.Errorf("decrypting response: %w", err)
+	}
+	return plainResp, nil
 }
 
 type attestedMeshCAAdapter struct {

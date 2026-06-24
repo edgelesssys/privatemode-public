@@ -104,7 +104,7 @@ func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
 	// wait for API key
 	select {
 	case <-ctx.Done():
-		log.Info("Context cancelled, stopping loop")
+		log.InfoContext(ctx, "Context cancelled, stopping loop")
 		return nil
 	case <-sm.apiKeyChan:
 	}
@@ -113,17 +113,17 @@ func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
 		secret, err := sm.LatestSecret(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				log.Info("Context cancelled, stopping loop")
+				log.InfoContext(ctx, "Context cancelled, stopping loop")
 				return nil //nolint:nilerr
 			}
-			log.Error("Failed to updated secret", "error", err)
+			log.ErrorContext(ctx, "Failed to updated secret", "error", err)
 			return err
 		}
-		log.Info("Secret updated successfully")
+		log.InfoContext(ctx, "Secret updated successfully")
 
 		select {
 		case <-ctx.Done():
-			log.Info("Context cancelled, stopping loop")
+			log.InfoContext(ctx, "Context cancelled, stopping loop")
 			return nil
 		case <-sm.clock.After(secret.ExpirationDate.Sub(sm.clock.Now())):
 		}

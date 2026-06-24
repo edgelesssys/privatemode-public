@@ -10,7 +10,6 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/anthropic"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/openai"
-	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/unencrypted"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/unstructured"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -21,8 +20,6 @@ const (
 	InferenceAPIOpenAI = "openai"
 	// InferenceAPIAnthropic is the name of the Anthropic adapter.
 	InferenceAPIAnthropic = "anthropic"
-	// InferenceAPIUnencrypted is a meta-adapter used for testing without encryption.
-	InferenceAPIUnencrypted = "unencrypted"
 	// InferenceAPIUnstructured is an adapter for the Unstructured API.
 	InferenceAPIUnstructured = "unstructured"
 )
@@ -31,9 +28,6 @@ const (
 func IsSupportedInferenceAPI(apiType string) bool {
 	switch strings.ToLower(apiType) {
 	case InferenceAPIOpenAI, InferenceAPIUnstructured, InferenceAPIAnthropic:
-		return true
-	case InferenceAPIUnencrypted:
-		// Special case we always support for testing
 		return true
 	default:
 		return false
@@ -56,8 +50,6 @@ func New(
 			adapter, err = anthropic.New(workloadTasks, cipher, ocspStatusFile, forwarder, reporter, log)
 		case InferenceAPIUnstructured:
 			adapter, err = unstructured.New(cipher, forwarder, log)
-		case InferenceAPIUnencrypted:
-			adapter, err = unencrypted.New(forwarder, log)
 		default:
 			return nil, fmt.Errorf("unknown API type %q", apiType)
 		}

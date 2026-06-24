@@ -147,6 +147,15 @@ const (
 	// when reading streaming inference responses.
 	MaxSSELineBytes = 256 * 1024 // 256 KiB
 
+	// MaxSSEEventBytes is the maximum allowed length of a single SSE event. It accommodates a
+	// single line of [MaxSSELineBytes] plus event framing overhead.
+	MaxSSEEventBytes = MaxSSELineBytes + 256
+
+	// MaxEncryptedFrameSize is the maximum size of a single encrypted body frame that a decrypter
+	// will read. It accommodates the largest body permitted by [MaxFileSizeBytes] plus encryption
+	// and framing overhead.
+	MaxEncryptedFrameSize = MaxFileSizeBytes + 64
+
 	// MetricsEndpoint is the endpoint where Prometheus metrics are exposed by default.
 	MetricsEndpoint = "/metrics"
 )

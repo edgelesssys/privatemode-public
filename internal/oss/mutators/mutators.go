@@ -10,7 +10,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"net/http"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
@@ -23,7 +22,7 @@ import (
 // shard key header into the request. When defaultCacheSalt is empty, a
 // random cache salt is assumed and no shard key is set unless the
 // request already contains one.
-func ShardKeyInjector(defaultCacheSalt string, log *slog.Logger) forwarder.RequestMutator {
+func ShardKeyInjector(defaultCacheSalt string) forwarder.RequestMutator {
 	// Reads the cache salt and generates a shard key using sha256.
 	// Returns an error if there is no cache salt in the request body.
 	return func(r *http.Request) error {
@@ -66,7 +65,7 @@ func ShardKeyInjector(defaultCacheSalt string, log *slog.Logger) forwarder.Reque
 			// Potentially, we may also adjust the chat template for such models but this
 			// could have a performance impact.
 			content := systemPrompt + tools + messages + prompt + suffix
-			shardKey, err := generateShardKey(cacheSalt, content, log)
+			shardKey, err := generateShardKey(cacheSalt, content)
 			if err != nil {
 				return fmt.Errorf("generating shard key: %w", err)
 			}
@@ -93,7 +92,7 @@ func ModelHeaderInjector(extractor func(*http.Request) (string, error)) forwarde
 
 // generateShardKey generates a shard key from a cache salt and content
 // string.
-func generateShardKey(cacheSalt string, content string, log *slog.Logger) (string, error) {
+func generateShardKey(cacheSalt string, content string) (string, error) {
 	cacheSaltHash := sha256.Sum256([]byte(cacheSalt))
 	shardKeyStr := hex.EncodeToString(cacheSaltHash[:])[:constants.CacheSaltHashLength]
 
@@ -108,7 +107,6 @@ func generateShardKey(cacheSalt string, content string, log *slog.Logger) (strin
 	// For extending this beyond 1Mio token context size we should have a clear plan on how to
 	// support larger keys and/or compress a bit more for large context (e.g., > 100k tokens).
 	if n > 1_000_000 {
-		log.Error("Context too large for shard key generation", slog.Int("tokens", n))
 		return "", fmt.Errorf("context too large: ~%d tokens", n)
 	}
 

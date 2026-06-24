@@ -10,6 +10,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -152,4 +153,53 @@ func TestReaderLineTooLong(t *testing.T) {
 
 	_, err := r.Next()
 	require.ErrorIs(t, err, bufio.ErrTooLong)
+}
+
+func TestScanEvents(t *testing.T) {
+	tests := map[string]struct {
+		input string
+		want  []string
+	}{
+		"single LF event": {
+			input: "event: x\ndata: hello\n\n",
+			want:  []string{"event: x\ndata: hello\n\n"},
+		},
+		"two events": {
+			input: "event: x\ndata: a\n\nevent: x\ndata: b\n\n",
+			want:  []string{"event: x\ndata: a\n\n", "event: x\ndata: b\n\n"},
+		},
+		"two CRLF events": {
+			input: "event: x\r\ndata: a\r\n\r\nevent: x\r\ndata: b\r\n\r\n",
+			want:  []string{"event: x\r\ndata: a\r\n\r\n", "event: x\r\ndata: b\r\n\r\n"},
+		},
+		"trailing partial": {
+			input: "data: a\n\ndata: partial",
+			want:  []string{"data: a\n\n", "data: partial"},
+		},
+		"empty input": {
+			input: "",
+			want:  nil,
+		},
+	}
+
+	readers := map[string]func(string) io.Reader{
+		"whole":        func(s string) io.Reader { return strings.NewReader(s) },
+		"byte-by-byte": func(s string) io.Reader { return iotest.OneByteReader(strings.NewReader(s)) },
+	}
+
+	for name, tc := range tests {
+		for readerName, newReader := range readers {
+			t.Run(name+"/"+readerName, func(t *testing.T) {
+				s := bufio.NewScanner(newReader(tc.input))
+				s.Split(ScanEvents)
+
+				var got []string
+				for s.Scan() {
+					got = append(got, s.Text())
+				}
+				require.NoError(t, s.Err())
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	}
 }

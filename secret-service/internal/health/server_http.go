@@ -34,7 +34,8 @@ func (s *HTTPServer) Serve(ctx context.Context, endpoint string) error {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 	server := &http.Server{
-		Addr: endpoint,
+		Addr:     endpoint,
+		ErrorLog: slog.NewLogLogger(s.log.Handler(), slog.LevelError),
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			if s.healthy.Load() {
 				w.WriteHeader(http.StatusOK)

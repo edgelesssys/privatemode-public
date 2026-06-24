@@ -6,11 +6,13 @@ Package openai implements an inference API adapter for the [OpenAI API spec].
 package openai
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/internal/model"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
@@ -103,50 +105,53 @@ func (a *Adapter) forwardSpecificModelRequest(w http.ResponseWriter, r *http.Req
 }
 
 func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Request) {
-	session := a.Cipher.NewResponseCipher()
-	encryptMutator := forwarder.NewJSONMutatingReader(session.EncryptResponse(r.Context()), openai.PlainEmbeddingsResponseFields)
-
-	a.Forwarder.Forward(
+	ctx := r.Context()
+	a.ForwardEncrypted(
 		w, r,
-		forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainEmbeddingsRequestFields, a.Log),
-		a.ResponseMapper(r, encryptMutator, extractOpenAIUsage, extractOpenAIUsage),
+		func(s cipher.ResponseCipher) forwarder.RequestMutator {
+			return forwarder.WithJSONRequestMutation(s.DecryptRequest(ctx), openai.PlainEmbeddingsRequestFields, a.Log)
+		},
+		forwarder.NoRequestMutation,
+		openai.PlainEmbeddingsResponseFields,
+		nil,
+		extractOpenAIUsage,
+		extractOpenAIUsage,
 	)
 }
 
 func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Request) {
-	session := a.Cipher.NewResponseCipher()
-	encryptMutator := forwarder.NewJSONMutatingReader(session.EncryptResponse(r.Context()), openai.PlainTranscriptionResponseFields)
-
-	a.Forwarder.Forward(
+	ctx := r.Context()
+	a.ForwardEncrypted(
 		w, r,
-		forwarder.RequestMutatorChain(
-			forwarder.WithFormRequestMutation(session.DecryptRequest(r.Context()), openai.PlainTranscriptionRequestFields, a.Log),
-			a.mutators.AudioStreamUsageReportingInjector,
-		),
-		a.ResponseMapper(r, encryptMutator, extractUnaryTranscriptionUsage, a.extractStreamingTranscriptionUsage),
+		func(s cipher.ResponseCipher) forwarder.RequestMutator {
+			return forwarder.WithFormRequestMutation(s.DecryptRequest(ctx), openai.PlainTranscriptionRequestFields, a.Log)
+		},
+		a.mutators.AudioStreamUsageReportingInjector,
+		openai.PlainTranscriptionResponseFields,
+		nil,
+		extractUnaryTranscriptionUsage,
+		a.extractStreamingTranscriptionUsage(ctx),
 	)
 }
 
 // forwardChatCompletionsRequest forwards chat completions with field mutation using the given selectors.
 func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.Request) {
-	session := a.Cipher.NewResponseCipher()
-
-	encryptMutator := forwarder.NewJSONMutatingReader(
-		// duplicate reasoning field during deprecation
-		// TODO: remove after May 1st
-		forwarder.MutationFuncChain(duplicateReasoningFieldInJSON, session.EncryptResponse(r.Context())),
-		openai.PlainCompletionsResponseFields,
-	)
-
-	a.Forwarder.Forward(
+	ctx := r.Context()
+	a.ForwardEncrypted(
 		w, r,
+		func(s cipher.ResponseCipher) forwarder.RequestMutator {
+			return forwarder.WithJSONRequestMutation(s.DecryptRequest(ctx), openai.PlainCompletionsRequestFields, a.Log)
+		},
 		forwarder.RequestMutatorChain(
-			forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), openai.PlainCompletionsRequestFields, a.Log),
 			a.mutators.CacheSaltValidator,
 			a.mutators.MediaContentValidator,
 			a.mutators.StreamUsageReportingInjector,
 		),
-		a.ResponseMapper(r, encryptMutator, extractOpenAIUsage, extractOpenAIUsage),
+		openai.PlainCompletionsResponseFields,
+		// TODO: remove after May 1st
+		forwarder.NewJSONMutatingReader(duplicateReasoningFieldInJSON, forwarder.FieldSelector{}),
+		extractOpenAIUsage,
+		extractOpenAIUsage,
 	)
 }
 
@@ -211,31 +216,37 @@ func extractUnaryTranscriptionUsage(body []byte) (usage.Stats, error) {
 	return usage.Stats{AudioSeconds: audioSeconds}, nil
 }
 
-func (a *Adapter) extractStreamingTranscriptionUsage(body []byte) (usage.Stats, error) {
-	var parsed struct {
-		Model string        `json:"model"`
-		Usage *openai.Usage `json:"usage"`
-	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return usage.Stats{}, err
-	}
-	if parsed.Usage == nil {
-		return usage.Stats{}, inference.ErrNoUsage
-	}
+func (a *Adapter) extractStreamingTranscriptionUsage(ctx context.Context) func([]byte) (usage.Stats, error) {
+	return func(body []byte) (usage.Stats, error) {
+		var parsed struct {
+			Model string        `json:"model"`
+			Usage *openai.Usage `json:"usage"`
+		}
+		if err := json.Unmarshal(body, &parsed); err != nil {
+			return usage.Stats{}, err
+		}
+		if parsed.Usage == nil {
+			return usage.Stats{}, inference.ErrNoUsage
+		}
 
-	baseUsage := parsed.Usage.ToUsageStats()
-	modelName := model.Resolve(parsed.Model)
+		baseUsage := parsed.Usage.ToUsageStats()
+		modelName := model.Resolve(parsed.Model)
 
-	var audioSeconds int64
-	switch modelName {
-	case model.OpenAIWhisperLargeV3:
-		audioSeconds = baseUsage.PromptTokens / model.TokensPerAudioSecondWhisper
-	case model.VoxtralMini3b:
-		audioSeconds = (baseUsage.PromptTokens - model.TokenOverheadVoxtral) / model.TokensPerAudioSecondVoxtral
-	default:
-		a.Log.Warn("Unknown transcription model, falling back to Voxtral billing formula", "model", parsed.Model)
-		audioSeconds = (baseUsage.PromptTokens - model.TokenOverheadVoxtral) / model.TokensPerAudioSecondVoxtral
+		var audioSeconds int64
+		switch modelName {
+		case model.OpenAIWhisperLargeV3:
+			audioSeconds = baseUsage.PromptTokens / model.TokensPerAudioSecondWhisper
+		case model.VoxtralMini3b:
+			audioSeconds = (baseUsage.PromptTokens - model.TokenOverheadVoxtral) / model.TokensPerAudioSecondVoxtral
+		default:
+			a.Log.WarnContext(
+				ctx,
+				"Unknown transcription model, falling back to Voxtral billing formula",
+				"model", parsed.Model,
+			)
+			audioSeconds = (baseUsage.PromptTokens - model.TokenOverheadVoxtral) / model.TokensPerAudioSecondVoxtral
+		}
+
+		return usage.Stats{AudioSeconds: max(0, audioSeconds)}, nil
 	}
-
-	return usage.Stats{AudioSeconds: max(0, audioSeconds)}, nil
 }

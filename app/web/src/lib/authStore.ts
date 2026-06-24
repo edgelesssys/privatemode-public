@@ -152,6 +152,10 @@ export async function initializeAuth(): Promise<void> {
                 imageUrl: m.organization.imageUrl || null,
               })),
             );
+            if (data.length === 0) {
+              window.location.href =
+                'https://portal.privatemode.ai/create-organization';
+            }
           })
           .catch((err: unknown) => {
             console.error('Failed to fetch organization memberships:', err);

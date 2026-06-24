@@ -138,7 +138,7 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 		log = logging.NewLogger(logLevel)
 	}
 
-	log.Info("Privatemode encryption proxy", "version", constants.Version())
+	log.InfoContext(cmd.Context(), "Privatemode encryption proxy", "version", constants.Version())
 
 	if (tlsCertPath == "") != (tlsKeyPath == "") {
 		return errors.New("TLS certificate and key must be provided together")
@@ -164,14 +164,14 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 			apiKey = &apiKeyStr
 		}
 	} else {
-		log.Warn("No API key provided. The proxy will not authenticate with the API.")
+		log.WarnContext(cmd.Context(), "No API key provided. The proxy will not authenticate with the API.")
 	}
 
 	if !nvidiaOCSPAllowUnknown && (nvidiaOCSPRevokedGracePeriod > 0) {
 		return errors.New("unknown OCSP statuses are disallowed, but revoked statuses are allowed. This is likely to be an erroneous configuration")
 	}
 
-	log.Info("Starting proxy")
+	log.InfoContext(cmd.Context(), "Starting proxy")
 	flags := setup.Flags{
 		Workspace:    workspace,
 		ManifestPath: manifestPath,
@@ -212,7 +212,7 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 	wg.Go(func() {
 		loopLog := log.With("component", "secret-loop")
 		if err := manager.Loop(cmd.Context(), loopLog); err != nil {
-			loopLog.Error("Secret update loop exited", "error", err)
+			loopLog.ErrorContext(cmd.Context(), "Secret update loop exited", "error", err)
 			// do not exit because the server will still keep the secrets up-to-date through incoming requests
 		}
 	})

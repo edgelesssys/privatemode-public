@@ -16,6 +16,7 @@ let
       "go.mod"
       "go.sum"
       "internal/crypto"
+      "internal/mtls"
       "internal/oss"
       "attestation-agent"
     ];

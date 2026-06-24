@@ -126,3 +126,31 @@ func (r *Reader) Lines() iter.Seq2[Line, error] {
 		}
 	}
 }
+
+// ScanEvents is a [bufio.SplitFunc] that yields one SSE event per scanner token, including its
+// terminating blank line and LF/CRLF line endings. It returns a partial event on EOF detectable by
+// its missing terminating blank line.
+func ScanEvents(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	lineStart := 0
+	for i := range data {
+		if data[i] != '\n' {
+			continue
+		}
+		contentEnd := i
+		if contentEnd > lineStart && data[contentEnd-1] == '\r' {
+			// ignore CR of a CRLF terminator
+			contentEnd--
+		}
+		if contentEnd == lineStart {
+			// blank line ends the event
+			return i + 1, data[:i+1], nil
+		}
+		lineStart = i + 1
+	}
+	// If at EOF, return a partial event
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	// no full event found, signal "need more data"
+	return 0, nil, nil
+}

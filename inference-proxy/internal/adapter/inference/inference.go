@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
+	"github.com/edgelesssys/continuum/internal/oss/compat"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
@@ -197,9 +199,9 @@ func parseUsageContext(r *http.Request) (*usageContext, error) {
 	if usageID == "" {
 		return nil, nil
 	}
-	requestID := requestid.FromHeader(r.Header)
-	if requestID == requestid.Unknown {
-		return nil, fmt.Errorf("missing request ID in header %q", requestid.Header)
+	requestID, ok := requestid.FromContext(r.Context())
+	if !ok {
+		return nil, fmt.Errorf("cannot parse usage context: missing request ID")
 	}
 	return &usageContext{
 		requestID: requestID,
@@ -215,83 +217,45 @@ func (u *usageContext) applyTo(req usagecollector.SubmitUsageReportRequest) usag
 	return req
 }
 
-// ResponseMapper returns a mapper that handles both unary and streaming vLLM responses.
-// It performs usage report extraction, encryption, and out-of-band usage report submission.
-func (a *Adapter) ResponseMapper(
-	r *http.Request,
-	encryptMutator *forwarder.MutatingReader,
-	extractUnaryUsage UsageExtractor,
-	extractStreamingUsage UsageExtractor,
-) forwarder.ResponseMapper {
-	uc, err := parseUsageContext(r)
-	if err != nil {
-		a.Log.Error("Failed to parse usage header; skipping usage reporting", "error", err)
+func (a *Adapter) reportUnaryUsage(
+	ctx context.Context,
+	resp *forwarder.UnaryResponse,
+	extractUsage UsageExtractor,
+	uc *usageContext,
+) {
+	if resp.StatusCode >= 400 {
+		return
 	}
-	ctx := r.Context()
-	return func(resp *http.Response) (forwarder.Response, error) {
-		if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
-			return a.streamingResponse(ctx, resp, encryptMutator, extractStreamingUsage, uc), nil
-		}
-		return a.unaryResponse(ctx, resp, encryptMutator, extractUnaryUsage, uc)
+	stats, err := extractUsage(resp.Body)
+	if err != nil {
+		a.Log.WarnContext(ctx, "Failed to extract usage from response", "error", err)
+		return
+	}
+	hasUsageContext := uc != nil
+	a.Log.InfoContext(
+		ctx,
+		"Extracted usage stats from response", "usage", stats, "responseType", "unary",
+		"hasUsageContext", hasUsageContext,
+	)
+	if hasUsageContext {
+		a.dispatchReport(ctx, uc.applyTo(usagecollector.SubmitUsageReportRequest{
+			Stats:     stats,
+			Completed: true,
+			Streaming: false,
+		}))
 	}
 }
 
-func (a *Adapter) unaryResponse(
+func (a *Adapter) reportStreamingUsage(
 	ctx context.Context,
-	usResp *http.Response,
-	encryptMutator *forwarder.MutatingReader,
+	source io.ReadCloser,
 	extractUsage UsageExtractor,
 	uc *usageContext,
-) (*forwarder.UnaryResponse, error) {
-	dsResp, err := forwarder.ReadUnaryResponse(usResp, constants.MaxUnaryResponseBodyBytes)
-	if err != nil {
-		return nil, fmt.Errorf("reading upstream response body: %w", err)
-	}
-
-	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
-
-	if dsResp.StatusCode < 400 {
-		stats, err := extractUsage(dsResp.Body)
-		if err != nil {
-			a.Log.Warn("Failed to extract usage from response", "error", err)
-		} else {
-			hasUsageContext := uc != nil
-			a.Log.Info(
-				"Extracted usage stats from response", "usage", stats, "responseType", "unary",
-				"hasUsageContext", hasUsageContext,
-			)
-			if hasUsageContext {
-				a.dispatchReport(ctx, uc.applyTo(usagecollector.SubmitUsageReportRequest{
-					Stats:     stats,
-					Completed: true,
-					Streaming: false,
-				}))
-			}
-		}
-	}
-
-	body, err := encryptMutator.Mutate(dsResp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("encrypting response: %w", err)
-	}
-	dsResp.Body = body
-
-	return dsResp, nil
-}
-
-func (a *Adapter) streamingResponse(
-	ctx context.Context,
-	usResp *http.Response,
-	encryptMutator *forwarder.MutatingReader,
-	extractUsage UsageExtractor,
-	uc *usageContext,
-) *forwarder.StreamingResponse {
-	dsResp := forwarder.NewStreamingResponse(usResp)
-	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
-
-	body, clone := cloneReader(dsResp.Body)
+) io.ReadCloser {
+	body, clone := cloneReader(source)
 	sseReader := sse.NewReader(clone, maxSSELineBytes)
-	usageReader := NewUsageSSEReader(sseReader, extractUsage, a.Log)
+	warn := func(msg string, args ...any) { a.Log.WarnContext(ctx, msg, args...) }
+	usageReader := NewUsageSSEReader(sseReader, extractUsage, warn)
 
 	go func() {
 		// Termination behaviour: clone, the io.Reader underneath usageReader, eventually returns
@@ -308,15 +272,15 @@ func (a *Adapter) streamingResponse(
 				if errors.Is(err, io.EOF) {
 					streamCompleted = true
 				} else if !errors.Is(err, context.Canceled) && !errors.Is(err, io.ErrUnexpectedEOF) {
-					// The above are expected errors when a request is cancelled -> no need to Warn
-					a.Log.Warn("SSE usage extraction error", "error", err)
+					a.Log.WarnContext(ctx, "SSE usage extraction error", "error", err)
 				}
 				break
 			}
 		}
 		latest := usageReader.LatestUsage()
 		hasUsageContext := uc != nil
-		a.Log.Info(
+		a.Log.InfoContext(
+			ctx,
 			"Extracted usage stats from response", "usage", latest,
 			"responseType", "streaming", "streamCompleted", streamCompleted,
 			"hasUsageContext", hasUsageContext,
@@ -332,23 +296,246 @@ func (a *Adapter) streamingResponse(
 		_, _ = io.Copy(io.Discard, clone)
 	}()
 
-	encryptedBody := encryptMutator.Reader(body)
+	return body
+}
 
-	dsResp.Body = encryptedBody
+// ForwardEncrypted decrypts the downstream request, forwarding it as plaintext and encrypts the
+// upstream response to send back to the client. It also handles usage extraction.
+func (a *Adapter) ForwardEncrypted(
+	w http.ResponseWriter,
+	r *http.Request,
+	legacyDecryptMutator func(cipher.ResponseCipher) forwarder.RequestMutator,
+	postDecryptMutator forwarder.RequestMutator,
+	legacyPlainResponseFields forwarder.FieldSelector,
+	preEncryptMutator *forwarder.MutatingReader,
+	extractUnaryUsage UsageExtractor,
+	extractStreamingUsage UsageExtractor,
+) {
+	if compat.AtLeastMajorMinor(r.Header.Get(constants.PrivatemodeVersionHeader), 1, 46) {
+		a.forwardEncryptedFBE(w, r, postDecryptMutator, preEncryptMutator, extractUnaryUsage, extractStreamingUsage)
+	} else {
+		a.forwardEncryptedLegacy(
+			w, r,
+			legacyDecryptMutator, postDecryptMutator,
+			legacyPlainResponseFields, preEncryptMutator,
+			extractUnaryUsage, extractStreamingUsage,
+		)
+	}
+}
+
+func (a *Adapter) forwardEncryptedLegacy(
+	w http.ResponseWriter,
+	r *http.Request,
+	legacyDecryptMutator func(cipher.ResponseCipher) forwarder.RequestMutator,
+	postDecryptMutator forwarder.RequestMutator,
+	legacyPlainResponseFields forwarder.FieldSelector,
+	preEncryptMutator *forwarder.MutatingReader,
+	extractUnaryUsage UsageExtractor,
+	extractStreamingUsage UsageExtractor,
+) {
+	ctx := r.Context()
+	session := a.Cipher.NewResponseCipher()
+	encryptMutator := forwarder.NewJSONMutatingReader(session.EncryptResponse(r.Context()), legacyPlainResponseFields)
+
+	uc, err := parseUsageContext(r)
+	if err != nil {
+		a.Log.ErrorContext(r.Context(), "Failed to parse usage header; skipping usage reporting", "error", err)
+	}
+
+	a.Forwarder.Forward(
+		w, r,
+		forwarder.RequestMutatorChain(legacyDecryptMutator(session), postDecryptMutator),
+		func(resp *http.Response) (forwarder.Response, error) {
+			if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
+				return a.legacyStreamingResponse(
+					ctx, resp, preEncryptMutator, encryptMutator, extractStreamingUsage, uc,
+				), nil
+			}
+			return a.legacyUnaryResponse(ctx, resp, preEncryptMutator, encryptMutator, extractUnaryUsage, uc)
+		},
+	)
+}
+
+func (a *Adapter) forwardEncryptedFBE(
+	w http.ResponseWriter,
+	r *http.Request,
+	postDecryptMutator forwarder.RequestMutator,
+	preEncryptMutator *forwarder.MutatingReader,
+	extractUnaryUsage UsageExtractor,
+	extractStreamingUsage UsageExtractor,
+) {
+	ctx := r.Context()
+	// Set by every successful execution of the request mutator
+	var exchange *encbody.ServerExchange
+
+	if !encbody.IsEncrypted(r.Header) {
+		forwarder.HTTPError(w, r, 400, "request must be encrypted")
+		return
+	}
+	secretID := r.Header.Get(constants.PrivatemodeSecretIDHeader)
+	if secretID == "" {
+		forwarder.HTTPError(w, r, 400, "request must contain secret ID")
+		return
+	}
+	secret, err := a.Cipher.Secret(r.Context(), secretID)
+	if err != nil {
+		forwarder.HTTPError(w, r, 400, "getting secret: %v", err)
+		return
+	}
+
+	uc, err := parseUsageContext(r)
+	if err != nil {
+		a.Log.ErrorContext(r.Context(), "Failed to parse usage header; skipping usage reporting", "error", err)
+	}
+
+	a.Forwarder.Forward(
+		w, r,
+		func(r *http.Request) error {
+			var err error
+			exchange, err = encbody.InitializeServerExchange(secret, r)
+			if err != nil {
+				return fmt.Errorf("initializing server exchange: %w", err)
+			}
+
+			if err := exchange.DecryptRequest(r); err != nil {
+				return fmt.Errorf("decrypting request: %w", err)
+			}
+
+			if err := postDecryptMutator(r); err != nil {
+				return fmt.Errorf("applying request mutators: %w", err)
+			}
+
+			return nil
+		},
+		func(resp *http.Response) (forwarder.Response, error) {
+			if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
+				return a.fbeStreamingResponse(
+					ctx, resp, exchange, preEncryptMutator, extractStreamingUsage, uc,
+				)
+			}
+			return a.fbeUnaryResponse(ctx, resp, exchange, preEncryptMutator, extractUnaryUsage, uc)
+		},
+	)
+}
+
+func (a *Adapter) legacyUnaryResponse(
+	ctx context.Context,
+	usResp *http.Response,
+	preEncryptMutator *forwarder.MutatingReader,
+	legacyEncryptMutator *forwarder.MutatingReader,
+	extractUsage UsageExtractor,
+	uc *usageContext,
+) (*forwarder.UnaryResponse, error) {
+	dsResp, err := forwarder.ReadUnaryResponse(usResp, constants.MaxUnaryResponseBodyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("reading upstream response body: %w", err)
+	}
+
+	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
+
+	a.reportUnaryUsage(ctx, dsResp, extractUsage, uc)
+
+	body := dsResp.Body
+	if preEncryptMutator != nil {
+		body, err = preEncryptMutator.Mutate(body)
+		if err != nil {
+			return nil, fmt.Errorf("pre-encrypting response: %w", err)
+		}
+	}
+	body, err = legacyEncryptMutator.Mutate(body)
+	if err != nil {
+		return nil, fmt.Errorf("encrypting response: %w", err)
+	}
+	dsResp.Body = body
+
+	return dsResp, nil
+}
+
+func (a *Adapter) legacyStreamingResponse(
+	ctx context.Context,
+	usResp *http.Response,
+	preEncryptMutator *forwarder.MutatingReader,
+	legacyEncryptMutator *forwarder.MutatingReader,
+	extractUsage UsageExtractor,
+	uc *usageContext,
+) *forwarder.StreamingResponse {
+	dsResp := forwarder.NewStreamingResponse(usResp)
+	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
+
+	body := a.reportStreamingUsage(ctx, dsResp.Body, extractUsage, uc)
+	if preEncryptMutator != nil {
+		body = preEncryptMutator.Reader(body)
+	}
+	dsResp.Body = legacyEncryptMutator.Reader(body)
 
 	return dsResp
+}
+
+func (a *Adapter) fbeUnaryResponse(
+	ctx context.Context,
+	usResp *http.Response,
+	exchange *encbody.ServerExchange,
+	preEncryptMutator *forwarder.MutatingReader,
+	extractUsage UsageExtractor,
+	uc *usageContext,
+) (*forwarder.UnaryResponse, error) {
+	dsResp, err := forwarder.ReadUnaryResponse(usResp, constants.MaxUnaryResponseBodyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("reading upstream response body: %w", err)
+	}
+
+	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
+
+	a.reportUnaryUsage(ctx, dsResp, extractUsage, uc)
+
+	if preEncryptMutator != nil {
+		dsResp.Body, err = preEncryptMutator.Mutate(dsResp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("pre-encrypting response: %w", err)
+		}
+	}
+
+	if err := exchange.EncryptUnaryResponse(dsResp); err != nil {
+		return nil, fmt.Errorf("FBE encrypting response: %w", err)
+	}
+
+	return dsResp, nil
+}
+
+func (a *Adapter) fbeStreamingResponse(
+	ctx context.Context,
+	usResp *http.Response,
+	exchange *encbody.ServerExchange,
+	preEncryptMutator *forwarder.MutatingReader,
+	extractUsage UsageExtractor,
+	uc *usageContext,
+) (*forwarder.StreamingResponse, error) {
+	dsResp := forwarder.NewStreamingResponse(usResp)
+	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
+
+	body := a.reportStreamingUsage(ctx, dsResp.Body, extractUsage, uc)
+	if preEncryptMutator != nil {
+		body = preEncryptMutator.Reader(body)
+	}
+	dsResp.Body = body
+	if err := exchange.EncryptSSEResponse(dsResp, constants.MaxSSEEventBytes); err != nil {
+		return nil, fmt.Errorf("encrypting SSE response: %w", err)
+	}
+
+	return dsResp, nil
 }
 
 // dispatchReport asynchronously submits a usage report on a context detached from ctx.
 func (a *Adapter) dispatchReport(ctx context.Context, report usagecollector.SubmitUsageReportRequest) {
 	go func() {
 		log := a.Log.With("reportRequestID", report.RequestID, "report", report)
+		// detachedCtx retains attributes from ctx, like the request ID for correlation
 		detachedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := a.UsageReporter.Submit(detachedCtx, report); err != nil {
-			log.Warn("Failed to submit usage report", "error", err)
+			log.WarnContext(detachedCtx, "Failed to submit usage report", "error", err)
 		} else {
-			log.Info("Submitted usage report")
+			log.InfoContext(detachedCtx, "Submitted usage report")
 		}
 	}()
 }
@@ -359,13 +546,14 @@ func (a *Adapter) dispatchReport(ctx context.Context, report usagecollector.Subm
 // The clone receives the same bytes and errors via an [io.Pipe] as they are read from original.
 // The clone blocks the original and hence must be fully read in a separate goroutine. Always
 // Close() the original to ensure that clone.Read() eventually returns an error and does not block.
-func cloneReader(r io.Reader) (original io.ReadCloser, clone io.Reader) {
+// Close() propagates to the input r.
+func cloneReader(r io.ReadCloser) (original io.ReadCloser, clone io.Reader) {
 	pr, pw := io.Pipe()
 	return &cloningReader{r: r, pw: pw}, pr
 }
 
 type cloningReader struct {
-	r  io.Reader
+	r  io.ReadCloser
 	pw *io.PipeWriter
 }
 
@@ -383,5 +571,5 @@ func (c *cloningReader) Read(p []byte) (int, error) {
 
 func (c *cloningReader) Close() error {
 	c.pw.CloseWithError(io.ErrUnexpectedEOF)
-	return nil
+	return c.r.Close()
 }

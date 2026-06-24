@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
@@ -53,17 +54,17 @@ func (a *Adapter) HandlesCatchAll() bool {
 
 // forwardMessagesRequest forwards a request to the Anthropic messages endpoint.
 func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request) {
-	session := a.Cipher.NewResponseCipher()
-	encryptMutator := forwarder.NewJSONMutatingReader(session.EncryptResponse(r.Context()), anthropic.PlainMessagesResponseFields)
-
-	a.Forwarder.Forward(
+	ctx := r.Context()
+	a.ForwardEncrypted(
 		w, r,
-		forwarder.RequestMutatorChain(
-			forwarder.WithJSONRequestMutation(session.DecryptRequest(r.Context()), anthropic.PlainMessagesRequestFields, a.Log),
-			a.cacheSaltValidator,
-			a.mediaContentValidator,
-		),
-		a.ResponseMapper(r, encryptMutator, extractAnthropicUsage, extractAnthropicUsage),
+		func(s cipher.ResponseCipher) forwarder.RequestMutator {
+			return forwarder.WithJSONRequestMutation(s.DecryptRequest(ctx), anthropic.PlainMessagesRequestFields, a.Log)
+		},
+		forwarder.RequestMutatorChain(a.cacheSaltValidator, a.mediaContentValidator),
+		anthropic.PlainMessagesResponseFields,
+		nil,
+		extractAnthropicUsage,
+		extractAnthropicUsage,
 	)
 }
 

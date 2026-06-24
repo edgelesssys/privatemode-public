@@ -410,3 +410,18 @@ func TestForwardDoesNotStripTraceparent(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.Equal(t, inbound, gotTraceparent)
 }
+
+func TestExtractFlusher(t *testing.T) {
+	// httptest.ResponseRecorder implements http.Flusher.
+	w := dummyWriterWrapper{httptest.NewRecorder()}
+	f, ok := extractFlusher(w)
+	assert.True(t, ok)
+	assert.NotNil(t, f)
+}
+
+// dummyWriterWrapper wraps an [http.ResponseWriter].
+type dummyWriterWrapper struct {
+	http.ResponseWriter
+}
+
+func (u dummyWriterWrapper) Unwrap() http.ResponseWriter { return u.ResponseWriter }

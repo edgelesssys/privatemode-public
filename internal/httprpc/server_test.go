@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -208,9 +207,6 @@ func TestMakeHandlerContextPropagation(t *testing.T) {
 	assert.NotEmpty(t, reqID)
 
 	assert.Equal(t, reqID, rec.Header().Get(requestid.Header))
-
-	ctxLogger := logging.FromContext(capturedCtx)
-	assert.NotNil(t, ctxLogger)
 }
 
 func TestFuncErrorUnwrap(t *testing.T) {

@@ -3,9 +3,10 @@ package model
 
 // Well-known model names.
 const (
+	Gemma431B            = "gemma-4-31b"
 	OpenAIWhisperLargeV3 = "openai/whisper-large-v3"
 	OpenAIGPTOSS120B     = "openai/gpt-oss-120b"
-	KimiLatest           = "kimi-k2.6"
+	KimiK26              = "kimi-k2.6"
 	VoxtralMini3b        = "voxtral-mini-3b"
 )
 
@@ -20,9 +21,11 @@ const (
 
 // modelMap maps model aliases to their billing names.
 var modelMap = map[string]string{
+	"gemma-latest":     Gemma431B,
+	"gpt-oss-latest":   OpenAIGPTOSS120B,
+	"kimi-latest":      KimiK26,
 	"whisper-large-v3": OpenAIWhisperLargeV3,
 	"gpt-oss-120b":     OpenAIGPTOSS120B,
-	"kimi-latest":      KimiLatest,
 }
 
 // Resolve is used to ensure our code uses the full name of a model

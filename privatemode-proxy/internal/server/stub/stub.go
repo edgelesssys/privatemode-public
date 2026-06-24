@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
-	crypto "github.com/edgelesssys/continuum/internal/oss/crypto"
+	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 )
@@ -22,26 +22,44 @@ func EchoHandler(secrets map[string][]byte, log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/chat/completions", openAIChatCompletionsHandler(secrets, log))
 	mux.HandleFunc("POST /v1/completions", openAIChatCompletionsHandler(secrets, log))
-	mux.HandleFunc("POST /v1/embeddings", func(w http.ResponseWriter, _ *http.Request) {
-		// Empty response: strictly speaking invalid, but enough for minimal tests
-		w.WriteHeader(http.StatusOK)
-	})
-	mux.HandleFunc("POST /v1/audio/transcriptions", func(w http.ResponseWriter, _ *http.Request) {
-		// Empty response: strictly speaking invalid, but enough for minimal tests
-		w.WriteHeader(http.StatusOK)
-	})
-	mux.HandleFunc("POST /v1/messages", func(w http.ResponseWriter, _ *http.Request) {
-		// Empty response: strictly speaking invalid, but enough for minimal tests
-		w.WriteHeader(http.StatusOK)
-	})
+
+	// Handlers with empty responses: strictly speaking invalid, but enough for minimal tests
+	mux.HandleFunc("POST /v1/embeddings", encryptedStaticResponseHandler(secrets, []byte("{}")))
+	mux.HandleFunc("POST /v1/audio/transcriptions", encryptedStaticResponseHandler(secrets, []byte("{}")))
+	mux.HandleFunc("POST /v1/messages", encryptedStaticResponseHandler(secrets, []byte("{}")))
+
 	mux.HandleFunc("GET /v1/models", openAIModelsHandler())
 	return mux
 }
 
+func encryptedStaticResponseHandler(secrets map[string][]byte, response []byte) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.Header.Get(constants.PrivatemodeSecretIDHeader)
+		secret, ok := secrets[id]
+		if !ok {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "no secret for ID %q", id)
+			return
+		}
+		se, err := encbody.InitializeServerExchange(secret, r)
+		if err != nil {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "%s", err.Error())
+			return
+		}
+		if err := se.DecryptRequest(r); err != nil {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "%s", err.Error())
+			return
+		}
+		if err := writeEncryptedResponse(w, se, response); err != nil {
+			forwarder.HTTPError(w, r, http.StatusInternalServerError, "%s", err.Error())
+			return
+		}
+	}
+}
+
 func openAIChatCompletionsHandler(secrets map[string][]byte, log *slog.Logger) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		requestMutator, responseMutate := getConnectionMutators(secrets, log)
-		if err := requestMutator(r); err != nil {
+		se, err := decryptRequest(secrets, r, log)
+		if err != nil {
 			forwarder.HTTPError(w, r, http.StatusInternalServerError, "Forwarding request: %s", err.Error())
 			return
 		}
@@ -122,76 +140,52 @@ func openAIChatCompletionsHandler(secrets map[string][]byte, log *slog.Logger) f
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		response, err := responseMutate(responseJSON)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if _, err := w.Write(response); err != nil {
+		if err := writeEncryptedResponse(w, se, responseJSON); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
 }
 
-// GetEncryptionFunctions returns the encryption and decryption functions for the given secrets.
-// It uses the first secret found in the map for both encryption and decryption.
-func GetEncryptionFunctions(secrets map[string][]byte) (encryptFunc forwarder.MutationFunc, decryptFunc forwarder.MutationFunc) {
-	encSeqNumber, decSeqNumber := uint32(0), uint32(0)
-	var id string
-	var nonce []byte
-	var secret []byte
-
-	decrypt := func(cipherText string) (string, error) {
-		var err error
-		id, err = crypto.GetIDFromCipher(cipherText)
-		if err != nil {
-			return "", err
-		}
-		var ok bool
-		secret, ok = secrets[id]
-		if !ok {
-			return "", fmt.Errorf("no secret for ID %q", id)
-		}
-		nonce, err = crypto.GetNonceFromCipher(cipherText)
-		if err != nil {
-			return "", err
-		}
-
-		plainText, err := crypto.DecryptMessage(cipherText, secret, nonce, decSeqNumber)
-		if err != nil {
-			return "", err
-		}
-		decSeqNumber++
-		return plainText, nil
+// decryptRequest sets up a server-side encrypted exchange and mutates r to decrypt its body. The
+// decrypted request is then validated like the real backend would.
+func decryptRequest(secrets map[string][]byte, r *http.Request, log *slog.Logger) (*encbody.ServerExchange, error) {
+	id := r.Header.Get(constants.PrivatemodeSecretIDHeader)
+	secret, ok := secrets[id]
+	if !ok {
+		return nil, fmt.Errorf("%s %q", constants.ErrorNoSecretForID, id)
 	}
 
-	encrypt := func(plainText string) (string, error) {
-		cipherText, err := crypto.EncryptMessage(plainText, secret, id, nonce, encSeqNumber)
-		if err != nil {
-			return "", err
-		}
-		encSeqNumber++
-		return cipherText, nil
+	se, err := encbody.InitializeServerExchange(secret, r)
+	if err != nil {
+		return nil, fmt.Errorf("initializing server exchange: %w", err)
+	}
+	if err := se.DecryptRequest(r); err != nil {
+		return nil, fmt.Errorf("decrypting request: %w", err)
 	}
 
-	return encrypt, decrypt
-}
-
-func getConnectionMutators(secrets map[string][]byte, log *slog.Logger) (requestMutator forwarder.RequestMutator, responseMutate func([]byte) ([]byte, error)) {
-	encrypt, decrypt := GetEncryptionFunctions(secrets)
-
-	requestMutator = forwarder.RequestMutatorChain(
-		forwarder.WithJSONRequestMutation(decrypt, openai.PlainCompletionsRequestFields, log),
+	validate := forwarder.RequestMutatorChain(
 		openai.CacheSaltValidator(log),
 		openai.MediaContentValidator(log),
 	)
-
-	responseMutate = func(data []byte) ([]byte, error) {
-		return forwarder.MutateJSONFields(data, encrypt, openai.PlainCompletionsResponseFields)
+	if err := validate(r); err != nil {
+		return nil, fmt.Errorf("validating request: %w", err)
 	}
-	return requestMutator, responseMutate
+
+	return se, nil
+}
+
+// writeEncryptedResponse seals plaintext as a full-body-encrypted response and writes it to w.
+func writeEncryptedResponse(w http.ResponseWriter, se *encbody.ServerExchange, plaintext []byte) error {
+	resp := &forwarder.UnaryResponse{Header: w.Header(), Body: plaintext}
+	resp.Header.Set("Content-Type", "application/json")
+	if err := se.EncryptUnaryResponse(resp); err != nil {
+		return fmt.Errorf("encrypting response: %w", err)
+	}
+	if _, err := w.Write(resp.Body); err != nil {
+		return fmt.Errorf("writing response: %w", err)
+	}
+	return nil
 }
 
 func openAIModelsHandler() func(w http.ResponseWriter, r *http.Request) {

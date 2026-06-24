@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
 )
 
@@ -89,27 +88,26 @@ func (f *FuncError) toErrorResponse() ErrorResponse {
 // MakeHandler returns an [http.HandlerFunc] that decodes a JSON request of type Req, calls fn, and
 // encodes the response of type Resp as JSON.
 //
-// If fn returns a [*FuncError], it is used in the error response. If fn needs to log, it should
-// use [logging.FromContext]. [SentinelError] are a simple way to return client-matchable errors.
+// If fn returns a [*FuncError], it is used in the error response. [SentinelError] is a simple way
+// to return client-matchable errors.
 func MakeHandler[Req any, Resp any](
 	log *slog.Logger, fn func(ctx context.Context, req Req) (Resp, error),
 ) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		requestID := requestid.New()
 		w.Header().Set(requestid.Header, requestID)
-		reqLogger := log.With("requestID", requestID, "path", r.URL.Path)
 		ctx := requestid.WithContext(r.Context(), requestID)
-		ctx = logging.ContextWithLogger(ctx, reqLogger)
+		reqLog := log.With("path", r.URL.Path)
 
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
-			writeErrorRespAndLog(ctx, w, http.StatusMethodNotAllowed, ErrMethodNotAllowed.toErrorResponse())
+			writeErrorRespAndLog(ctx, reqLog, w, http.StatusMethodNotAllowed, ErrMethodNotAllowed.toErrorResponse())
 			return
 		}
 
 		ct := r.Header.Get("Content-Type")
 		if !isJSONContentType(ct) {
-			writeErrorRespAndLog(ctx, w, http.StatusUnsupportedMediaType, ErrUnsupportedMediaType.toErrorResponse())
+			writeErrorRespAndLog(ctx, reqLog, w, http.StatusUnsupportedMediaType, ErrUnsupportedMediaType.toErrorResponse())
 			return
 		}
 
@@ -119,10 +117,10 @@ func MakeHandler[Req any, Resp any](
 		buf, err := io.ReadAll(body)
 		if err != nil {
 			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-				writeErrorRespAndLog(ctx, w, http.StatusRequestEntityTooLarge, ErrRequestEntityTooLarge.toErrorResponse())
+				writeErrorRespAndLog(ctx, reqLog, w, http.StatusRequestEntityTooLarge, ErrRequestEntityTooLarge.toErrorResponse())
 				return
 			}
-			writeErrorRespAndLog(ctx, w, http.StatusBadRequest, ErrReadBody.toErrorResponse())
+			writeErrorRespAndLog(ctx, reqLog, w, http.StatusBadRequest, ErrReadBody.toErrorResponse())
 			return
 		}
 
@@ -130,13 +128,13 @@ func MakeHandler[Req any, Resp any](
 		dec := json.NewDecoder(bytes.NewReader(buf))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
-			writeErrorRespAndLog(ctx, w, http.StatusBadRequest, ErrInvalidRequest.toErrorResponse())
+			writeErrorRespAndLog(ctx, reqLog, w, http.StatusBadRequest, ErrInvalidRequest.toErrorResponse())
 			return
 		}
 
 		// Reject requests that send more than one JSON value.
 		if dec.More() {
-			writeErrorRespAndLog(ctx, w, http.StatusBadRequest, ErrInvalidRequest.toErrorResponse())
+			writeErrorRespAndLog(ctx, reqLog, w, http.StatusBadRequest, ErrInvalidRequest.toErrorResponse())
 			return
 		}
 
@@ -146,32 +144,31 @@ func MakeHandler[Req any, Resp any](
 				var status int
 				if funcErr.ServerFault {
 					status = http.StatusInternalServerError
-					reqLogger.ErrorContext(ctx, "RPC func returned server fault", "error", err, "errorCode", funcErr.Code)
+					reqLog.ErrorContext(ctx, "RPC func returned server fault", "error", err, "errorCode", funcErr.Code)
 				} else {
 					status = http.StatusBadRequest
-					reqLogger.DebugContext(ctx, "RPC func returned client fault", "error", err, "errorCode", funcErr.Code)
+					reqLog.DebugContext(ctx, "RPC func returned client fault", "error", err, "errorCode", funcErr.Code)
 				}
-				writeErrorRespAndLog(ctx, w, status, funcErr.toErrorResponse())
+				writeErrorRespAndLog(ctx, reqLog, w, status, funcErr.toErrorResponse())
 				return
 			}
-			reqLogger.ErrorContext(ctx, "RPC func returned unhandled error", "error", err)
-			writeErrorRespAndLog(ctx, w, http.StatusInternalServerError, ErrInternalError.toErrorResponse())
+			reqLog.ErrorContext(ctx, "RPC func returned unhandled error", "error", err)
+			writeErrorRespAndLog(ctx, reqLog, w, http.StatusInternalServerError, ErrInternalError.toErrorResponse())
 			return
 		}
 
-		writeSuccessRespAndLog(ctx, w, &resp)
+		writeSuccessRespAndLog(ctx, reqLog, w, &resp)
 	}
 }
 
-func writeSuccessRespAndLog(ctx context.Context, w http.ResponseWriter, resp any) {
-	log := logging.FromContext(ctx)
+func writeSuccessRespAndLog(ctx context.Context, log *slog.Logger, w http.ResponseWriter, resp any) {
 	respBuf, err := json.Marshal(resp)
 	if err != nil {
 		log.ErrorContext(ctx, "Marshaling response failed", "error", err)
-		writeErrorRespAndLog(ctx, w, http.StatusInternalServerError, ErrInternalError.toErrorResponse())
+		writeErrorRespAndLog(ctx, log, w, http.StatusInternalServerError, ErrInternalError.toErrorResponse())
 		return
 	}
-	if !writeJSON(ctx, w, http.StatusOK, respBuf) {
+	if !writeJSON(ctx, log, w, http.StatusOK, respBuf) {
 		return
 	}
 	log.InfoContext(
@@ -180,15 +177,14 @@ func writeSuccessRespAndLog(ctx context.Context, w http.ResponseWriter, resp any
 	)
 }
 
-func writeErrorRespAndLog(ctx context.Context, w http.ResponseWriter, httpStatus int, resp ErrorResponse) {
-	log := logging.FromContext(ctx)
+func writeErrorRespAndLog(ctx context.Context, log *slog.Logger, w http.ResponseWriter, httpStatus int, resp ErrorResponse) {
 	respBuf, err := json.Marshal(&resp)
 	if err != nil {
 		log.ErrorContext(ctx, "Marshaling error response failed", "error", err)
 		respBuf = []byte(`{"message":"internal error","code":"httprpc.Internal"}`)
 		httpStatus = http.StatusInternalServerError
 	}
-	if !writeJSON(ctx, w, httpStatus, respBuf) {
+	if !writeJSON(ctx, log, w, httpStatus, respBuf) {
 		return
 	}
 	outcome, rpcStatus := "success", "clientFaultError"
@@ -201,8 +197,7 @@ func writeErrorRespAndLog(ctx context.Context, w http.ResponseWriter, httpStatus
 	)
 }
 
-func writeJSON(ctx context.Context, w http.ResponseWriter, status int, body []byte) bool {
-	log := logging.FromContext(ctx)
+func writeJSON(ctx context.Context, log *slog.Logger, w http.ResponseWriter, status int, body []byte) bool {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)

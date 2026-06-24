@@ -27,15 +27,33 @@ func LoadIdentity(certPath, keyPath, caPath string) (Identity, error) {
 	if _, err := id.loadKeyPair(); err != nil {
 		return nil, fmt.Errorf("loading identity cert/key: %w", err)
 	}
-	caPEM, err := os.ReadFile(caPath)
+	var err error
+	id.caPool, err = loadCA(caPath)
 	if err != nil {
-		return nil, fmt.Errorf("reading identity CA: %w", err)
-	}
-	id.caPool = x509.NewCertPool()
-	if !id.caPool.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("parsing identity CA: no PEM certs found in %s", caPath)
+		return nil, fmt.Errorf("loading identity CA: %w", err)
 	}
 	return id, nil
+}
+
+// ClientConfigWithoutCert returns a [*tls.Config] for dialing peers with server auth.
+func ClientConfigWithoutCert(caPath string) (*tls.Config, error) {
+	caPool, err := loadCA(caPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading CA: %w", err)
+	}
+	return &tls.Config{RootCAs: caPool}, nil
+}
+
+func loadCA(caPath string) (*x509.CertPool, error) {
+	caPEM, err := os.ReadFile(caPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading CA: %w", err)
+	}
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("parsing CA: no PEM certs found in %s", caPath)
+	}
+	return caPool, nil
 }
 
 type identity struct {

@@ -20,6 +20,7 @@ import (
 
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
@@ -560,9 +561,9 @@ func TestSetDynamicHeaders(t *testing.T) {
 			server := newTestServer(nil, tc.secret, "", "", false)
 
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
-			requestID := newRequestID()
+			requestID := requestid.New()
 			attempt := 1
-			err := server.setDynamicHeaders(req, tc.secret, requestID, attempt)
+			err := server.setEncryptionHeaders(req, tc.secret, requestID, attempt)
 			if tc.wantErr {
 				require.Error(err)
 			} else {
@@ -570,7 +571,7 @@ func TestSetDynamicHeaders(t *testing.T) {
 				assert.Equal(req.Header.Get(constants.PrivatemodeSecretIDHeader), tc.secret.ID)
 				assert.NotEmpty(req.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyHeader))
 				assert.NotEmpty(req.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyMACHeader))
-				assert.Equal(req.Header.Get(requestid.UserHeader), fmt.Sprintf("%s_%d", requestID, attempt))
+				assert.Equal(fmt.Sprintf("proxy_%s_%d", requestID, attempt), req.Header.Get(requestid.UserHeader))
 			}
 		})
 	}
@@ -725,12 +726,14 @@ func newTestServer(apiKey *string, secret secretmanager.Secret, backendAddr stri
 
 func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.Request) (map[string]string, error)) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		encrypt, decrypt := stub.GetEncryptionFunctions(secret.Map())
 		log := slog.Default()
 
-		// Use JSON request mutation if the request is a JSON request
-		requestMutator := forwarder.WithRawRequestMutation(decrypt, log)
-		if err := requestMutator(r); err != nil {
+		se, err := encbody.InitializeServerExchange(secret.Data, r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := se.DecryptRequest(r); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -748,14 +751,13 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 			return
 		}
 
-		mutatedJSON, err := forwarder.MutateJSONFields(responseJSON, encrypt, nil)
-		if err != nil {
+		resp := &forwarder.UnaryResponse{Header: w.Header(), Body: responseJSON}
+		resp.Header.Set("Content-Type", "application/json")
+		if err := se.EncryptUnaryResponse(resp); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if _, err := w.Write(mutatedJSON); err != nil {
+		if _, err := w.Write(resp.Body); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

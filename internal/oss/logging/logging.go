@@ -9,44 +9,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
 
+	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/spf13/cobra"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
-
-type contextKey string
-
-const loggerContextKey contextKey = "logger"
-
-// ContextWithLogger stores the scoped (e.g. request-scoped) logger in ctx.
-func ContextWithLogger(ctx context.Context, log *slog.Logger) context.Context {
-	return context.WithValue(ctx, loggerContextKey, log)
-}
-
-// FromContext retrieves the scoped logger from ctx. Falls back to [slog.Default] if no logger is
-// stored in the context.
-func FromContext(ctx context.Context) *slog.Logger {
-	if log, ok := ctx.Value(loggerContextKey).(*slog.Logger); ok && log != nil {
-		return log
-	}
-	return slog.Default()
-}
-
-// FromRequest retrieves the request-scoped logger from r's context. Falls back to [slog.Default] if
-// no logger is stored in the context.
-func FromRequest(r *http.Request) *slog.Logger {
-	return FromContext(r.Context())
-}
-
-// RequestWithLogger returns a new [http.Request] with a the request-scoped log stored in its
-// context. It is a convenience wrapper around [ContextWithLogger].
-func RequestWithLogger(r *http.Request, log *slog.Logger) *http.Request {
-	return r.WithContext(ContextWithLogger(r.Context(), log))
-}
 
 const (
 	// Flag is the flag name for setting the logging level.
@@ -96,19 +66,53 @@ func ValidateLogFormat(logFormat string) error {
 	}
 }
 
+// contextHandler wraps a [slog.Handler] and enriches each record with attributes extracted from the
+// context at log time (if context is passed in the logging call e.g. [slog.Logger.InfoContext]).
+// Attributes added: request ID via [requestid.FromContext].
+type contextHandler struct {
+	handler slog.Handler
+}
+
+var _ slog.Handler = (*contextHandler)(nil)
+
+func newContextHandler(handler slog.Handler) *contextHandler {
+	return &contextHandler{handler}
+}
+
+func (c contextHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return c.handler.Enabled(ctx, level)
+}
+
+func (c contextHandler) Handle(ctx context.Context, r slog.Record) error {
+	if id, ok := requestid.FromContext(ctx); ok {
+		r.AddAttrs(slog.String("requestID", id))
+	}
+	return c.handler.Handle(ctx, r)
+}
+
+func (c contextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return newContextHandler(c.handler.WithAttrs(attrs))
+}
+
+func (c contextHandler) WithGroup(name string) slog.Handler {
+	return newContextHandler(c.handler.WithGroup(name))
+}
+
 // NewLogger returns a new [*slog.Logger] at the given log level.
 // The logger writes to [os.Stderr] and uses the JSON format.
 func NewLogger(logLevel string) *slog.Logger {
-	return slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+	baseHandler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: LevelFromString(logLevel, slog.LevelInfo),
-	}))
+	})
+	return slog.New(newContextHandler(baseHandler))
 }
 
 // NewCLILogger returns a new [*slog.Logger] at the given log level.
 func NewCLILogger(logLevel string, out io.Writer) *slog.Logger {
-	return slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{
+	baseHandler := slog.NewTextHandler(out, &slog.HandlerOptions{
 		Level: LevelFromString(logLevel, slog.LevelWarn),
-	}))
+	})
+	return slog.New(newContextHandler(baseHandler))
 }
 
 // LevelFromString converts a string to a [slog.Level].
@@ -151,7 +155,8 @@ func NewFileLogger(logLevel string, output io.Writer, filename string) *slog.Log
 		Compress:   false, // compress old files
 		LocalTime:  false,
 	}
-	return slog.New(slog.NewJSONHandler(io.MultiWriter(writer, output), &slog.HandlerOptions{
+	baseHandler := slog.NewJSONHandler(io.MultiWriter(writer, output), &slog.HandlerOptions{
 		Level: LevelFromString(logLevel, slog.LevelInfo),
-	}))
+	})
+	return slog.New(newContextHandler(baseHandler))
 }

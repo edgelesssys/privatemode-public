@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"strings"
@@ -27,14 +28,13 @@ const (
 type Etcd struct {
 	client etcdClient
 
-	secrets   *secrets.Secrets
-	closeChan chan struct{}
-	log       *slog.Logger
+	secrets *secrets.Secrets
+	log     *slog.Logger
 }
 
 // New creates a new etcd client.
 // This function attempts to load client certificates and CA from the filesystem.
-func New(hosts []string, etcdMemberCert, etcdMemberKey, etcdCA string, fs afero.Afero, log *slog.Logger) (*Etcd, func(), error) {
+func New(hosts []string, etcdMemberCert, etcdMemberKey, etcdCA string, fs afero.Afero, log *slog.Logger) (*Etcd, *secrets.Secrets, error) {
 	keyPair, err := tls.LoadX509KeyPair(etcdMemberCert, etcdMemberKey)
 	if err != nil {
 		return nil, nil, err
@@ -64,19 +64,12 @@ func New(hosts []string, etcdMemberCert, etcdMemberKey, etcdCA string, fs afero.
 	}
 
 	e := &Etcd{
-		client:    client,
-		closeChan: make(chan struct{}),
-		log:       log,
+		client: client,
+		log:    log,
 	}
 	e.secrets = secrets.New(e)
 
-	return e, e.close, nil
-}
-
-// WatchSecrets starts a watch on the etcd's inference secrets and updates the local secret store on changes.
-func (e *Etcd) WatchSecrets(ctx context.Context) *secrets.Secrets {
-	go e.watchSecrets(ctx)
-	return e.secrets
+	return e, e.secrets, nil
 }
 
 // GetSecret retrieves a secret from etcd by its key.
@@ -91,79 +84,73 @@ func (e *Etcd) GetSecret(ctx context.Context, key string) ([]byte, error) {
 	return response.Kvs[0].Value, nil
 }
 
-func (e *Etcd) watchSecrets(ctx context.Context) {
+// WatchSecrets starts a watch on the etcd's inference secrets and updates the local secret store on changes.
+func (e *Etcd) WatchSecrets(ctx context.Context) error {
 	watchChan, cancel, err := e.startWatch(ctx, 0)
 	if err != nil {
-		return
+		return fmt.Errorf("starting watch: %w", err)
 	}
 	defer cancel()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-e.closeChan:
-			return
+			return ctx.Err()
 
 		case event, ok := <-watchChan:
 			if !ok {
-				e.log.Error("Watch channel closed")
-				e.log.Info("Restarting watch")
+				e.log.ErrorContext(ctx, "Watch channel closed")
+				e.log.InfoContext(ctx, "Restarting watch")
 
 				cancel()
 				watchChan, cancel, err = e.startWatch(ctx, restartBackoff)
 				if err != nil {
-					return
+					return fmt.Errorf("restarting watch: %w", err)
 				}
 				continue
 			}
 			if event.Err() != nil {
-				e.log.Error("Error watching etcd", "error", event.Err())
-				e.log.Info("Restarting watch")
+				e.log.ErrorContext(ctx, "Error watching etcd", "error", event.Err())
+				e.log.InfoContext(ctx, "Restarting watch")
 
 				cancel()
 				watchChan, cancel, err = e.startWatch(ctx, restartBackoff)
 				if err != nil {
-					return
+					return fmt.Errorf("restarting watch: %w", err)
 				}
 				continue
 			}
 			if event.Canceled {
-				e.log.Error("Watch canceled")
-				e.log.Info("Restarting watch")
+				e.log.ErrorContext(ctx, "Watch canceled")
+				e.log.InfoContext(ctx, "Restarting watch")
 
 				cancel()
 				watchChan, cancel, err = e.startWatch(ctx, restartBackoff)
 				if err != nil {
-					return
+					return fmt.Errorf("restarting watch: %w", err)
 				}
 				continue
 			}
 
 			if event.IsProgressNotify() {
-				e.log.Info("Watch still alive")
+				e.log.InfoContext(ctx, "Watch still alive")
 				continue
 			}
 
-			e.log.Info("Received inference secret update event. Updating local secret cache...")
+			e.log.InfoContext(ctx, "Received inference secret update event. Updating local secret cache...")
 			for _, ev := range event.Events {
 				if ev.IsCreate() || ev.IsModify() {
 					// Save new secret or update existing secret
 					e.secrets.Set(strings.TrimPrefix(string(ev.Kv.Key), constants.EtcdInferenceSecretPrefix), ev.Kv.Value)
-					e.log.Info("Updated secret", "key", string(ev.Kv.Key))
+					e.log.InfoContext(ctx, "Updated secret", "key", string(ev.Kv.Key))
 				} else {
 					// Remove existing key
 					e.secrets.Delete(strings.TrimPrefix(string(ev.Kv.Key), constants.EtcdInferenceSecretPrefix))
-					e.log.Info("Deleted secret", "key", string(ev.Kv.Key))
+					e.log.InfoContext(ctx, "Deleted secret", "key", string(ev.Kv.Key))
 				}
 			}
 		}
 	}
-}
-
-func (e *Etcd) close() {
-	e.closeChan <- struct{}{}
-	_ = e.client.Close()
 }
 
 // startWatch starts a watcher on etcd using the given [context.Context].
@@ -178,7 +165,7 @@ func (e *Etcd) startWatch(ctx context.Context, delay time.Duration) (ch clientv3
 		case <-ctx.Done():
 			return nil, func() {}, ctx.Err()
 		case <-time.After(backoff):
-			e.log.Info("Starting watch")
+			e.log.InfoContext(ctx, "Starting watch")
 			watchCtx, cancel := context.WithCancel(ctx)
 			watch := e.client.Watch(
 				clientv3.WithRequireLeader(watchCtx),
@@ -193,7 +180,7 @@ func (e *Etcd) startWatch(ctx context.Context, delay time.Duration) (ch clientv3
 			resp, err := e.client.Get(getCtx, constants.EtcdInferenceSecretPrefix, clientv3.WithPrefix())
 			getCancel()
 			if err != nil {
-				e.log.Error("Failed retrieving inference secrets from etcd, restarting watch...", "error", err)
+				e.log.ErrorContext(ctx, "Failed retrieving inference secrets from etcd, restarting watch...", "error", err)
 				backoff = restartBackoff
 				cancel()
 				continue
@@ -201,7 +188,7 @@ func (e *Etcd) startWatch(ctx context.Context, delay time.Duration) (ch clientv3
 
 			secretMap, err := kvsToMap(resp.Kvs)
 			if err != nil {
-				e.log.Error("Failed parsing inference secrets from etcd", "error", err)
+				e.log.ErrorContext(ctx, "Failed parsing inference secrets from etcd", "error", err)
 				backoff = restartBackoff
 				cancel()
 				continue

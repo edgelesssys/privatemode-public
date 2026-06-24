@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
-	"strings"
 	"testing"
 
 	"github.com/edgelesssys/continuum/internal/oss/sse"
@@ -14,17 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testLogger(t *testing.T) *slog.Logger {
-	t.Helper()
-	return slog.New(slog.NewTextHandler(&testLogWriter{t: t}, nil))
-}
-
-type testLogWriter struct{ t *testing.T }
-
-func (w *testLogWriter) Write(p []byte) (int, error) {
-	w.t.Helper()
-	w.t.Log(strings.TrimRight(string(p), "\n"))
-	return len(p), nil
+func testWarn(t *testing.T) WarnFunc {
+	return func(msg string, args ...any) {
+		t.Log(append([]any{msg}, args...)...)
+	}
 }
 
 // mockSSEReader yields a fixed sequence of SSE lines.
@@ -136,7 +127,7 @@ func TestUsageSSEReader(t *testing.T) {
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			mock := &mockSSEReader{lines: tc.lines}
-			reader := NewUsageSSEReader(mock, testExtractor, testLogger(t))
+			reader := NewUsageSSEReader(mock, testExtractor, testWarn(t))
 
 			for {
 				_, err := reader.Next()

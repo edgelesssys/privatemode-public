@@ -93,7 +93,7 @@ func MutationFuncChain(
 // regardless of its content-type. It uses the provided MutationFunc to mutate the raw request body.
 func WithRawRequestMutation(mutate MutationFunc, log *slog.Logger) RequestMutator {
 	return func(r *http.Request) error {
-		log.Info("Mutating full request body")
+		log.InfoContext(r.Context(), "Mutating full request body")
 
 		bodyBytes, err := persist.ReadBodyUnlimited(r)
 		if err != nil {
@@ -122,7 +122,7 @@ func WithJSONRequestMutation(mutate MutationFunc, skipFields FieldSelector, log 
 // is left unchanged.
 func WithRawFormRequestMutation(mutate func(*multipart.Form, *multipart.Writer) (bool, error), log *slog.Logger) RequestMutator {
 	return func(r *http.Request) error {
-		log.Info("Mutating full form request body")
+		log.InfoContext(r.Context(), "Mutating full form request body")
 
 		body, err := persist.ReadBodyUnlimited(r)
 		if err != nil {
@@ -212,7 +212,7 @@ func WithFormRequestMutation(mutate MutationFunc, skipFields FieldSelector, log 
 	}, log)
 
 	return func(r *http.Request) error {
-		log.Info("Mutating HTTP form request")
+		log.InfoContext(r.Context(), "Mutating HTTP form request")
 		return innerMutator(r)
 	}
 }
@@ -223,7 +223,7 @@ func withJSONRequestMutation(
 	log *slog.Logger,
 ) RequestMutator {
 	return func(r *http.Request) error {
-		log.Info("Mutating request")
+		log.InfoContext(r.Context(), "Mutating request")
 
 		req, err := persist.ReadBodyUnlimited(r)
 		if err != nil {

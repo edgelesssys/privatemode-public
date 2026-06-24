@@ -27,10 +27,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func BenchmarkServeUnencrypted(b *testing.B) {
-	benchmarkServe(b, adapter.InferenceAPIUnencrypted)
-}
-
 func BenchmarkServeOpenAI(b *testing.B) {
 	benchmarkServe(b, adapter.InferenceAPIOpenAI)
 }
