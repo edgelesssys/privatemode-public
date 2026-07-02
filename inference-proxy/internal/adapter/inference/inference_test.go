@@ -2,16 +2,14 @@ package inference
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/adaptertest"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
-	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
 	"github.com/stretchr/testify/assert"
@@ -26,6 +24,7 @@ func TestVerifyOCSP(t *testing.T) {
 	testCases := map[string]struct {
 		ocspStatus     ocsp.StatusInfo
 		acceptedStatus []ocspheader.AllowStatus
+		secretID       string // when unset, a known secret ID is used
 		expectedCode   int
 		expectedBody   string
 	}{
@@ -37,6 +36,13 @@ func TestVerifyOCSP(t *testing.T) {
 		"all good, no header set": {
 			ocspStatus:   ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood},
 			expectedCode: http.StatusOK,
+		},
+		"missing secret, OCSP header set": {
+			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood},
+			acceptedStatus: []ocspheader.AllowStatus{ocspheader.AllowStatusGood},
+			secretID:       "non-existing",
+			expectedCode:   http.StatusBadRequest,
+			expectedBody:   constants.ErrorNoSecretForID,
 		},
 		"unknown gpu, accept good": {
 			ocspStatus:     ocsp.StatusInfo{GPU: ocsp.StatusUnknown, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood},
@@ -145,10 +151,10 @@ func TestVerifyOCSP(t *testing.T) {
 			secretID := "test"
 
 			a := &Adapter{
-				Cipher: &stubCipher{
-					secretMap: map[string][]byte{secretID: secret},
+				Secrets: &adaptertest.Secrets{
+					SecretMap: map[string][]byte{secretID: secret},
 				},
-				Forwarder:     &stubForwarder{},
+				EncForwarder:  adaptertest.EncForwarder{},
 				WorkloadTasks: []string{"generate"},
 				Log:           slog.Default(),
 				OCSPStatus:    []ocsp.StatusInfo{tc.ocspStatus},
@@ -169,9 +175,13 @@ func TestVerifyOCSP(t *testing.T) {
 				policyMACHeader, err := ocspHeader.MarshalMACHeader([32]byte(secret))
 				require.NoError(err)
 
+				sentSecretID := secretID
+				if tc.secretID != "" {
+					sentSecretID = tc.secretID
+				}
 				request.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyHeader, policyHeader)
 				request.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyMACHeader, policyMACHeader)
-				request.Header.Set(constants.PrivatemodeSecretIDHeader, secretID)
+				request.Header.Set(constants.PrivatemodeSecretIDHeader, sentSecretID)
 			}
 
 			responseRecorder := httptest.NewRecorder()
@@ -197,33 +207,4 @@ func TestUnsupportedEndpoint(t *testing.T) {
 
 	assert.Equal(http.StatusNotImplemented, responseRecorder.Code)
 	assert.Contains(responseRecorder.Body.String(), "unsupported endpoint")
-}
-
-type stubCipher struct {
-	secretMap map[string][]byte
-}
-
-func (c *stubCipher) Secret(_ context.Context, id string) ([]byte, error) {
-	return c.secretMap[id], nil
-}
-
-func (c *stubCipher) NewResponseCipher() cipher.ResponseCipher {
-	return c
-}
-
-func (c *stubCipher) DecryptRequest(context.Context) func(encryptedData string) (res string, err error) {
-	return func(encryptedData string) (res string, err error) {
-		return encryptedData, nil
-	}
-}
-
-func (c *stubCipher) EncryptResponse(context.Context) func(plainData string) (string, error) {
-	return func(plainData string) (res string, err error) {
-		return plainData, nil
-	}
-}
-
-type stubForwarder struct{}
-
-func (f *stubForwarder) Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts) {
 }

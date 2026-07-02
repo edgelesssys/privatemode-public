@@ -31,7 +31,9 @@ func LogRequestSummary(next http.Handler, log *slog.Logger, logStart bool) http.
 		args := []any{
 			slog.String("method", r.Method),
 			slog.String("scheme", scheme),
-			slog.String("host", r.Host),
+			// pm-proxy < v1.47 sends its own hostname/IP towards Privatemode infrastructure, which
+			// we don't want to log.
+			// slog.String("host", r.Host),
 			slog.String("path", r.URL.Path),
 			slog.String("query", r.URL.RawQuery),
 			slog.String("protocol", r.Proto),

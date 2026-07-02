@@ -50,7 +50,7 @@ func TestSummaryServedLine(t *testing.T) {
 			assert: func(t *testing.T, a map[string]any) {
 				assert.Equal(t, http.MethodPost, a["method"])
 				assert.Equal(t, "http", a["scheme"])
-				assert.Equal(t, "example.com", a["host"])
+				assert.Empty(t, a["host"]) // Temporarily no logging of `Host` header
 				assert.Equal(t, "/v1/chat/completions", a["path"])
 				assert.Equal(t, "foo=bar", a["query"])
 				assert.Equal(t, "HTTP/1.1", a["protocol"])

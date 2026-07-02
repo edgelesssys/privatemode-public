@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/httpapi"
 	contrastsdk "github.com/edgelesssys/contrast/sdk"
 )
@@ -40,7 +41,7 @@ func NewGetter(httpClient *http.Client, endpoint string, contrastClient *contras
 }
 
 // GetAttestedMeshCA gets the mesh CA of the Privatemode deployment.
-func (c Getter) GetAttestedMeshCA(ctx context.Context, expectedMfBytes []byte, apiKey string) (*x509.Certificate, error) {
+func (c Getter) GetAttestedMeshCA(ctx context.Context, expectedMfBytes []byte, cred auth.Credential) (*x509.Certificate, error) {
 	// Get the attestation
 	nonce := make([]byte, 32)
 	if _, err := rand.Read(nonce); err != nil {
@@ -50,7 +51,7 @@ func (c Getter) GetAttestedMeshCA(ctx context.Context, expectedMfBytes []byte, a
 	if err != nil {
 		return nil, fmt.Errorf("marshaling attest request: %w", err)
 	}
-	attestResp, err := httpapi.Do(ctx, c.httpClient, http.MethodPost, "https://"+c.endpoint+"/privatemode/v1/attest", attestReq, apiKey)
+	attestResp, err := httpapi.Do(ctx, c.httpClient, http.MethodPost, "https://"+c.endpoint+"/privatemode/v1/attest", attestReq, cred)
 	if err != nil {
 		return nil, fmt.Errorf("doing attest request: %w", err)
 	}

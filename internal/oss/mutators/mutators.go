@@ -11,12 +11,28 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/persist"
 	"github.com/tidwall/gjson"
 )
+
+// imageDataQueries locate image payloads (base64 data or URLs) in chat messages, across the
+// OpenAI and Anthropic formats. "#" + "@flatten" collect every image, so each is counted once.
+var imageDataQueries = []string{
+	// OpenAI: content[].image_url.url (object form) or content[].image_url (string form).
+	`#.content.#.image_url.url|@flatten`,
+	`#.content.#.image_url|@flatten`,
+	// Anthropic: content[].source.data (base64) or content[].source.url.
+	`#.content.#.source.data|@flatten`,
+	`#.content.#.source.url|@flatten`,
+	// Anthropic tool results nest media one level deeper: content[].content[].source.{data,url}.
+	`#.content.#.content.#.source.data|@flatten|@flatten`,
+	`#.content.#.content.#.source.url|@flatten|@flatten`,
+}
 
 // ShardKeyInjector returns a [forwarder.RequestMutator] that injects a
 // shard key header into the request. When defaultCacheSalt is empty, a
@@ -35,6 +51,14 @@ func ShardKeyInjector(defaultCacheSalt string) forwarder.RequestMutator {
 		if len(httpBody) == 0 {
 			return nil
 		}
+
+		content := shardContent(httpBody)
+
+		// Always set the token count for load balancing, even when no shard key is generated
+		// (e.g. a random cache salt).
+		contentTokens := len(content) / constants.ShardKeyCharsPerToken
+		r.Header.Set(constants.PrivatemodeContentLengthTokensHeader, strconv.Itoa(contentTokens))
+
 		cacheSalt := gjson.Get(httpBody, "cache_salt").String()
 
 		// If there is no explicit cache salt, we use the default cache salt.
@@ -44,27 +68,6 @@ func ShardKeyInjector(defaultCacheSalt string) forwarder.RequestMutator {
 
 		// If there is no cache salt, we use default sharding without a shard key.
 		if cacheSalt != "" {
-			// /chat/completions
-			tools := gjson.Get(httpBody, "tools").String()
-			messages := gjson.Get(httpBody, "messages").String()
-
-			// /completions
-			prompt := gjson.Get(httpBody, "prompt").String()
-			suffix := gjson.Get(httpBody, "suffix").String()
-
-			// /v1/messages sends the system prompt as its own field
-			systemPrompt := gjson.Get(httpBody, "system").String()
-
-			// NOTE: The order is important and must match the chat template of the model.
-			// For many models, tools are defined first, whithin or after the system message.
-			// This is the case for Llama and DeepSeek. Gemma does not have tools right now.
-			//
-			// Mistral puts tools right before the last user message. Once we use a model
-			// that does not store tools in the beginning, we may want to create a
-			// model-specific shard key to avoid cache misses due to changing tools.
-			// Potentially, we may also adjust the chat template for such models but this
-			// could have a performance impact.
-			content := systemPrompt + tools + messages + prompt + suffix
 			shardKey, err := generateShardKey(cacheSalt, content)
 			if err != nil {
 				return fmt.Errorf("generating shard key: %w", err)
@@ -75,6 +78,74 @@ func ShardKeyInjector(defaultCacheSalt string) forwarder.RequestMutator {
 
 		return nil
 	}
+}
+
+// shardContent assembles the request content used for shard key generation and token
+// estimation. Image payloads are replaced by a hash sized to the image's embedding so the
+// resulting length reflects the number of tokens the model actually sees (see [replaceImages]).
+func shardContent(httpBody string) string {
+	// /chat/completions
+	tools := gjson.Get(httpBody, "tools").String()
+	messages := gjson.Get(httpBody, "messages").String()
+
+	// /completions
+	prompt := gjson.Get(httpBody, "prompt").String()
+	suffix := gjson.Get(httpBody, "suffix").String()
+
+	// /v1/messages sends the system prompt as its own field
+	systemPrompt := gjson.Get(httpBody, "system").String()
+
+	messages = replaceImages(messages)
+
+	// NOTE: The order is important and must match the chat template of the model.
+	// For many models, tools are defined first, whithin or after the system message.
+	// This is the case for Llama and DeepSeek. Gemma does not have tools right now.
+	//
+	// Mistral puts tools right before the last user message. Once we use a model
+	// that does not store tools in the beginning, we may want to create a
+	// model-specific shard key to avoid cache misses due to changing tools.
+	// Potentially, we may also adjust the chat template for such models but this
+	// could have a performance impact.
+	return systemPrompt + tools + messages + prompt + suffix
+}
+
+// replaceImages swaps every image payload in messages for a fixed-size placeholder (see
+// [imagePlaceholder]); payloads are located via [imageDataQueries].
+//
+// We match on the raw JSON token ([gjson.Result.Raw], quoted and still-escaped), not the
+// decoded value, so the replace is exact whatever the escaping (quotes/backslashes in a URL)
+// and even malformed data stays bounded to one embedding. The decoded value only feeds the hash.
+func replaceImages(messages string) string {
+	seen := make(map[string]struct{})
+	for _, query := range imageDataQueries {
+		gjson.Get(messages, query).ForEach(func(_, res gjson.Result) bool {
+			// Skip empty values: an empty image string has res.Raw == `""`, and replacing
+			// that would rewrite every empty string in messages (e.g. an empty text part).
+			if res.Type != gjson.String || res.Str == "" {
+				return true
+			}
+			if _, ok := seen[res.Raw]; ok {
+				return true
+			}
+			seen[res.Raw] = struct{}{}
+			// res.Raw is quoted; keep quotes around the placeholder so messages stays well-formed.
+			messages = strings.ReplaceAll(messages, res.Raw, `"`+imagePlaceholder(res.String())+`"`)
+			return true
+		})
+	}
+	return messages
+}
+
+// imagePlaceholder returns the image's sha256 hash repeated to fill one embedding's worth of
+// content ([constants.ImageEmbeddingTokens] tokens). Content-derived, so the shard key stays
+// sensitive to the image while its length is bounded.
+func imagePlaceholder(data string) string {
+	sum := sha256.Sum256([]byte(data))
+	hash := hex.EncodeToString(sum[:])
+
+	// Shard content is char-based, so scale tokens to chars.
+	size := constants.ImageEmbeddingTokens * constants.ShardKeyCharsPerToken
+	return strings.Repeat(hash, size/len(hash)+1)[:size]
 }
 
 // ModelHeaderInjector returns a [forwarder.RequestMutator] that
@@ -96,8 +167,8 @@ func generateShardKey(cacheSalt string, content string) (string, error) {
 	cacheSaltHash := sha256.Sum256([]byte(cacheSalt))
 	shardKeyStr := hex.EncodeToString(cacheSaltHash[:])[:constants.CacheSaltHashLength]
 
-	// Estimate number of tokens n as content length // 4
-	n := len(content) / 4
+	// Estimate number of tokens from bytes
+	n := len(content) / constants.ShardKeyCharsPerToken
 
 	// Currently, only 1Mio tokens to limit the shard key size. Limiting factors are proxies,
 	// where nginx supports only 4kb. But currently, this only goes to the API Gateway such

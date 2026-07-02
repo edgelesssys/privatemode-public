@@ -6,7 +6,6 @@ package setup
 
 import (
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -36,7 +35,7 @@ type ContrastFlags struct {
 
 // NewServer creates a new server instance.
 func NewServer(flags Flags, isApp bool, manager *secretmanager.SecretManager, log *slog.Logger) *server.Server {
-	client := http.DefaultClient
+	client := httputil.NewClient()
 	if flags.InsecureAPIConnection {
 		client = httputil.InsecureNewSkipVerifyClient()
 	}

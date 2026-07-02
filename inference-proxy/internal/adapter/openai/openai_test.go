@@ -2,7 +2,6 @@ package openai
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,12 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/adaptertest"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
@@ -58,6 +56,7 @@ func TestForwardModelsRequest(t *testing.T) {
 		workloadTasks  []string
 		path           string
 		serverResponse string
+		serverStatus   int
 		wantResponse   string
 	}{
 		"list models": {
@@ -131,6 +130,13 @@ func TestForwardModelsRequest(t *testing.T) {
 				return string(res)
 			}(),
 		},
+		"list models upstream error passes through": {
+			workloadTasks:  []string{constants.WorkloadTaskGenerate},
+			path:           "/v1/models",
+			serverResponse: `{"error":"Internal Server Error"}`,
+			wantResponse:   `{"error":"Internal Server Error"}`,
+			serverStatus:   http.StatusInternalServerError,
+		},
 	}
 
 	for name, tc := range testCases {
@@ -139,6 +145,9 @@ func TestForwardModelsRequest(t *testing.T) {
 			require := require.New(t)
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.serverStatus != 0 {
+					w.WriteHeader(tc.serverStatus)
+				}
 				_, _ = w.Write([]byte(tc.serverResponse))
 			}))
 			defer srv.Close()
@@ -150,7 +159,7 @@ func TestForwardModelsRequest(t *testing.T) {
 
 			log := slog.Default()
 			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
-			adapter, err := New(tc.workloadTasks, nil, ocspFile, forwarder, &stubUsageReporter{}, log)
+			adapter, err := New(tc.workloadTasks, nil, ocspFile, adaptertest.EncForwarder{Inner: forwarder}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
@@ -159,6 +168,9 @@ func TestForwardModelsRequest(t *testing.T) {
 			adapter.forwardModelsRequest(responseRecorder, request)
 			t.Log(responseRecorder.Body.String())
 			assert.JSONEq(tc.wantResponse, responseRecorder.Body.String())
+			if tc.serverStatus != 0 {
+				assert.Equal(tc.serverStatus, responseRecorder.Code)
+			}
 		})
 	}
 }
@@ -168,6 +180,7 @@ func TestForwardSpecificModelRequest(t *testing.T) {
 		workloadTasks  []string
 		path           string
 		serverResponse string
+		serverStatus   int
 		wantResponse   string
 	}{
 		"retrieve model": {
@@ -212,6 +225,13 @@ func TestForwardSpecificModelRequest(t *testing.T) {
 				return string(res)
 			}(),
 		},
+		"retrieve model upstream error passes through": {
+			workloadTasks:  []string{constants.WorkloadTaskGenerate},
+			path:           fmt.Sprintf("/v1/models/%s", defaultModel),
+			serverResponse: `{"error":"Model not found"}`,
+			serverStatus:   http.StatusNotFound,
+			wantResponse:   `{"error":"Model not found"}`,
+		},
 	}
 
 	for name, tc := range testCases {
@@ -220,6 +240,9 @@ func TestForwardSpecificModelRequest(t *testing.T) {
 			require := require.New(t)
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.serverStatus != 0 {
+					w.WriteHeader(tc.serverStatus)
+				}
 				_, _ = w.Write([]byte(tc.serverResponse))
 			}))
 			defer srv.Close()
@@ -231,7 +254,7 @@ func TestForwardSpecificModelRequest(t *testing.T) {
 
 			log := slog.Default()
 			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
-			adapter, err := New(tc.workloadTasks, nil, ocspFile, forwarder, &stubUsageReporter{}, log)
+			adapter, err := New(tc.workloadTasks, nil, ocspFile, adaptertest.EncForwarder{Inner: forwarder}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
@@ -240,6 +263,9 @@ func TestForwardSpecificModelRequest(t *testing.T) {
 			adapter.forwardSpecificModelRequest(responseRecorder, request)
 			t.Log(responseRecorder.Body.String())
 			assert.JSONEq(tc.wantResponse, responseRecorder.Body.String())
+			if tc.serverStatus != 0 {
+				assert.Equal(tc.serverStatus, responseRecorder.Code)
+			}
 		})
 	}
 }
@@ -366,7 +392,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 
 			log := slog.Default()
 			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
-			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, forwarder, &stubUsageReporter{}, log)
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: forwarder}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(tc.clientRequest))
@@ -427,7 +453,7 @@ func TestForwardChatCompletionsRequestDuplicatesReasoningContent(t *testing.T) {
 
 			log := slog.Default()
 			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
-			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, forwarder, &stubUsageReporter{}, log)
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: forwarder}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"some-model","messages":[{"role":"user","content":"hello"}],"cache_salt":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
@@ -448,8 +474,8 @@ func TestModelsEndpointExcludedFromOCSP(t *testing.T) {
 	// Create adapter with bad OCSP status - would normally fail verification
 	a := &Adapter{
 		Adapter: &inference.Adapter{
-			Cipher:        &stubCipher{},
-			Forwarder:     &stubForwarder{},
+			Secrets:       &adaptertest.Secrets{},
+			EncForwarder:  adaptertest.EncForwarder{},
 			WorkloadTasks: []string{constants.WorkloadTaskGenerate},
 			Log:           slog.Default(),
 			OCSPStatus:    []ocsp.StatusInfo{{GPU: ocsp.StatusUnknown, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}},
@@ -476,35 +502,6 @@ func TestModelsEndpointExcludedFromOCSP(t *testing.T) {
 	responseRecorder = httptest.NewRecorder()
 	mux.ServeHTTP(responseRecorder, request)
 	assert.Equal(http.StatusInternalServerError, responseRecorder.Code)
-}
-
-type stubCipher struct {
-	secretMap map[string][]byte
-}
-
-func (c *stubCipher) Secret(_ context.Context, id string) ([]byte, error) {
-	return c.secretMap[id], nil
-}
-
-func (c *stubCipher) NewResponseCipher() cipher.ResponseCipher {
-	return c
-}
-
-func (c *stubCipher) DecryptRequest(context.Context) func(encryptedData string) (res string, err error) {
-	return func(encryptedData string) (res string, err error) {
-		return encryptedData, nil
-	}
-}
-
-func (c *stubCipher) EncryptResponse(context.Context) func(plainData string) (string, error) {
-	return func(plainData string) (res string, err error) {
-		return plainData, nil
-	}
-}
-
-type stubForwarder struct{}
-
-func (f *stubForwarder) Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts) {
 }
 
 func stubRequestMutator(_ *http.Request) error { return nil }
@@ -605,9 +602,9 @@ func TestUsageExtraction(t *testing.T) {
 			ocspFile := filepath.Join(t.TempDir(), "ocsp.json")
 			require.NoError(t, os.WriteFile(ocspFile, ocspStatus, 0o644))
 
-			reporter := &stubUsageReporter{}
+			reporter := &adaptertest.UsageReporter{}
 			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default())
-			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, reporter, slog.Default())
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: fwd}, reporter, slog.Default())
 			require.NoError(t, err)
 
 			ctx := requestid.WithContext(t.Context(), "test-request-id")
@@ -620,7 +617,7 @@ func TestUsageExtraction(t *testing.T) {
 			assert.Equal(t, http.StatusOK, responseRecorder.Code)
 
 			assert.Eventually(t, func() bool {
-				report, ok := reporter.latestReport()
+				report, ok := reporter.LatestReport()
 				return ok && report.Stats == tc.wantUsage
 			}, time.Second, 10*time.Millisecond)
 		})
@@ -687,9 +684,9 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 			ocspFile := filepath.Join(t.TempDir(), "ocsp.json")
 			require.NoError(t, os.WriteFile(ocspFile, ocspStatus, 0o644))
 
-			reporter := &stubUsageReporter{}
+			reporter := &adaptertest.UsageReporter{}
 			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default())
-			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, reporter, slog.Default())
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: fwd}, reporter, slog.Default())
 			require.NoError(t, err)
 
 			// Build multipart form request with a model field.
@@ -709,30 +706,9 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 			assert.Equal(t, http.StatusOK, responseRecorder.Code)
 
 			assert.Eventually(t, func() bool {
-				report, ok := reporter.latestReport()
+				report, ok := reporter.LatestReport()
 				return ok && report.Stats == tc.wantUsage
 			}, time.Second, 10*time.Millisecond)
 		})
 	}
-}
-
-type stubUsageReporter struct {
-	mu     sync.Mutex
-	latest *usagecollector.SubmitUsageReportRequest
-}
-
-func (r *stubUsageReporter) Submit(_ context.Context, req usagecollector.SubmitUsageReportRequest) error {
-	r.mu.Lock()
-	r.latest = &req
-	r.mu.Unlock()
-	return nil
-}
-
-func (r *stubUsageReporter) latestReport() (usagecollector.SubmitUsageReportRequest, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.latest == nil {
-		return usagecollector.SubmitUsageReportRequest{}, false
-	}
-	return *r.latest, true
 }

@@ -3,7 +3,6 @@ package cipher
 import (
 	"bytes"
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
@@ -20,15 +19,15 @@ func TestEncryptResponse(t *testing.T) {
 	id := "id"
 	nonce := []byte("nonce")
 	secret := bytes.Repeat([]byte{0x42}, 32)
-	secrets := secrets.New(stubSecretGetter{})
-	cipher := New(secrets)
+	sec := secrets.New(stubSecretGetter{})
+	cipher := New(sec)
 
 	// No secrets set
 	_, err := cipher.encryptResponse(t.Context(), id, message, nonce, 2)
-	assert.Error(err)
+	assert.ErrorIs(err, secrets.ErrSecretNotFound)
 
 	// Add a secret
-	secrets.Set(id, secret)
+	sec.Set(id, secret)
 
 	// Encrypt
 	cipherText, err := cipher.encryptResponse(t.Context(), id, message, nonce, 2)
@@ -36,7 +35,7 @@ func TestEncryptResponse(t *testing.T) {
 
 	// Encrypt with wrong id
 	_, err = cipher.encryptResponse(t.Context(), "wrong", message, nonce, 2)
-	assert.Error(err)
+	assert.ErrorIs(err, secrets.ErrSecretNotFound)
 
 	// Decrypt
 	plainText, err := crypto.DecryptMessage(cipherText, secret, nonce, 2)
@@ -51,8 +50,8 @@ func TestDecryptRequest(t *testing.T) {
 	message := "message"
 	id := "id"
 	secret := bytes.Repeat([]byte{0x42}, 32)
-	secrets := secrets.New(stubSecretGetter{})
-	cipher := New(secrets)
+	sec := secrets.New(stubSecretGetter{})
+	cipher := New(sec)
 
 	// Prepare ciphertext
 	requestCipher, err := crypto.NewRequestCipher(secret, id)
@@ -65,10 +64,10 @@ func TestDecryptRequest(t *testing.T) {
 
 	// No secrets set
 	_, _, err = cipher.decryptRequest(t.Context(), cipherText, nonce, 0)
-	assert.Error(err)
+	assert.ErrorIs(err, secrets.ErrSecretNotFound)
 
 	// Add a secret
-	secrets.Set(id, secret)
+	sec.Set(id, secret)
 
 	// Decrypt
 	plainText, gotID, err := cipher.decryptRequest(t.Context(), cipherText, nonce, 0)
@@ -316,5 +315,5 @@ func (s *stubCipher) getNonce(string) ([]byte, error) {
 type stubSecretGetter struct{}
 
 func (s stubSecretGetter) GetSecret(_ context.Context, _ string) ([]byte, error) {
-	return nil, errors.New("not found")
+	return nil, secrets.ErrSecretNotFound
 }

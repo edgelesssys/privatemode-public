@@ -69,7 +69,7 @@ type apiForwarder interface {
 type secretManager interface {
 	LatestSecret(ctx context.Context) (secretmanager.Secret, error)
 	ForceUpdate(ctx context.Context) error
-	OfferAPIKey(context.Context, string) error
+	OfferCredential(context.Context, auth.Credential) error
 }
 
 // New sets up a new Server.
@@ -149,7 +149,7 @@ func addRequestID(next http.Handler) http.Handler {
 func passAuthToSecretManagerMiddleware(next http.Handler, sm secretManager) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if apiKey, err := auth.GetAuth(auth.Bearer, r.Header); err == nil {
-			if err := sm.OfferAPIKey(r.Context(), apiKey); err != nil {
+			if err := sm.OfferCredential(r.Context(), auth.APIKey(apiKey)); err != nil {
 				forwarder.HTTPError(w, r, http.StatusUnauthorized, "trying API key: %s", err)
 				return
 			}

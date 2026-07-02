@@ -26,29 +26,24 @@ const (
 	WorkloadTaskEmbed = "embed"
 	// WorkloadTaskTranscribe indicates models that support the /v1/audio/transcriptions API.
 	WorkloadTaskTranscribe = "transcribe"
+	// WorkloadTaskUnstructured indicates that a workload serves the Unstructured API for document
+	// processing.
+	WorkloadTaskUnstructured = "unstructured"
 
 	// CacheDirEnv is the environment variable that specifies the cache directory of Continuum.
 	// If unset, [os.UserCacheDir()] is used.
 	// This defaults to $XDG_CACHE_HOME/continuum or $HOME/.cache/continuum on Unix systems, and $HOME/Library/Caches/continuum on Darwin.
 	CacheDirEnv = "CONTINUUM_CACHE_DIR"
-	// ProxyServerPort is the port on which the proxy server runs. It can be static, since it is run in a container.
-	ProxyServerPort = "8085"
+	// InferenceProxyServerPort is the port on which the inference-proxy listens for client connections.
+	InferenceProxyServerPort = "8085"
 	// MetricsServerPort is the port on which our standalone metrics servers are exposed by default.
 	MetricsServerPort = "8185"
-	// AttestationServiceUserPort is the port on which the Attestation Service listens on for connections with users (Continuum CLI).
-	AttestationServiceUserPort = "3000"
-	// AttestationServiceHealthPort is the port on which the Attestation Service Health Server listens for health probes.
-	AttestationServiceHealthPort = "3001"
-	// AttestationServiceBackendPort is the port on which the Attestation Service listens on for connections with worker nodes.
-	AttestationServiceBackendPort = "9000"
-	// SecretServiceUserPort is the port on which the Secret Service listens on for connections with users (Continuum CLI).
+	// SecretServiceHealthPort is the port on which the Secret Service Health Server listens for health probes.
+	SecretServiceHealthPort = "3001"
+	// SecretServiceUserPort is the port on which the Secret Service listens on for client connection.
 	SecretServiceUserPort = "3000"
-	// SecretServiceBackendPort is the port on which the Secret Service listens on for connections with worker nodes.
-	SecretServiceBackendPort = "9000"
-	// WorkloadDefaultExposedPort is the default port on which a workload container, and therefore the inference-proxy, listens for connections.
-	WorkloadDefaultExposedPort = "8008"
-	// LoadBalancerDefaultPort is the default port on which the local API Gateway load balancer listens for connections.
-	LoadBalancerDefaultPort = "8000"
+	// WorkloadDefaultPort is the default port on which a workload container, e.g. vLLM or unstructured-api, listens for connections.
+	WorkloadDefaultPort = "8008"
 
 	// EtcdInferenceSecretPrefix is the prefix for inference secrets stored in etcd.
 	EtcdInferenceSecretPrefix = "inference-secrets/"
@@ -64,6 +59,8 @@ const (
 	// PrivatemodeShardKeyHeader is the key used to decide how to route requests, e.g., to reuse a cache.
 	// Currently used for routing chat completions to reuse the prefix cache.
 	PrivatemodeShardKeyHeader = "Privatemode-Shard-Key"
+	// PrivatemodeContentLengthTokensHeader carries the estimated request length in tokens.
+	PrivatemodeContentLengthTokensHeader = "Privatemode-Content-Length-Tokens"
 	// PrivatemodeVersionHeader is a header sent by Privatemode clients with their version, indicating the expected API version.
 	// It is used to check for version compatibility between client and server.
 	PrivatemodeVersionHeader = "Privatemode-Version"
@@ -89,13 +86,13 @@ const (
 	// Even though this information is already available in the request body if used, this serves as an additional hint for the proxy
 	// to facilitate OCSP checks, which rely on the inference secret ID.
 	PrivatemodeSecretIDHeader = "Privatemode-Secret-ID"
+	// PrivatemodeJWTHeader carries a Clerk session JWT for API-key-less authentication.
+	PrivatemodeJWTHeader = "Privatemode-JWT"
+	// PrivatemodeAnonymousAuthHeader carries client fingerprinting data for anonymous auth.
+	PrivatemodeAnonymousAuthHeader = "Privatemode-Anonymous-Auth"
 
-	// SecretServiceEndpoint is the endpoint of the secret service.
-	SecretServiceEndpoint = "secret.privatemode.ai:443"
 	// APIEndpoint is the endpoint of the Privatemode API.
 	APIEndpoint = "api.privatemode.ai:443"
-	// CoordinatorEndpoint is the endpoint of the Contrast coordinator.
-	CoordinatorEndpoint = "coordinator.privatemode.ai:443"
 
 	// ErrorNoSecretForID is the error message returned when no secret is found for a given ID.
 	// NOTE: This is used for error checking in the PM proxy and should not be changed lightly for backwards compatibility.
@@ -105,6 +102,16 @@ const (
 	CacheSaltHashLength = 16
 	// CacheBlockSizeTokens is the number of tokens in a cache block.
 	CacheBlockSizeTokens = 16
+	// ShardKeyCharsPerToken is the number of content characters used to estimate one token
+	// when generating shard keys and estimating the request length in tokens.
+	ShardKeyCharsPerToken = 4
+	// ImageEmbeddingTokens is the number of tokens a single image is counted as for sharding
+	// and load balancing. It is the maximum embedding size of the Kimi K2.6 vision model,
+	// derived from its image processor config: in_patch_limit (16384) divided by the merged
+	// patch area (merge_kernel_size^2 = 2^2 = 4) yields 4096 tokens. This is an approximation
+	// that is good enough for load balancing and different values may be used for other models
+	// in the future.
+	ImageEmbeddingTokens = 4096
 	// ShardKeyFirstBoundaryBlocksPerChar is the number of blocks per character before the first boundary.
 	ShardKeyFirstBoundaryBlocksPerChar = 1
 	// ShardKeyFirstBoundaryBlocks is the number of cache blocks before the first boundary.

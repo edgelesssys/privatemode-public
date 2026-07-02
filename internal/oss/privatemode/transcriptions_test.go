@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,7 +35,7 @@ func TestTranscribeAudio(t *testing.T) {
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			client := New("test-key")
+			client := New(auth.APIKey("test-key"))
 			_, err := client.TranscribeAudio(context.Background(), tc.file, tc.opts)
 			require.Error(t, err)
 		})

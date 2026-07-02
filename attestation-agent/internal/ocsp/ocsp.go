@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/edgelesssys/continuum/internal/oss/httputil"
 	internalOCSP "github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"golang.org/x/crypto/ocsp"
 )
@@ -53,7 +54,7 @@ type Client struct {
 // New sets up a new client for NVIDIA's OCSP server.
 func New(log *slog.Logger) *Client {
 	return &Client{
-		client: &http.Client{},
+		client: httputil.NewClient(),
 		url:    nvidiaOCSPURL,
 		log:    log,
 	}

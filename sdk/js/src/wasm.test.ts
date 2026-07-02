@@ -57,9 +57,15 @@ describe('wasm', () => {
   describe('initialize', () => {
     it('fails with illegal base64 data', async () => {
       const invalidBase64 = '!!!';
-      await expect(initialize(invalidBase64, '', '', true)).rejects.toThrow(
-        'illegal base64 data at input byte 0',
-      );
+      await expect(
+        initialize(
+          invalidBase64,
+          'apiKey',
+          'test-key',
+          'https://example.com',
+          true,
+        ),
+      ).rejects.toThrow('illegal base64 data at input byte 0');
     });
 
     it('fails with unauthorized API key', async () => {
@@ -67,7 +73,7 @@ describe('wasm', () => {
         Promise.resolve(new Response('Unauthorized', { status: 401 })),
       );
       await expect(
-        initialize(manifest, 'bad-key', 'https://example.com', true),
+        initialize(manifest, 'apiKey', 'bad-key', 'https://example.com', true),
       ).rejects.toThrow('Unauthorized');
     });
   });

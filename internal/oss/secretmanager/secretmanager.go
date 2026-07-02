@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/httpapi"
 	"k8s.io/utils/clock"
 )
@@ -22,13 +23,14 @@ const (
 
 // SecretManager manages the lifetime of a secret and always returns an up-to-date secret.
 type SecretManager struct {
-	secret                   *Secret
-	updateSecretFn           updateSecretFn
-	mut                      sync.Mutex
-	clock                    clock.Clock
-	apiKey                   string
-	apiKeyDropOnUnauthorized bool
-	apiKeyChan               chan struct{} // signals the Loop that an API key has been set
+	secret                 *Secret
+	updateSecretFn         updateSecretFn
+	mut                    sync.Mutex
+	clock                  clock.Clock
+	credential             auth.Credential
+	dropCredOnUnauthorized bool
+	credChan               chan struct{} // signals the Loop that a credential has been set
+	credChanClosed         bool
 }
 
 // Secret includes all the information needed to identify and use a secret.
@@ -45,15 +47,15 @@ func (s Secret) Map() map[string][]byte {
 	}
 }
 
-type updateSecretFn func(ctx context.Context, apiKey string) (string, []byte, error)
+type updateSecretFn func(ctx context.Context, cred auth.Credential) (string, []byte, error)
 
 // New creates a new SecretManager.
-func New(updateSecretFn updateSecretFn, apiKeyDropOnUnauthorized bool) *SecretManager {
+func New(updateSecretFn updateSecretFn, dropCredOnUnauthorized bool) *SecretManager {
 	return &SecretManager{
-		updateSecretFn:           updateSecretFn,
-		clock:                    clock.RealClock{},
-		apiKeyDropOnUnauthorized: apiKeyDropOnUnauthorized,
-		apiKeyChan:               make(chan struct{}),
+		updateSecretFn:         updateSecretFn,
+		clock:                  clock.RealClock{},
+		dropCredOnUnauthorized: dropCredOnUnauthorized,
+		credChan:               make(chan struct{}),
 	}
 }
 
@@ -62,13 +64,13 @@ func (sm *SecretManager) LatestSecret(ctx context.Context) (Secret, error) {
 	sm.mut.Lock()
 	defer sm.mut.Unlock()
 
-	if sm.apiKey == "" {
-		return Secret{}, errors.New("don't have an API key yet")
+	if sm.credential.IsZero() {
+		return Secret{}, errors.New("don't have a credential yet")
 	}
 
 	now := sm.clock.Now()
 	if sm.secret == nil || !now.Before(sm.secret.ExpirationDate) { // should trigger on expiration date and not after
-		if err := sm.updateSecret(ctx, now, sm.apiKey); err != nil {
+		if err := sm.updateSecret(ctx, now, sm.credential); err != nil {
 			return Secret{}, err
 		}
 	}
@@ -80,33 +82,51 @@ func (sm *SecretManager) ForceUpdate(ctx context.Context) error {
 	sm.mut.Lock()
 	defer sm.mut.Unlock()
 
-	return sm.updateSecret(ctx, sm.clock.Now(), sm.apiKey)
+	return sm.updateSecret(ctx, sm.clock.Now(), sm.credential)
 }
 
-// OfferAPIKey offers an API key to the SecretManager.
+// OfferCredential offers an authentication credential to the SecretManager.
 // If the SecretManager already has one, this is a no-op.
-func (sm *SecretManager) OfferAPIKey(ctx context.Context, apiKey string) error {
+func (sm *SecretManager) OfferCredential(ctx context.Context, cred auth.Credential) error {
 	sm.mut.Lock()
 	defer sm.mut.Unlock()
-	if sm.apiKey != "" {
+	if !sm.credential.IsZero() {
 		return nil
 	}
-	if err := sm.updateSecret(ctx, sm.clock.Now(), apiKey); err != nil {
+	if err := sm.updateSecret(ctx, sm.clock.Now(), cred); err != nil {
 		return err
 	}
-	sm.apiKey = apiKey
-	close(sm.apiKeyChan) // signal the Loop that an API key has been set
+	sm.setCredentialLocked(cred)
 	return nil
+}
+
+// SetCredential replaces the credential used for subsequent secret updates. Unlike
+// [SecretManager.OfferCredential], it overwrites an existing credential, which is needed
+// for short-lived credentials (e.g. JWTs) that must be refreshed over time.
+func (sm *SecretManager) SetCredential(cred auth.Credential) {
+	sm.mut.Lock()
+	defer sm.mut.Unlock()
+	sm.setCredentialLocked(cred)
+}
+
+// setCredentialLocked stores cred and signals the Loop that a credential is available.
+// The caller must hold sm.mut.
+func (sm *SecretManager) setCredentialLocked(cred auth.Credential) {
+	sm.credential = cred
+	if !sm.credChanClosed && !cred.IsZero() {
+		sm.credChanClosed = true
+		close(sm.credChan) // signal the Loop that a credential has been set
+	}
 }
 
 // Loop keeps the secret up-to-date by periodically updating it.
 func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
-	// wait for API key
+	// wait for a credential
 	select {
 	case <-ctx.Done():
 		log.InfoContext(ctx, "Context cancelled, stopping loop")
 		return nil
-	case <-sm.apiKeyChan:
+	case <-sm.credChan:
 	}
 
 	for {
@@ -130,10 +150,10 @@ func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
 	}
 }
 
-func (sm *SecretManager) updateSecret(ctx context.Context, now time.Time, apiKey string) error {
-	id, data, err := sm.updateSecretFn(ctx, apiKey)
-	if sm.apiKeyDropOnUnauthorized && errors.Is(err, httpapi.ErrUnauthorized) {
-		sm.apiKey = ""
+func (sm *SecretManager) updateSecret(ctx context.Context, now time.Time, cred auth.Credential) error {
+	id, data, err := sm.updateSecretFn(ctx, cred)
+	if sm.dropCredOnUnauthorized && errors.Is(err, httpapi.ErrUnauthorized) {
+		sm.credential = auth.Credential{}
 	}
 	if err != nil {
 		return err

@@ -12,6 +12,8 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/openai"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/unstructured"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 )
 
@@ -36,20 +38,21 @@ func IsSupportedInferenceAPI(apiType string) bool {
 
 // New creates InferenceAdapters for the given API types.
 func New(
-	apiTypes []string, workloadTasks []string, cipher *cipher.Cipher, ocspStatusFile string,
-	forwarder mutatingForwarder, reporter inference.UsageReporter, log *slog.Logger,
+	apiTypes []string, workloadTasks []string, secrets *secrets.Secrets, ocspStatusFile string,
+	plainForwarder plainForwarder, reporter inference.UsageReporter, log *slog.Logger,
 ) ([]InferenceAdapter, error) {
+	encForwarder := encforward.New(plainForwarder, cipher.New(secrets))
 	var adapters []InferenceAdapter
 	for _, apiType := range apiTypes {
 		var adapter InferenceAdapter
 		var err error
 		switch strings.ToLower(apiType) {
 		case InferenceAPIOpenAI:
-			adapter, err = openai.New(workloadTasks, cipher, ocspStatusFile, forwarder, reporter, log)
+			adapter, err = openai.New(workloadTasks, secrets, ocspStatusFile, encForwarder, reporter, log)
 		case InferenceAPIAnthropic:
-			adapter, err = anthropic.New(workloadTasks, cipher, ocspStatusFile, forwarder, reporter, log)
+			adapter, err = anthropic.New(workloadTasks, secrets, ocspStatusFile, encForwarder, reporter, log)
 		case InferenceAPIUnstructured:
-			adapter, err = unstructured.New(cipher, forwarder, log)
+			adapter, err = unstructured.New(encForwarder, log)
 		default:
 			return nil, fmt.Errorf("unknown API type %q", apiType)
 		}
@@ -71,7 +74,7 @@ type InferenceAdapter interface {
 	HandlesCatchAll() bool
 }
 
-type mutatingForwarder interface {
+type plainForwarder interface {
 	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts)
 }
 

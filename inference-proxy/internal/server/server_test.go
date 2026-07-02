@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	crypto "github.com/edgelesssys/continuum/internal/oss/crypto"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -114,7 +113,6 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 	secret := []byte(strings.Repeat("a", 32))
 	secrets := secrets.New(stubSecretGetter{})
 	secrets.Reset(map[string][]byte{"test": secret})
-	c := cipher.New(secrets)
 	requestCipher, err := crypto.NewRequestCipher(secret, "test")
 	require.NoError(err)
 
@@ -130,7 +128,7 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 	ocspFile := filepath.Join(b.TempDir(), "ocsp.json")
 	require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
 
-	adapters, err := adapter.New([]string{apiType}, []string{"generate"}, c, ocspFile, fw, &stubUsageReporter{}, log)
+	adapters, err := adapter.New([]string{apiType}, []string{"generate"}, secrets, ocspFile, fw, &stubUsageReporter{}, log)
 	require.NoError(err)
 
 	server := New(adapters, nil, log)
@@ -141,7 +139,7 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 type stubSecretGetter struct{}
 
 func (s stubSecretGetter) GetSecret(_ context.Context, _ string) ([]byte, error) {
-	return nil, errors.New("not found")
+	return nil, secrets.ErrSecretNotFound
 }
 
 type stubUsageReporter struct{}

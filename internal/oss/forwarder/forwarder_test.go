@@ -411,6 +411,43 @@ func TestForwardDoesNotStripTraceparent(t *testing.T) {
 	assert.Equal(t, inbound, gotTraceparent)
 }
 
+func TestForwardDeletesHopHeaders(t *testing.T) {
+	assert := assert.New(t)
+
+	var got *http.Request
+	stubServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got = r
+	}))
+	defer stubServer.Close()
+
+	upstreamHost := stubServer.Listener.Addr().String()
+	fwd := New(http.DefaultClient, upstreamHost, SchemeHTTP, slog.Default())
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	req.Host = "endpoint.intranet.example.com"
+	req.Header.Set("Connection", "Keep-Alive, X-Connection-Scoped")
+	req.Header.Set("X-Connection-Scoped", "secret")
+	req.Header.Set("Keep-Alive", "timeout=5")
+	req.Header.Set("Trailer", "X-Checksum")
+	req.Header.Set("X-App-Header", "kept")
+
+	resp := httptest.NewRecorder()
+	fwd.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
+
+	assert.Equal(http.StatusOK, resp.Code)
+	if !assert.NotNil(got) {
+		return
+	}
+	assert.Equal(upstreamHost, got.Host)
+	// All these hop headers should be dropped
+	assert.Empty(got.Header.Get("Connection"))
+	assert.Empty(got.Header.Get("Keep-Alive"))
+	assert.Empty(got.Header.Get("X-Connection-Scoped"))
+	assert.Empty(got.Header.Get("Trailer"))
+	// Other headers are kept
+	assert.Equal("kept", got.Header.Get("X-App-Header"))
+}
+
 func TestExtractFlusher(t *testing.T) {
 	// httptest.ResponseRecorder implements http.Flusher.
 	w := dummyWriterWrapper{httptest.NewRecorder()}

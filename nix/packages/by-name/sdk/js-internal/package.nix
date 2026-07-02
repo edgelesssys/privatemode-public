@@ -19,7 +19,7 @@ stdenv.mkDerivation (finalAttrs: {
     inherit (finalAttrs) pname version src;
     fetcherVersion = 3;
     sourceRoot = "${finalAttrs.src.name}/sdk/js";
-    hash = "sha256-kV2KMaO/5LeVS/D7BjN3xHJd4teS7ATPOyBYdEo4GjQ=";
+    hash = "sha256-HSUYi5VyO6uOBh2VKlFwSqH23kAvivkG1n3BNx/7GPY=";
   };
 
   nativeBuildInputs = [

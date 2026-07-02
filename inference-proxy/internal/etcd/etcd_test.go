@@ -59,11 +59,11 @@ func TestWatchSecrets(t *testing.T) {
 				},
 			},
 			assertions: func(t *testing.T, sec *secrets.Secrets) {
-				secret, ok := sec.Get(t.Context(), "key1")
-				assert.True(t, ok)
+				secret, err := sec.Get(t.Context(), "key1")
+				assert.NoError(t, err)
 				assert.Equal(t, "value1", string(secret))
-				secret, ok = sec.Get(t.Context(), "key2")
-				assert.True(t, ok)
+				secret, err = sec.Get(t.Context(), "key2")
+				assert.NoError(t, err)
 				assert.Equal(t, "value2", string(secret))
 			},
 		},
@@ -82,8 +82,8 @@ func TestWatchSecrets(t *testing.T) {
 				},
 			},
 			assertions: func(t *testing.T, sec *secrets.Secrets) {
-				_, ok := sec.Get(t.Context(), "key1")
-				assert.False(t, ok)
+				_, err := sec.Get(t.Context(), "key1")
+				assert.ErrorIs(t, err, secrets.ErrSecretNotFound)
 			},
 		},
 		"update secret": {
@@ -104,8 +104,8 @@ func TestWatchSecrets(t *testing.T) {
 				},
 			},
 			assertions: func(t *testing.T, sec *secrets.Secrets) {
-				secret, ok := sec.Get(t.Context(), "key1")
-				assert.True(t, ok)
+				secret, err := sec.Get(t.Context(), "key1")
+				assert.NoError(t, err)
 				assert.Equal(t, "value2", string(secret))
 			},
 		},
@@ -129,8 +129,8 @@ func TestWatchSecrets(t *testing.T) {
 				},
 			},
 			assertions: func(t *testing.T, sec *secrets.Secrets) {
-				secret, ok := sec.Get(t.Context(), "key1")
-				assert.True(t, ok)
+				secret, err := sec.Get(t.Context(), "key1")
+				assert.NoError(t, err)
 				assert.Equal(t, "value1", string(secret))
 			},
 		},
@@ -149,8 +149,8 @@ func TestWatchSecrets(t *testing.T) {
 				},
 			},
 			assertions: func(t *testing.T, sec *secrets.Secrets) {
-				_, ok := sec.Get(t.Context(), "key1")
-				assert.False(t, ok)
+				_, err := sec.Get(t.Context(), "key1")
+				assert.ErrorIs(t, err, secrets.ErrSecretNotFound)
 			},
 		},
 	}

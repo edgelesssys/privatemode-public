@@ -12,6 +12,7 @@ import (
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
@@ -26,9 +27,9 @@ type Adapter struct {
 }
 
 // New creates a new [Adapter] for the Anthropic API.
-func New(workloadTasks []string, cipher inference.ResponseCipherCreator, ocspStatusFile string, forwarder inference.MutatingForwarder, reporter inference.UsageReporter, log *slog.Logger) (*Adapter, error) {
+func New(workloadTasks []string, secrets inference.SecretGetter, ocspStatusFile string, encForwarder encforward.Forwarder, reporter inference.UsageReporter, log *slog.Logger) (*Adapter, error) {
 	// No endpoints are excluded from OCSP verification for Anthropic
-	baseAdapter, err := inference.New(workloadTasks, cipher, ocspStatusFile, forwarder, reporter, log)
+	baseAdapter, err := inference.New(workloadTasks, secrets, ocspStatusFile, encForwarder, reporter, log)
 	if err != nil {
 		return nil, err
 	}

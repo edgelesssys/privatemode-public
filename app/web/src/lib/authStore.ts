@@ -1,11 +1,7 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import type { Clerk as ClerkType } from '@clerk/clerk-js';
 import { ui as clerkUI } from '@clerk/ui';
-
-// Fallback API key for unauthenticated users.
-const FALLBACK_API_KEY = '15785f3d-e0b3-4c59-8b58-edaa77606084';
-
-const API_KEY_STORAGE_KEY = 'privatemode-user-api-key';
+import type { AuthCredential } from 'privatemode-ai';
 
 export interface OrgMembership {
   id: string;
@@ -22,90 +18,41 @@ export const orgName = writable<string | null>(null);
 export const orgId = writable<string | null>(null);
 export const userOrganizations = writable<OrgMembership[]>([]);
 
-export const activeApiKey = writable<string>(FALLBACK_API_KEY);
-export const apiKeyError = writable<string | null>(null);
-export const isLimitedMode = derived(
-  [isSignedIn, activeApiKey],
-  ([$isSignedIn, $activeApiKey]) =>
-    !$isSignedIn || $activeApiKey === FALLBACK_API_KEY,
+// Limited mode is active for anonymous (signed-out) users. They authenticate
+// against the API gateway anonymously.
+export const isLimitedMode = derived(isSignedIn, ($isSignedIn) => !$isSignedIn);
+
+// authIdentity changes whenever the effective authentication identity changes
+// (sign-in/out or active organization). The Privatemode client should be
+// re-initialized when it changes, as the resolved internal key (and therefore
+// the encryption secret) depends on it.
+export const authIdentity = derived(
+  [isSignedIn, orgId],
+  ([$isSignedIn, $orgId]) =>
+    $isSignedIn ? `jwt:${$orgId ?? ''}` : 'anonymous',
 );
-
-function loadCachedApiKey(): string | null {
-  try {
-    return sessionStorage.getItem(API_KEY_STORAGE_KEY);
-  } catch {
-    return null;
-  }
+// getAnonymousFingerprint should eventually collect some client-side telemetry
+// to augment abuse control. For now, it's just a static value
+function getAnonymousFingerprint(): string {
+  return 'placeholder';
 }
 
-function saveCachedApiKey(key: string): void {
-  try {
-    sessionStorage.setItem(API_KEY_STORAGE_KEY, key);
-  } catch {
-    console.warn('Unable to cache API key in sessionStorage');
+// getAuthCredential resolves the credential to authenticate the next Privatemode
+// request with. Signed-in users authenticate with their Clerk session JWT;
+// signed-out users authenticate anonymously. It is passed to the Privatemode SDK
+// as the `auth` provider and invoked before every request, so JWTs are always
+// fresh (Clerk's getToken() refreshes them transparently).
+export async function getAuthCredential(): Promise<AuthCredential> {
+  const clerk = get(clerkInstance);
+  const session = clerk?.session;
+  if (session) {
+    const token = await session.getToken();
+    if (token) {
+      return { type: 'jwt', value: token };
+    }
+    throw new Error('Clerk session present but no token could be resolved');
   }
-}
-
-function clearCachedApiKey(): void {
-  try {
-    sessionStorage.removeItem(API_KEY_STORAGE_KEY);
-  } catch {
-    console.warn('Unable to clear cached API key from sessionStorage');
-  }
-}
-
-function keysUrl(): string {
-  const baseUrl = 'https://api-key-service-403278544087.europe-west1.run.app';
-  const pathPrefix = import.meta.env.VITE_API_KEY_SERVICE_PATH_PREFIX || '';
-  return `${baseUrl}${pathPrefix}/api/v2/keys`;
-}
-
-function authHeaders(token: string): Record<string, string> {
-  return {
-    Authorization: `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  };
-}
-
-async function createWebAppKey(token: string): Promise<string> {
-  const response = await fetch(keysUrl(), {
-    method: 'POST',
-    headers: authHeaders(token),
-    body: JSON.stringify({
-      name: 'chat.privatemode.ai',
-      comment: "API key that's used by the Privatemode web app",
-      is_webapp_key: true,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to create web app API key: ${response.statusText}`);
-  }
-
-  const key = await response.json();
-  return key.license_key;
-}
-
-async function fetchApiKeyFromService(token: string): Promise<string> {
-  const response = await fetch(keysUrl(), {
-    headers: authHeaders(token),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch API keys: ${response.statusText}`);
-  }
-
-  const keys = await response.json();
-
-  const webAppKey = (Array.isArray(keys) ? keys : []).find(
-    (k: { name: string }) => k.name === 'chat.privatemode.ai',
-  );
-  if (webAppKey) {
-    return webAppKey.license_key;
-  }
-
-  // Auto-create the web app key if none exists for this org.
-  return createWebAppKey(token);
+  return { type: 'anonymous', value: getAnonymousFingerprint() };
 }
 
 export async function initializeAuth(): Promise<void> {
@@ -161,30 +108,6 @@ export async function initializeAuth(): Promise<void> {
             console.error('Failed to fetch organization memberships:', err);
             userOrganizations.set([]);
           });
-
-        const cached = loadCachedApiKey();
-        if (cached) {
-          activeApiKey.set(cached);
-        } else {
-          session
-            .getToken()
-            .then((token: string | null) => {
-              if (token) return fetchApiKeyFromService(token);
-              throw new Error('No session token');
-            })
-            .then((key: string) => {
-              activeApiKey.set(key);
-              saveCachedApiKey(key);
-              apiKeyError.set(null);
-            })
-            .catch((err: unknown) => {
-              console.error('Failed to fetch API key:', err);
-              const message =
-                err instanceof Error ? err.message : 'Failed to fetch API key';
-              apiKeyError.set(message);
-              activeApiKey.set(FALLBACK_API_KEY);
-            });
-        }
       } else {
         isSignedIn.set(false);
         userDisplayName.set(null);
@@ -192,8 +115,6 @@ export async function initializeAuth(): Promise<void> {
         orgName.set(null);
         orgId.set(null);
         userOrganizations.set([]);
-        activeApiKey.set(FALLBACK_API_KEY);
-        clearCachedApiKey();
       }
     };
 
@@ -211,7 +132,8 @@ export async function switchOrganization(
   clerkInstance.subscribe((c) => (clerk = c))();
   if (clerk) {
     await (clerk as ClerkType).setActive({ organization: organizationId });
-    clearCachedApiKey();
+    // Clear the privatemode session cache so a new session is established for
+    // the newly active organization (which resolves to a different internal key).
     sessionStorage.removeItem('privatemode-secret');
     sessionStorage.removeItem('privatemode-manifest');
   }
@@ -229,8 +151,7 @@ export async function signOut(): Promise<void> {
   let clerk: ClerkType | null = null;
   clerkInstance.subscribe((c) => (clerk = c))();
   if (clerk) {
-    clearCachedApiKey();
-    // Clear the privatemode session cache so a new session is created with the new key
+    // Clear the privatemode session cache so a new (anonymous) session is created.
     sessionStorage.removeItem('privatemode-secret');
     sessionStorage.removeItem('privatemode-manifest');
     await (clerk as ClerkType).signOut();

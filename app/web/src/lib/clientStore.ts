@@ -1,7 +1,7 @@
 import { writable, get } from 'svelte/store';
 import { PrivatemodeAI } from 'privatemode-ai';
 import type { ExportedSecret, PrivatemodeAIOptions } from 'privatemode-ai';
-import { activeApiKey } from './authStore';
+import { getAuthCredential, authIdentity } from './authStore';
 
 export interface Model {
   id: string;
@@ -20,27 +20,37 @@ export const models = writable<Model[]>([]);
 
 const SECRET_STORAGE_KEY = 'privatemode-secret';
 const MANIFEST_STORAGE_KEY = 'privatemode-manifest';
+const IDENTITY_STORAGE_KEY = 'privatemode-identity';
 
 interface CachedSession {
   secret: ExportedSecret;
   manifestBase64: string;
 }
 
-function loadCachedSession(): CachedSession | null {
+function clearCachedSession(): void {
+  sessionStorage.removeItem(SECRET_STORAGE_KEY);
+  sessionStorage.removeItem(MANIFEST_STORAGE_KEY);
+  sessionStorage.removeItem(IDENTITY_STORAGE_KEY);
+}
+
+function loadCachedSession(identity: string): CachedSession | null {
   try {
     const secretRaw = sessionStorage.getItem(SECRET_STORAGE_KEY);
     const manifestRaw = sessionStorage.getItem(MANIFEST_STORAGE_KEY);
+    const cachedIdentity = sessionStorage.getItem(IDENTITY_STORAGE_KEY);
     if (!secretRaw || !manifestRaw) return null;
+    if (cachedIdentity !== identity) {
+      clearCachedSession();
+      return null;
+    }
     const secret = JSON.parse(secretRaw) as ExportedSecret;
     if (secret.expiresAtUnix * 1000 <= Date.now()) {
-      sessionStorage.removeItem(SECRET_STORAGE_KEY);
-      sessionStorage.removeItem(MANIFEST_STORAGE_KEY);
+      clearCachedSession();
       return null;
     }
     return { secret, manifestBase64: manifestRaw };
   } catch {
-    sessionStorage.removeItem(SECRET_STORAGE_KEY);
-    sessionStorage.removeItem(MANIFEST_STORAGE_KEY);
+    clearCachedSession();
     return null;
   }
 }
@@ -48,10 +58,12 @@ function loadCachedSession(): CachedSession | null {
 function saveCachedSession(
   secret: ExportedSecret,
   manifestBase64: string,
+  identity: string,
 ): void {
   try {
     sessionStorage.setItem(SECRET_STORAGE_KEY, JSON.stringify(secret));
     sessionStorage.setItem(MANIFEST_STORAGE_KEY, manifestBase64);
+    sessionStorage.setItem(IDENTITY_STORAGE_KEY, identity);
   } catch {
     // sessionStorage may be unavailable; ignore.
   }
@@ -61,10 +73,11 @@ let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let nextRefreshTime: number | null = null;
 let currentClient: PrivatemodeAI | null = null;
 let currentClientOpts: PrivatemodeAIOptions | null = null;
+let currentIdentity: string | null = null;
 let refreshInProgress = false;
 
 async function performSecretRefresh(): Promise<void> {
-  if (!currentClient || !currentClientOpts) return;
+  if (!currentClient || !currentClientOpts || currentIdentity === null) return;
   if (refreshInProgress) {
     console.log('Secret refresh already in progress, skipping...');
     return;
@@ -88,11 +101,16 @@ async function performSecretRefresh(): Promise<void> {
     }
     const exported = currentClient.exportSecret();
     const manifestBytes = currentClient.manifestBytes!;
-    saveCachedSession(exported, btoa(String.fromCharCode(...manifestBytes)));
+    saveCachedSession(
+      exported,
+      btoa(String.fromCharCode(...manifestBytes)),
+      currentIdentity,
+    );
     scheduleSecretRefresh(
       currentClient,
       exported.expiresAtUnix,
       currentClientOpts,
+      currentIdentity,
     );
   } catch (e) {
     console.error('Background secret refresh failed:', e);
@@ -105,9 +123,11 @@ function scheduleSecretRefresh(
   client: PrivatemodeAI,
   expiresAtUnix: number,
   clientOpts: PrivatemodeAIOptions,
+  identity: string,
 ): void {
   currentClient = client;
   currentClientOpts = clientOpts;
+  currentIdentity = identity;
   if (refreshTimer !== null) clearTimeout(refreshTimer);
   // Refresh 60 seconds before expiration (the server-side buffer is 5min,
   // so this is well within the valid window).
@@ -167,13 +187,13 @@ export async function loadModels(
 }
 
 export async function initializeClient(): Promise<void> {
-  const apiKey = get(activeApiKey);
   clientError.set(null);
   clientReady.set(false);
   clientVerifying.set(true);
   modelsLoaded.set(false);
   modelsError.set(null);
   try {
+    const identity = get(authIdentity);
     const configuredManifestBytes = import.meta.env
       .VITE_PRIVATEMODE_MANIFEST_BASE64
       ? Uint8Array.from(
@@ -182,7 +202,7 @@ export async function initializeClient(): Promise<void> {
         )
       : undefined;
     const opts = {
-      apiKey,
+      auth: getAuthCredential,
       apiBaseURL: import.meta.env.VITE_PRIVATEMODE_URL || undefined,
       manifestBytes: configuredManifestBytes,
       dangerouslyAllowBrowser: true,
@@ -200,27 +220,36 @@ export async function initializeClient(): Promise<void> {
         const manifestBytes = client.manifestBytes;
         if (manifestBytes) {
           const manifestBase64 = btoa(String.fromCharCode(...manifestBytes));
-          saveCachedSession(secret, manifestBase64);
-          scheduleSecretRefresh(client, secret.expiresAtUnix, opts);
+          saveCachedSession(secret, manifestBase64, identity);
+          scheduleSecretRefresh(client, secret.expiresAtUnix, opts, identity);
         }
       },
     };
     const client = new PrivatemodeAI(opts);
-    const cached = loadCachedSession();
+    const cached = loadCachedSession(identity);
     if (cached) {
       const manifestBytes =
         configuredManifestBytes ??
         Uint8Array.from(atob(cached.manifestBase64), (c) => c.charCodeAt(0));
       await client.initializeOffline(manifestBytes);
       client.importSecret(cached.secret);
-      scheduleSecretRefresh(client, cached.secret.expiresAtUnix, opts);
+      scheduleSecretRefresh(
+        client,
+        cached.secret.expiresAtUnix,
+        opts,
+        identity,
+      );
     } else {
       await client.verify();
       await client.refreshSecret();
       const exported = client.exportSecret();
       const manifestBytes = client.manifestBytes!;
-      saveCachedSession(exported, btoa(String.fromCharCode(...manifestBytes)));
-      scheduleSecretRefresh(client, exported.expiresAtUnix, opts);
+      saveCachedSession(
+        exported,
+        btoa(String.fromCharCode(...manifestBytes)),
+        identity,
+      );
+      scheduleSecretRefresh(client, exported.expiresAtUnix, opts, identity);
     }
 
     privatemodeClient.set(client);

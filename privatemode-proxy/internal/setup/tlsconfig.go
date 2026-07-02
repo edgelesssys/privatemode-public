@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/privatemode"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/manifestlog"
 	"github.com/spf13/afero"
@@ -27,7 +28,7 @@ type caAdapter struct {
 }
 
 type caUpdater interface {
-	GetAttestedMeshCA(ctx context.Context, expectedMfBytes []byte, apiKey string) (*x509.Certificate, error)
+	GetAttestedMeshCA(ctx context.Context, expectedMfBytes []byte, cred auth.Credential) (*x509.Certificate, error)
 }
 
 type manifestFetcher interface {
@@ -37,7 +38,7 @@ type manifestFetcher interface {
 // newCAAdapter creates a new caAdapter.
 func newCAAdapter(cdnBaseURL string, mfLogger mfLogger, caUpdater caUpdater, log *slog.Logger) *caAdapter {
 	fetcher := privatemode.
-		New(""). // API key is not required to just fetch the manifest
+		New(auth.Credential{}). // No credential is required to just fetch the manifest
 		WithCDNBaseURL(cdnBaseURL)
 
 	return &caAdapter{
@@ -49,7 +50,7 @@ func newCAAdapter(cdnBaseURL string, mfLogger mfLogger, caUpdater caUpdater, log
 }
 
 // GetMeshCA retrieves the latest manifest and gets the attested mesh CA.
-func (c *caAdapter) GetMeshCA(ctx context.Context, apiKey string) (*x509.Certificate, error) {
+func (c *caAdapter) GetMeshCA(ctx context.Context, cred auth.Credential) (*x509.Certificate, error) {
 	expectedMfBytes, err := c.fetcher.FetchManifest(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetching manifest: %w", err)
@@ -60,7 +61,7 @@ func (c *caAdapter) GetMeshCA(ctx context.Context, apiKey string) (*x509.Certifi
 		return nil, fmt.Errorf("logging manifest: %w", err)
 	}
 
-	cert, err := c.caUpdater.GetAttestedMeshCA(ctx, expectedMfBytes, apiKey)
+	cert, err := c.caUpdater.GetAttestedMeshCA(ctx, expectedMfBytes, cred)
 	if err != nil {
 		return nil, fmt.Errorf("getting attested certificate: %w", err)
 	}

@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
-	"github.com/edgelesssys/continuum/internal/oss/compat"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
-	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
@@ -35,16 +35,9 @@ var ocspStatusMetrics = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Help: "NVIDIA OCSP status of the attested components (0=good, 1=revoked, -1=unknown)",
 }, []string{"i", "component"})
 
-// ResponseCipherCreator is the interface used for creating new ciphers for response encryption.
-type ResponseCipherCreator interface {
-	// NewResponseCipher creates a new [cipher.ResponseCipher] for encrypting responses.
-	NewResponseCipher() cipher.ResponseCipher
-	Secret(ctx context.Context, id string) ([]byte, error)
-}
-
-// MutatingForwarder forwards requests with mutation support.
-type MutatingForwarder interface {
-	Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts)
+// SecretGetter retrieves decryption secrets by ID.
+type SecretGetter interface {
+	Get(ctx context.Context, id string) ([]byte, error)
 }
 
 // UsageReporter is a client for submitting usage reports (via RPC).
@@ -54,8 +47,8 @@ type UsageReporter interface {
 
 // Adapter contains common functionality shared by all inference API adapters.
 type Adapter struct {
-	Cipher        ResponseCipherCreator
-	Forwarder     MutatingForwarder
+	Secrets       SecretGetter
+	EncForwarder  encforward.Forwarder
 	UsageReporter UsageReporter
 	WorkloadTasks []string
 	OCSPStatus    []ocsp.StatusInfo
@@ -63,8 +56,8 @@ type Adapter struct {
 }
 
 // New creates a new base Adapter with common functionality.
-func New(workloadTasks []string, cipher ResponseCipherCreator, ocspStatusFile string,
-	forwarder MutatingForwarder, reporter UsageReporter, log *slog.Logger,
+func New(workloadTasks []string, secrets SecretGetter, ocspStatusFile string,
+	encForwarder encforward.Forwarder, reporter UsageReporter, log *slog.Logger,
 ) (*Adapter, error) {
 	if len(workloadTasks) == 0 {
 		return nil, errors.New("no workload tasks provided")
@@ -86,8 +79,8 @@ func New(workloadTasks []string, cipher ResponseCipherCreator, ocspStatusFile st
 	}
 
 	return &Adapter{
-		Cipher:        cipher,
-		Forwarder:     forwarder,
+		Secrets:       secrets,
+		EncForwarder:  encForwarder,
 		UsageReporter: reporter,
 		WorkloadTasks: workloadTasks,
 		OCSPStatus:    ocspStatus,
@@ -120,19 +113,23 @@ func (a *Adapter) verifyOCSP(w http.ResponseWriter, r *http.Request) bool {
 	if ocspPolicy == "" && ocspMAC == "" {
 		acceptedStatuses = []ocsp.Status{ocsp.StatusGood} // Old clients won't set the header, only accept good status
 	} else {
-		secret, err := a.Cipher.Secret(ctx, secretID)
+		secret, err := a.Secrets.Get(ctx, secretID)
 		if err != nil {
-			forwarder.HTTPError(w, r, http.StatusInternalServerError, "getting secret for OCSP verification: %s", err)
+			if errors.Is(err, secrets.ErrSecretNotFound) {
+				forwarder.HTTPError(w, r, http.StatusBadRequest, "getting secret for OCSP verification: %s %q: %v", constants.ErrorNoSecretForID, secretID, err)
+			} else {
+				forwarder.HTTPError(w, r, http.StatusInternalServerError, "getting secret for OCSP verification: id %q: %v", secretID, err)
+			}
 			return false
 		}
 		if len(secret) != 32 {
-			forwarder.HTTPError(w, r, http.StatusInternalServerError, "invalid secret length for OCSP verification: expected 32 bytes, got %d", len(secret))
+			forwarder.HTTPError(w, r, http.StatusBadRequest, "invalid secret length for OCSP verification: expected 32 bytes, got %d", len(secret))
 			return false
 		}
 
 		requestedOCSPStatus, err := ocspheader.UnmarshalAndVerify(ocspPolicy, ocspMAC, [32]byte(secret))
 		if err != nil {
-			forwarder.HTTPError(w, r, http.StatusInternalServerError, "verifying OCSP header: %s", err)
+			forwarder.HTTPError(w, r, http.StatusBadRequest, "verifying OCSP header: %s", err)
 			return false
 		}
 
@@ -311,170 +308,26 @@ func (a *Adapter) ForwardEncrypted(
 	extractUnaryUsage UsageExtractor,
 	extractStreamingUsage UsageExtractor,
 ) {
-	if compat.AtLeastMajorMinor(r.Header.Get(constants.PrivatemodeVersionHeader), 1, 46) {
-		a.forwardEncryptedFBE(w, r, postDecryptMutator, preEncryptMutator, extractUnaryUsage, extractStreamingUsage)
-	} else {
-		a.forwardEncryptedLegacy(
-			w, r,
-			legacyDecryptMutator, postDecryptMutator,
-			legacyPlainResponseFields, preEncryptMutator,
-			extractUnaryUsage, extractStreamingUsage,
-		)
-	}
-}
-
-func (a *Adapter) forwardEncryptedLegacy(
-	w http.ResponseWriter,
-	r *http.Request,
-	legacyDecryptMutator func(cipher.ResponseCipher) forwarder.RequestMutator,
-	postDecryptMutator forwarder.RequestMutator,
-	legacyPlainResponseFields forwarder.FieldSelector,
-	preEncryptMutator *forwarder.MutatingReader,
-	extractUnaryUsage UsageExtractor,
-	extractStreamingUsage UsageExtractor,
-) {
-	ctx := r.Context()
-	session := a.Cipher.NewResponseCipher()
-	encryptMutator := forwarder.NewJSONMutatingReader(session.EncryptResponse(r.Context()), legacyPlainResponseFields)
-
 	uc, err := parseUsageContext(r)
 	if err != nil {
 		a.Log.ErrorContext(r.Context(), "Failed to parse usage header; skipping usage reporting", "error", err)
 	}
 
-	a.Forwarder.Forward(
-		w, r,
-		forwarder.RequestMutatorChain(legacyDecryptMutator(session), postDecryptMutator),
-		func(resp *http.Response) (forwarder.Response, error) {
-			if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
-				return a.legacyStreamingResponse(
-					ctx, resp, preEncryptMutator, encryptMutator, extractStreamingUsage, uc,
-				), nil
-			}
-			return a.legacyUnaryResponse(ctx, resp, preEncryptMutator, encryptMutator, extractUnaryUsage, uc)
-		},
-	)
-}
-
-func (a *Adapter) forwardEncryptedFBE(
-	w http.ResponseWriter,
-	r *http.Request,
-	postDecryptMutator forwarder.RequestMutator,
-	preEncryptMutator *forwarder.MutatingReader,
-	extractUnaryUsage UsageExtractor,
-	extractStreamingUsage UsageExtractor,
-) {
 	ctx := r.Context()
-	// Set by every successful execution of the request mutator
-	var exchange *encbody.ServerExchange
 
-	if !encbody.IsEncrypted(r.Header) {
-		forwarder.HTTPError(w, r, 400, "request must be encrypted")
-		return
-	}
-	secretID := r.Header.Get(constants.PrivatemodeSecretIDHeader)
-	if secretID == "" {
-		forwarder.HTTPError(w, r, 400, "request must contain secret ID")
-		return
-	}
-	secret, err := a.Cipher.Secret(r.Context(), secretID)
-	if err != nil {
-		forwarder.HTTPError(w, r, 400, "getting secret: %v", err)
-		return
-	}
-
-	uc, err := parseUsageContext(r)
-	if err != nil {
-		a.Log.ErrorContext(r.Context(), "Failed to parse usage header; skipping usage reporting", "error", err)
-	}
-
-	a.Forwarder.Forward(
-		w, r,
-		func(r *http.Request) error {
-			var err error
-			exchange, err = encbody.InitializeServerExchange(secret, r)
-			if err != nil {
-				return fmt.Errorf("initializing server exchange: %w", err)
-			}
-
-			if err := exchange.DecryptRequest(r); err != nil {
-				return fmt.Errorf("decrypting request: %w", err)
-			}
-
-			if err := postDecryptMutator(r); err != nil {
-				return fmt.Errorf("applying request mutators: %w", err)
-			}
-
-			return nil
-		},
-		func(resp *http.Response) (forwarder.Response, error) {
-			if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
-				return a.fbeStreamingResponse(
-					ctx, resp, exchange, preEncryptMutator, extractStreamingUsage, uc,
-				)
-			}
-			return a.fbeUnaryResponse(ctx, resp, exchange, preEncryptMutator, extractUnaryUsage, uc)
-		},
-	)
-}
-
-func (a *Adapter) legacyUnaryResponse(
-	ctx context.Context,
-	usResp *http.Response,
-	preEncryptMutator *forwarder.MutatingReader,
-	legacyEncryptMutator *forwarder.MutatingReader,
-	extractUsage UsageExtractor,
-	uc *usageContext,
-) (*forwarder.UnaryResponse, error) {
-	dsResp, err := forwarder.ReadUnaryResponse(usResp, constants.MaxUnaryResponseBodyBytes)
-	if err != nil {
-		return nil, fmt.Errorf("reading upstream response body: %w", err)
-	}
-
-	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
-
-	a.reportUnaryUsage(ctx, dsResp, extractUsage, uc)
-
-	body := dsResp.Body
-	if preEncryptMutator != nil {
-		body, err = preEncryptMutator.Mutate(body)
-		if err != nil {
-			return nil, fmt.Errorf("pre-encrypting response: %w", err)
+	responseMapper := func(resp *http.Response) (forwarder.Response, error) {
+		if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
+			return a.mapPlaintextStreamingResponse(ctx, resp, preEncryptMutator, extractStreamingUsage, uc), nil
 		}
+		return a.mapPlaintextUnaryResponse(ctx, resp, preEncryptMutator, extractUnaryUsage, uc)
 	}
-	body, err = legacyEncryptMutator.Mutate(body)
-	if err != nil {
-		return nil, fmt.Errorf("encrypting response: %w", err)
-	}
-	dsResp.Body = body
 
-	return dsResp, nil
+	a.EncForwarder.ForwardEncrypted(w, r, legacyDecryptMutator, postDecryptMutator, legacyPlainResponseFields, responseMapper)
 }
 
-func (a *Adapter) legacyStreamingResponse(
+func (a *Adapter) mapPlaintextUnaryResponse(
 	ctx context.Context,
 	usResp *http.Response,
-	preEncryptMutator *forwarder.MutatingReader,
-	legacyEncryptMutator *forwarder.MutatingReader,
-	extractUsage UsageExtractor,
-	uc *usageContext,
-) *forwarder.StreamingResponse {
-	dsResp := forwarder.NewStreamingResponse(usResp)
-	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
-
-	body := a.reportStreamingUsage(ctx, dsResp.Body, extractUsage, uc)
-	if preEncryptMutator != nil {
-		body = preEncryptMutator.Reader(body)
-	}
-	dsResp.Body = legacyEncryptMutator.Reader(body)
-
-	return dsResp
-}
-
-func (a *Adapter) fbeUnaryResponse(
-	ctx context.Context,
-	usResp *http.Response,
-	exchange *encbody.ServerExchange,
 	preEncryptMutator *forwarder.MutatingReader,
 	extractUsage UsageExtractor,
 	uc *usageContext,
@@ -491,25 +344,20 @@ func (a *Adapter) fbeUnaryResponse(
 	if preEncryptMutator != nil {
 		dsResp.Body, err = preEncryptMutator.Mutate(dsResp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("pre-encrypting response: %w", err)
+			return nil, fmt.Errorf("mutating response body: %w", err)
 		}
-	}
-
-	if err := exchange.EncryptUnaryResponse(dsResp); err != nil {
-		return nil, fmt.Errorf("FBE encrypting response: %w", err)
 	}
 
 	return dsResp, nil
 }
 
-func (a *Adapter) fbeStreamingResponse(
+func (a *Adapter) mapPlaintextStreamingResponse(
 	ctx context.Context,
 	usResp *http.Response,
-	exchange *encbody.ServerExchange,
 	preEncryptMutator *forwarder.MutatingReader,
 	extractUsage UsageExtractor,
 	uc *usageContext,
-) (*forwarder.StreamingResponse, error) {
+) *forwarder.StreamingResponse {
 	dsResp := forwarder.NewStreamingResponse(usResp)
 	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
 
@@ -518,11 +366,8 @@ func (a *Adapter) fbeStreamingResponse(
 		body = preEncryptMutator.Reader(body)
 	}
 	dsResp.Body = body
-	if err := exchange.EncryptSSEResponse(dsResp, constants.MaxSSEEventBytes); err != nil {
-		return nil, fmt.Errorf("encrypting SSE response: %w", err)
-	}
 
-	return dsResp, nil
+	return dsResp
 }
 
 // dispatchReport asynchronously submits a usage report on a context detached from ctx.

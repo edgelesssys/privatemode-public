@@ -13,10 +13,34 @@ import (
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/attest"
+	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/privatemode"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 )
+
+// Authentication method identifiers exchanged with the JavaScript SDK. They must be
+// kept in sync with the AuthCredential types in sdk/js/src/privatemode-ai.ts.
+const (
+	authTypeAPIKey    = "apiKey"
+	authTypeJWT       = "jwt"
+	authTypeAnonymous = "anonymous"
+)
+
+// credentialFromArgs builds an [auth.Credential] from the (type, value) pair passed by
+// the JavaScript SDK.
+func credentialFromArgs(authType, authValue string) (auth.Credential, error) {
+	switch authType {
+	case authTypeAPIKey:
+		return auth.APIKey(authValue), nil
+	case authTypeJWT:
+		return auth.JWT(authValue), nil
+	case authTypeAnonymous:
+		return auth.Anonymous(authValue), nil
+	default:
+		return auth.Credential{}, fmt.Errorf("unknown auth type %q", authType)
+	}
+}
 
 type privatemodeWasmWrapper struct {
 	client *privatemode.Client
@@ -24,7 +48,7 @@ type privatemodeWasmWrapper struct {
 
 func newWasmWrapper() *privatemodeWasmWrapper {
 	return &privatemodeWasmWrapper{
-		client: privatemode.New(""),
+		client: privatemode.New(auth.Credential{}),
 	}
 }
 
@@ -33,25 +57,33 @@ func newWasmWrapper() *privatemodeWasmWrapper {
 // the Contrast coordinator and sets up the secret for encryption.
 // Arguments are structured as follows:
 //   - args[0]: base64-encoded manifest bytes (string)
-//   - args[1]: API key for the Privatemode API (string)
-//   - args[2]: API base URL for the Privatemode API (string)
-//   - args[3]: whether to enable logging (bool)
+//   - args[1]: authentication method (string: "apiKey", "jwt", or "anonymous")
+//   - args[2]: authentication value, e.g. the API key, JWT, or fingerprint (string)
+//   - args[3]: API base URL for the Privatemode API (string)
+//   - args[4]: whether to enable logging (bool)
 //
 // The returned Promise resolves with undefined on success, or rejects
 // with a JS Error on failure.
 func (w *privatemodeWasmWrapper) initialize(this js.Value, args []js.Value) any {
 	base64Manifest := args[0].String()
-	apiKey := args[1].String()
-	apiBaseURL := args[2].String()
-	enableLogging := args[3].Bool()
+	authType := args[1].String()
+	authValue := args[2].String()
+	apiBaseURL := args[3].String()
+	enableLogging := args[4].Bool()
 
-	client := privatemode.New(apiKey).WithAPIBaseURL(apiBaseURL)
+	promiseConstructor := js.Global().Get("Promise")
+
+	cred, err := credentialFromArgs(authType, authValue)
+	if err != nil {
+		return promiseConstructor.Call("reject",
+			js.Global().Get("Error").New(fmt.Sprintf("building credential: %s", err)))
+	}
+
+	client := privatemode.New(cred).WithAPIBaseURL(apiBaseURL)
 	if enableLogging {
 		client = client.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	}
 	w.client = client
-
-	promiseConstructor := js.Global().Get("Promise")
 
 	expectedMfBytes, err := base64.StdEncoding.DecodeString(base64Manifest)
 	if err != nil {
@@ -85,19 +117,48 @@ func (w *privatemodeWasmWrapper) initialize(this js.Value, args []js.Value) any 
 // attestation. This is useful when restoring a previously cached
 // secret with [importSecret].
 // Arguments are structured as follows:
-//   - args[0]: API key for the Privatemode API (string)
-//   - args[1]: API base URL for the Privatemode API (string)
-//   - args[2]: whether to enable logging (bool)
+//   - args[0]: authentication method (string: "apiKey", "jwt", or "anonymous")
+//   - args[1]: authentication value, e.g. the API key, JWT, or fingerprint (string)
+//   - args[2]: API base URL for the Privatemode API (string)
+//   - args[3]: whether to enable logging (bool)
+//
+// Throws a JS Error if the authentication method is unknown.
 func (w *privatemodeWasmWrapper) initializeOffline(this js.Value, args []js.Value) any {
-	apiKey := args[0].String()
-	apiBaseURL := args[1].String()
-	enableLogging := args[2].Bool()
+	authType := args[0].String()
+	authValue := args[1].String()
+	apiBaseURL := args[2].String()
+	enableLogging := args[3].Bool()
 
-	client := privatemode.New(apiKey).WithAPIBaseURL(apiBaseURL)
+	cred, err := credentialFromArgs(authType, authValue)
+	if err != nil {
+		panic(js.Global().Get("Error").New(fmt.Sprintf("building credential: %s", err)))
+	}
+
+	client := privatemode.New(cred).WithAPIBaseURL(apiBaseURL)
 	if enableLogging {
 		client = client.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	}
 	w.client = client
+	return js.Undefined()
+}
+
+// setAuth updates the authentication credential used for subsequent requests.
+// This allows rotating short-lived credentials (e.g. JWTs) without
+// re-initializing the client.
+// Arguments are structured as follows:
+//   - args[0]: authentication method (string: "apiKey", "jwt", or "anonymous")
+//   - args[1]: authentication value, e.g. the API key, JWT, or fingerprint (string)
+//
+// Throws a JS Error if the authentication method is unknown.
+func (w *privatemodeWasmWrapper) setAuth(this js.Value, args []js.Value) any {
+	authType := args[0].String()
+	authValue := args[1].String()
+
+	cred, err := credentialFromArgs(authType, authValue)
+	if err != nil {
+		panic(js.Global().Get("Error").New(fmt.Sprintf("building credential: %s", err)))
+	}
+	w.client.SetCredential(cred)
 	return js.Undefined()
 }
 
@@ -497,6 +558,7 @@ func main() {
 	js.Global().Set("errNoSecretForID", constants.ErrorNoSecretForID)
 	js.Global().Set("initialize", js.FuncOf(w.initialize))
 	js.Global().Set("initializeOffline", js.FuncOf(w.initializeOffline))
+	js.Global().Set("setAuth", js.FuncOf(w.setAuth))
 	js.Global().Set("updateSecret", js.FuncOf(w.updateSecret))
 	js.Global().Set("fetchManifest", js.FuncOf(w.fetchManifest))
 	js.Global().Set("chatCompletions", js.FuncOf(w.chatCompletions))

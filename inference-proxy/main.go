@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/etcd"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/metrics"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/server"
@@ -21,6 +20,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/mtls"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/httputil"
 	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/edgelesssys/continuum/internal/oss/process"
 	"github.com/edgelesssys/continuum/internal/tracing"
@@ -46,9 +46,9 @@ func newRootCmd() *cobra.Command {
 
 	var cfg runConfig
 
-	cmd.Flags().StringVar(&cfg.listenPort, "listen-port", constants.ProxyServerPort, "port the proxy server is listening on")
+	cmd.Flags().StringVar(&cfg.listenPort, "listen-port", constants.InferenceProxyServerPort, "port the proxy server is listening on")
 	cmd.Flags().StringVar(&cfg.metricsPort, "metrics-port", constants.MetricsServerPort, "port the metrics server is listening on")
-	cmd.Flags().StringVar(&cfg.workloadPort, "workload-port", constants.WorkloadDefaultExposedPort, "port the workload is listening on")
+	cmd.Flags().StringVar(&cfg.workloadPort, "workload-port", constants.WorkloadDefaultPort, "port the workload is listening on")
 	cmd.Flags().StringSliceVar(&cfg.adapterTypes, "adapter-type", []string{"openai"}, "type of adapter to use (can be specified multiple times or comma-separated)")
 	cmd.Flags().StringVar(&cfg.workloadAddress, "workload-address", "", "host name or IP the workload can be reached at over TCP")
 	cmd.Flags().StringVar(&cfg.workloadMetricsURL, "workload-metrics", "", "URL of the workload metrics")
@@ -135,9 +135,9 @@ func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
 		return fmt.Errorf("creating etcd watcher: %w", err)
 	}
 
-	// Wrap the default transport so outbound calls to vLLM get a client span
+	// Wrap the transport so outbound calls to vLLM get a client span
 	// and the W3C traceparent header is injected automatically.
-	workloadClient := &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
+	workloadClient := &http.Client{Transport: otelhttp.NewTransport(httputil.NewTransport())}
 	forwarder := forwarder.New(workloadClient, net.JoinHostPort(cfg.workloadAddress, cfg.workloadPort), forwarder.SchemeHTTP, log)
 
 	mtlsIdentity, err := mtls.LoadIdentity(cfg.identityCertPath, cfg.identityKeyPath, cfg.identityCAPath)
@@ -150,7 +150,7 @@ func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
 		return fmt.Errorf("creating usage reporter: %w", err)
 	}
 
-	adapters, err := adapter.New(cfg.adapterTypes, tasks, cipher.New(secrets), cfg.ocspStatusFile, forwarder, usageReporter, log)
+	adapters, err := adapter.New(cfg.adapterTypes, tasks, secrets, cfg.ocspStatusFile, forwarder, usageReporter, log)
 	if err != nil {
 		return fmt.Errorf("creating adapters: %w", err)
 	}

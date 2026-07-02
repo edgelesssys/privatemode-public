@@ -4,46 +4,69 @@
   import { Menu } from 'lucide-svelte';
   import { chatStore } from '$lib/chatStore';
   import { initTheme } from '$lib/themeStore';
-  import {
-    initializeClient,
-    clientReady,
-    clientVerifying,
-  } from '$lib/clientStore';
+  import { initializeClient } from '$lib/clientStore';
   import {
     initializeAuth,
     isLimitedMode,
     isSignedIn,
-    activeApiKey,
+    authIdentity,
     signIn,
     clerkLoaded,
   } from '$lib/authStore';
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import '@fontsource-variable/inter/wght.css';
   import '$lib/styles/theme.css';
   let { children } = $props();
 
   onMount(() => {
     let disposed = false;
-    let unsubscribeApiKey: (() => void) | undefined;
+    let unsubscribeAuth: (() => void) | undefined;
     const themeCleanup = initTheme();
+
+    // Serialize client (re-)initialization. If the auth identity changes while
+    // an init is still in flight, queue a follow-up run instead of dropping it,
+    // so the client always converges on the current identity.
+    let initInFlight = false;
+    let reinitQueued = false;
+    let initializedIdentity: string | null = null;
+
+    const runInit = async () => {
+      if (initInFlight) {
+        reinitQueued = true;
+        return;
+      }
+      initInFlight = true;
+      try {
+        do {
+          reinitQueued = false;
+          if (disposed) return;
+          initializedIdentity = get(authIdentity);
+          await initializeClient();
+        } while (reinitQueued);
+      } finally {
+        initInFlight = false;
+      }
+    };
 
     initializeAuth().then(() => {
       if (disposed) return;
-      initializeClient();
+      runInit();
 
-      // Re-initialize client when API key changes (e.g. after sign-in)
-      unsubscribeApiKey = activeApiKey.subscribe(() => {
-        if (!disposed && $clerkLoaded && ($clientReady || !$clientVerifying)) {
-          clientReady.set(false);
-          clientVerifying.set(true);
-          initializeClient();
-        }
+      // Re-initialize the client when the auth identity changes (sign-in/out or
+      // active organization), as that changes the resolved credential and secret.
+      // The subscribe callback also fires immediately with the current value,
+      // which the identity check below skips.
+      unsubscribeAuth = authIdentity.subscribe((identity) => {
+        if (disposed || !$clerkLoaded) return;
+        if (identity === initializedIdentity) return;
+        runInit();
       });
     });
 
     return () => {
       disposed = true;
-      unsubscribeApiKey?.();
+      unsubscribeAuth?.();
       if (typeof themeCleanup === 'function') themeCleanup();
     };
   });

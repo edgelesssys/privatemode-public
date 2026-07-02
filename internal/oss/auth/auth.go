@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -21,6 +22,48 @@ const (
 
 // Type of the authorization scheme.
 type Type string
+
+// Credential is an authentication credential applied to outgoing Privatemode API
+// requests. It abstracts over the different authentication methods the API gateway
+// accepts (API key, Clerk JWT, or anonymous).
+//
+// A non-initialized ("zero") Credential applies no authentication.
+type Credential struct {
+	header string
+	value  string
+}
+
+// APIKey returns a Credential that authenticates with a Privatemode API key via the
+// Authorization header ('Bearer <key>').
+func APIKey(key string) Credential {
+	return Credential{header: "Authorization", value: string(Bearer) + " " + key}
+}
+
+// JWT returns a Credential that authenticates with a Clerk session JWT via the
+// Privatemode-JWT header.
+func JWT(token string) Credential {
+	return Credential{header: constants.PrivatemodeJWTHeader, value: token}
+}
+
+// Anonymous returns a Credential for anonymous authentication. The fingerprint carries
+// client-collected data via the Privatemode-Anonymous-Auth header and is used by the
+// gateway for abuse control only.
+func Anonymous(fingerprint string) Credential {
+	return Credential{header: constants.PrivatemodeAnonymousAuthHeader, value: fingerprint}
+}
+
+// Apply sets the credential's header on h. It is a no-op for the zero Credential.
+func (c Credential) Apply(h http.Header) {
+	if c.IsZero() {
+		return
+	}
+	h.Set(c.header, c.value)
+}
+
+// IsZero reports whether c is the zero Credential, carrying no authentication.
+func (c Credential) IsZero() bool {
+	return c.header == ""
+}
 
 // Error is returned when no valid Authorization header is found in a request.
 type Error struct {

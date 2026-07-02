@@ -7,10 +7,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"path/filepath"
 
 	"github.com/edgelesssys/continuum/internal/oss/attest"
+	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/httputil"
 	"github.com/edgelesssys/continuum/internal/oss/secretclient"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
@@ -26,7 +26,7 @@ const (
 
 // SecretManager sets up the secret manager for the Contrast deployment.
 func SecretManager(ctx context.Context, flags Flags, log *slog.Logger) (*secretmanager.SecretManager, func() string, error) {
-	httpClient := http.DefaultClient
+	httpClient := httputil.NewClient()
 	if flags.InsecureAPIConnection {
 		httpClient = httputil.InsecureNewSkipVerifyClient()
 	}
@@ -55,10 +55,10 @@ func SecretManager(ctx context.Context, flags Flags, log *slog.Logger) (*secretm
 	}
 
 	secretUpdater := updater.New(ssClient, caGetter, log)
-	apiKeyDropOnUnauthorized := flags.APIKey == nil
-	sm := secretmanager.New(secretUpdater.UpdateSecret, apiKeyDropOnUnauthorized)
+	credDropOnUnauthorized := flags.APIKey == nil
+	sm := secretmanager.New(secretUpdater.UpdateSecret, credDropOnUnauthorized)
 	if flags.APIKey != nil {
-		if err := sm.OfferAPIKey(ctx, *flags.APIKey); err != nil {
+		if err := sm.OfferCredential(ctx, auth.APIKey(*flags.APIKey)); err != nil {
 			return nil, nil, fmt.Errorf("trying API key: %w", err)
 		}
 	}

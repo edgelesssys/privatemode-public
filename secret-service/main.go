@@ -37,7 +37,7 @@ const (
 
 func main() {
 	port := flag.String("port", constants.SecretServiceUserPort, "port to listen on")
-	healthPort := flag.String("health-port", constants.AttestationServiceHealthPort, "port for health probes")
+	healthPort := flag.String("health-port", constants.SecretServiceHealthPort, "port for health probes")
 	etcdServerCert := flag.String("etcd-server-cert", filepath.Join(constants.EtcdBasePath(), "etcd.crt"), "path to the etcd server certificate")
 	etcdServerKey := flag.String("etcd-server-key", filepath.Join(constants.EtcdBasePath(), "etcd.key"), "path to the etcd server key")
 	etcdCA := flag.String("etcd-ca", filepath.Join(constants.EtcdBasePath(), "ca.crt"), "path to the etcd CA certificate")

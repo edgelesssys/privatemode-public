@@ -16,8 +16,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -132,12 +132,13 @@ func (f *Forwarder) Forward(
 	// Prepare request for forwarding to upstream server
 	baseReq.RequestURI = ""
 	delHopHeaders(baseReq.Header)
-	updateForwardedHeader(baseReq.Header, baseReq.RemoteAddr)
 
 	// Not setting the host here leads to "no Host in request URL" errors.
 	baseReq.URL.Host = options.host
 	// Not setting the scheme here leads to "http: no Host in request URL" errors.
 	baseReq.URL.Scheme = string(f.protocolScheme)
+	// Clear Host header. Will be derived from baseReq.URL.Host by [http.Client].
+	baseReq.Host = ""
 
 	resp, err := f.sendWithRetry(baseReq, requestMutator, options.retryCallback)
 	if err != nil {
@@ -377,31 +378,32 @@ func HTTPError(w http.ResponseWriter, r *http.Request, code int, msg string, arg
 	fmt.Fprint(w, formattedMsg)
 }
 
-// delHopHeaders deletes hop-by-hop headers which should not be forwarded.
+// delHopHeaders deletes hop-by-hop headers which should not be forwarded. It mirrors the behaviour
+// of [net/http/httputil.ReverseProxy]
 // See the HTTP RFC for more details: https://datatracker.ietf.org/doc/html/rfc9110#name-message-forwarding
 func delHopHeaders(header http.Header) {
+	// Remove headers listed in the "Connection" header.
+	for _, f := range header["Connection"] {
+		for sf := range strings.SplitSeq(f, ",") {
+			if sf = textproto.TrimString(sf); sf != "" {
+				header.Del(sf)
+			}
+		}
+	}
+
 	hopHeaders := []string{
 		"Connection",
+		"Proxy-Connection", // non-standard but still sent by some clients
 		"Keep-Alive",
 		"Proxy-Authenticate",
 		"Proxy-Authorization",
-		"Te",
-		"Trailers",
+		"Te",      // canonicalized version of "TE"
+		"Trailer", // not "Trailers" per https://www.rfc-editor.org/errata_search.php?eid=4522
 		"Transfer-Encoding",
 		"Upgrade",
 	}
 	for _, h := range hopHeaders {
 		header.Del(h)
-	}
-}
-
-// updateForwardedHeader updates the X-Forwarded-For header with the client's IP address.
-func updateForwardedHeader(header http.Header, remoteAddr string) {
-	if clientIP, _, err := net.SplitHostPort(remoteAddr); err == nil {
-		if prior, ok := header["X-Forwarded-For"]; ok {
-			clientIP = strings.Join(prior, ", ") + ", " + clientIP
-		}
-		header.Set("X-Forwarded-For", clientIP)
 	}
 }
 

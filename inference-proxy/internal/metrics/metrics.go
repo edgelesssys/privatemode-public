@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/edgelesssys/continuum/internal/oss/httputil"
 	"github.com/edgelesssys/continuum/internal/oss/process"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
@@ -32,7 +33,7 @@ func NewServer(workloadMetricsURL, workloadLiveURL, workloadReadyURL string, log
 		workloadMetricsURL: workloadMetricsURL,
 		log:                log,
 		handler:            mux,
-		httpClient:         http.DefaultClient,
+		httpClient:         httputil.NewClient(),
 		metricsGatherer:    prometheus.DefaultGatherer,
 		metricsFormat:      expfmt.NewFormat(expfmt.TypeTextPlain),
 	}

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/httpapi"
 	"github.com/edgelesssys/continuum/internal/oss/secretexchange"
 )
@@ -33,7 +34,7 @@ func New(httpClient *http.Client, endpoint string) *Client {
 }
 
 // ExchangeSecret performs a cryptographic key agreement with the Privatemode backend.
-func (c *Client) ExchangeSecret(ctx context.Context, meshCA *x509.Certificate, apiKey string) (string, []byte, error) {
+func (c *Client) ExchangeSecret(ctx context.Context, meshCA *x509.Certificate, cred auth.Credential) (string, []byte, error) {
 	priv, err := hpke.MLKEM768X25519().GenerateKey()
 	if err != nil {
 		return "", nil, fmt.Errorf("generating key: %w", err)
@@ -45,7 +46,7 @@ func (c *Client) ExchangeSecret(ctx context.Context, meshCA *x509.Certificate, a
 	if err != nil {
 		return "", nil, fmt.Errorf("marshaling request: %w", err)
 	}
-	body, err := httpapi.Do(ctx, c.httpClient, http.MethodPost, "https://"+c.endpoint+"/privatemode/v1/secret", reqJSON, apiKey)
+	body, err := httpapi.Do(ctx, c.httpClient, http.MethodPost, "https://"+c.endpoint+"/privatemode/v1/secret", reqJSON, cred)
 	if err != nil {
 		return "", nil, fmt.Errorf("doing request: %w", err)
 	}

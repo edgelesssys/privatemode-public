@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v5"
+	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/stretchr/testify/assert"
 )
@@ -46,7 +47,7 @@ func TestUpdateSecret(t *testing.T) {
 				tc.customize(sut)
 			}
 
-			id, data, err := sut.UpdateSecret(t.Context(), "")
+			id, data, err := sut.UpdateSecret(t.Context(), auth.APIKey(""))
 			assert := assert.New(t)
 			if tc.wantErr {
 				assert.Error(err)
@@ -63,7 +64,7 @@ type stubCAGetter struct {
 	err error
 }
 
-func (c *stubCAGetter) GetMeshCA(context.Context, string) (*x509.Certificate, error) {
+func (c *stubCAGetter) GetMeshCA(context.Context, auth.Credential) (*x509.Certificate, error) {
 	return &x509.Certificate{}, c.err
 }
 
@@ -71,7 +72,7 @@ type stubSecretClient struct {
 	errWithoutCA error
 }
 
-func (s *stubSecretClient) ExchangeSecret(_ context.Context, meshCA *x509.Certificate, _ string) (string, []byte, error) {
+func (s *stubSecretClient) ExchangeSecret(_ context.Context, meshCA *x509.Certificate, _ auth.Credential) (string, []byte, error) {
 	if meshCA == nil {
 		return "", nil, s.errWithoutCA
 	}

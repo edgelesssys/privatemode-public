@@ -7,6 +7,7 @@ import {
   updateSecret,
   fetchManifest,
   initializeOffline as wasmInitializeOffline,
+  setAuth as wasmSetAuth,
   chatCompletions as wasmChatCompletions,
   streamChatCompletions as wasmStreamChatCompletions,
   unstructured as wasmUnstructured,
@@ -16,13 +17,30 @@ import {
   importSecret as wasmImportSecret,
 } from './wasm.js';
 
+/**
+ * An authentication credential for the Privatemode API. Privatemode supports
+ * authenticating with an API key, a Clerk session JWT, or anonymously.
+ */
+export type AuthCredential =
+  | { type: 'apiKey'; value: string }
+  | { type: 'jwt'; value: string }
+  | { type: 'anonymous'; value: string };
+
+/**
+ * A function that returns the credential to authenticate the next request with.
+ * It is invoked before every request, so it can return short-lived credentials
+ * (such as JWTs) that are refreshed over time.
+ */
+export type AuthProvider = () => AuthCredential | Promise<AuthCredential>;
+
 /** Options for configuring {@link PrivatemodeAI}. */
 export interface PrivatemodeAIOptions {
   /**
-   * API key for authenticating with the Privatemode API.
-   * If not provided, defaults to the `PRIVATEMODE_API_KEY` environment variable.
+   * Authentication provider, invoked before every request to obtain the
+   * credential to use. Use this to authenticate with an API key, a Clerk JWT,
+   * or anonymously, or to rotate short-lived credentials.
    */
-  apiKey?: string;
+  auth?: AuthProvider;
 
   /**
    * API base URL.
@@ -102,7 +120,7 @@ export interface VerifyResult {
  * Secure, OpenAI-compatible client for Privatemode.
  */
 export class PrivatemodeAI {
-  private apiKey: string;
+  private authProvider: AuthProvider;
   private apiBaseURL: string;
   private isBrowser: boolean;
   private _manifestBytes: Uint8Array | null;
@@ -128,13 +146,13 @@ export class PrivatemodeAI {
       );
     }
 
-    this.apiKey = options.apiKey ?? readEnv('PRIVATEMODE_API_KEY') ?? '';
-    if (!this.apiKey) {
+    if (!options.auth) {
       throw new Error(
-        'The PRIVATEMODE_API_KEY environment variable is missing or empty. ' +
-          'Either provide it, or instantiate the PrivatemodeAI client with the apiKey option.',
+        'No authentication configured. Pass an `auth` provider to the ' +
+          'PrivatemodeAI client.',
       );
     }
+    this.authProvider = options.auth;
 
     this.apiBaseURL = options.apiBaseURL ?? 'https://api.privatemode.ai';
     this._manifestBytes = options.manifestBytes ?? null;
@@ -163,7 +181,7 @@ export class PrivatemodeAI {
     }
     this.initialized = true;
 
-    await this.initializeWithManifestRetry();
+    await this.initializeWithManifestRetry(await this.resolveCredential());
     return {
       manifest: JSON.parse(
         new TextDecoder().decode(this._manifestBytes!),
@@ -182,7 +200,13 @@ export class PrivatemodeAI {
    */
   public async initializeOffline(manifestBytes: Uint8Array): Promise<void> {
     await this.loadWasm();
-    wasmInitializeOffline(this.apiKey, this.apiBaseURL, this.enableWasmLogging);
+    const cred = await this.resolveCredential();
+    wasmInitializeOffline(
+      cred.type,
+      cred.value,
+      this.apiBaseURL,
+      this.enableWasmLogging,
+    );
     this._manifestBytes = manifestBytes;
     this.initialized = true;
   }
@@ -204,8 +228,10 @@ export class PrivatemodeAI {
         'verify() or initializeOffline() must be called before refreshSecret().',
       );
     }
+    const cred = await this.resolveCredential();
+    wasmSetAuth(cred.type, cred.value);
     if (!this.verified) {
-      await this.initializeWithManifestRetry();
+      await this.initializeWithManifestRetry(cred);
     }
     await updateSecret();
     if (this.onSecretUpdate) {
@@ -228,6 +254,7 @@ export class PrivatemodeAI {
   public async chatCompletions(
     body: Record<string, unknown>,
   ): Promise<unknown> {
+    await this.applyCredential();
     return this.retryWithSecretRefresh(async () => {
       const resp = await wasmChatCompletions(JSON.stringify(body));
       return JSON.parse(resp);
@@ -252,6 +279,7 @@ export class PrivatemodeAI {
     body: Record<string, unknown>,
     options?: { signal?: AbortSignal },
   ): AsyncGenerator<unknown> {
+    await this.applyCredential();
     const generator = await this.retryWithSecretRefresh(async () =>
       this.initiateStream(body, options),
     );
@@ -363,6 +391,7 @@ export class PrivatemodeAI {
     files: UnstructuredFile[],
     options?: UnstructuredOptions,
   ): Promise<unknown> {
+    await this.applyCredential();
     return this.retryWithSecretRefresh(async () => {
       const wasmFiles = files.map((f) => ({
         name: f.name,
@@ -395,6 +424,7 @@ export class PrivatemodeAI {
     file: AudioFile,
     options: AudioTranscriptionOptions,
   ): Promise<unknown> {
+    await this.applyCredential();
     return this.retryWithSecretRefresh(async () => {
       const wasmFile = {
         name: file.name,
@@ -419,6 +449,7 @@ export class PrivatemodeAI {
    * @throws If the request fails.
    */
   public async listModels(): Promise<unknown> {
+    await this.applyCredential();
     const resp = await wasmListModels();
     return JSON.parse(resp);
   }
@@ -494,19 +525,39 @@ export class PrivatemodeAI {
   }
 
   /**
+   * Resolve the current authentication credential via the configured provider.
+   */
+  private async resolveCredential(): Promise<AuthCredential> {
+    return this.authProvider();
+  }
+
+  /**
+   * Resolve the current credential and push it into the WASM client so the next
+   * request is authenticated with it. Used before network operations to keep
+   * short-lived credentials (e.g. JWTs) fresh.
+   */
+  private async applyCredential(): Promise<void> {
+    const cred = await this.resolveCredential();
+    wasmSetAuth(cred.type, cred.value);
+  }
+
+  /**
    * Initialize with automatic manifest retry if the active manifest doesn't match.
    * If initialization fails with a manifest mismatch error, fetches a new manifest
    * and retries once.
    *
    * @throws If initialization fails for reasons other than manifest mismatch, or if retry fails.
    */
-  private async initializeWithManifestRetry(): Promise<void> {
+  private async initializeWithManifestRetry(
+    cred: AuthCredential,
+  ): Promise<void> {
     const manifestBase64 = btoa(String.fromCharCode(...this._manifestBytes!));
 
     try {
       await initialize(
         manifestBase64,
-        this.apiKey,
+        cred.type,
+        cred.value,
         this.apiBaseURL,
         this.enableWasmLogging,
       );
@@ -522,7 +573,8 @@ export class PrivatemodeAI {
 
         await initialize(
           newManifestBase64,
-          this.apiKey,
+          cred.type,
+          cred.value,
           this.apiBaseURL,
           this.enableWasmLogging,
         );
@@ -638,14 +690,4 @@ export interface AudioTranscriptionOptions {
   response_format?: 'json' | 'verbose_json';
   /** Sampling temperature. */
   temperature?: number;
-}
-
-/**
- * Read an environment variable, returning undefined if not available.
- */
-function readEnv(name: string): string | undefined {
-  if (typeof process !== 'undefined' && process.env) {
-    return process.env[name];
-  }
-  return undefined;
 }

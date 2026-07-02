@@ -79,7 +79,7 @@ func (e *Etcd) GetSecret(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 	if len(response.Kvs) != 1 {
-		return nil, errors.New("secret not found")
+		return nil, secrets.ErrSecretNotFound
 	}
 	return response.Kvs[0].Value, nil
 }

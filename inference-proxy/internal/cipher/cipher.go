@@ -25,9 +25,12 @@ func New(secrets *secrets.Secrets) *Cipher {
 
 // Secret returns the secret for the given ID.
 func (c *Cipher) Secret(ctx context.Context, id string) ([]byte, error) {
-	secret, ok := c.inferenceSecrets.Get(ctx, id)
-	if !ok {
-		return nil, fmt.Errorf("%s %q", constants.ErrorNoSecretForID, id)
+	secret, err := c.inferenceSecrets.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, secrets.ErrSecretNotFound) {
+			return nil, fmt.Errorf("%s %q: %w", constants.ErrorNoSecretForID, id, err)
+		}
+		return nil, err
 	}
 	return secret, nil
 }
@@ -36,9 +39,12 @@ func (c *Cipher) Secret(ctx context.Context, id string) ([]byte, error) {
 // The message is encrypted using the secret associated with the given id.
 // The function returns the encrypted message in the format 'id:nonce:iv:cipher'.
 func (c *Cipher) encryptResponse(ctx context.Context, id, message string, requestNonce []byte, sequenceNumber uint32) (string, error) {
-	secret, ok := c.inferenceSecrets.Get(ctx, id)
-	if !ok {
-		return "", fmt.Errorf("%s %q", constants.ErrorNoSecretForID, id)
+	secret, err := c.inferenceSecrets.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, secrets.ErrSecretNotFound) {
+			return "", fmt.Errorf("%s %q: %w", constants.ErrorNoSecretForID, id, err)
+		}
+		return "", err
 	}
 	return crypto.EncryptMessage(message, secret, id, requestNonce, sequenceNumber)
 }
@@ -51,9 +57,12 @@ func (c *Cipher) decryptRequest(ctx context.Context, message string, nonce []byt
 	if err != nil {
 		return "", "", err
 	}
-	secret, ok := c.inferenceSecrets.Get(ctx, id)
-	if !ok {
-		return "", "", fmt.Errorf("%s %q", constants.ErrorNoSecretForID, id)
+	secret, err := c.inferenceSecrets.Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, secrets.ErrSecretNotFound) {
+			return "", "", fmt.Errorf("%s %q: %w", constants.ErrorNoSecretForID, id, err)
+		}
+		return "", "", err
 	}
 	text, err = crypto.DecryptMessage(message, secret, nonce, sequenceNumber)
 	return text, id, err

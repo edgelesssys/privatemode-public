@@ -9,19 +9,20 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 )
 
-// ErrUnauthorized is returned if the API returned 401, indicating that the API key is invalid.
+// ErrUnauthorized is returned if the API returned 401, indicating that the credential is invalid.
 var ErrUnauthorized = errors.New(http.StatusText(http.StatusUnauthorized))
 
 // Do performs an HTTP request to the Privatemode API.
-func Do(ctx context.Context, client *http.Client, method, url string, reqBody []byte, apiKey string) ([]byte, error) {
+func Do(ctx context.Context, client *http.Client, method, url string, reqBody []byte, cred auth.Credential) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	cred.Apply(req.Header)
 	req.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
 	resp, err := client.Do(req)
 	if err != nil {

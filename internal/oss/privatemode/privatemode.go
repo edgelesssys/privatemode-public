@@ -21,6 +21,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/httputil"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/edgelesssys/continuum/internal/oss/secretclient"
@@ -94,9 +95,11 @@ type Client struct {
 	// but can be overridden with [Client.WithAPIBaseURL].
 	apiBaseURL string
 
-	// apiKey is the API key used for authentication with the
-	// Privatemode deployment.
-	apiKey string
+	// cred is the credential used for authentication with the
+	// Privatemode deployment. It may be an API key, a Clerk JWT, or
+	// an anonymous credential, and can be updated at runtime with
+	// [Client.SetCredential].
+	cred auth.Credential
 
 	// log is the main logger used by the client. It is also
 	// passed to sub-clients.
@@ -126,17 +129,22 @@ type Client struct {
 	secretManager *secretmanager.SecretManager
 }
 
-// New creates a new Privatemode client.
+// New creates a new Privatemode client authenticating with the given credential.
+//
+// The credential can be updated at runtime with [Client.SetCredential].
+//
+// Pass the zero [auth.Credential for a client that only performs
+// unauthenticated operations such as fetching the manifest.
 //
 // Logging is disabled by default, but can be enabled by setting a
 // logger with [Client.WithLogger].
-func New(apiKey string) *Client {
+func New(cred auth.Credential) *Client {
 	c := &Client{
 		cdnBaseURL:      "https://cdn.confidential.cloud/privatemode/v2",
 		apiBaseURL:      "https://api.privatemode.ai",
-		apiKey:          apiKey,
+		cred:            cred,
 		log:             slog.New(slog.DiscardHandler),
-		httpClient:      http.DefaultClient,
+		httpClient:      httputil.NewClient(),
 		promptCacheSalt: openai.RandomPromptCacheSalt(),
 	}
 
@@ -155,6 +163,16 @@ func (c *Client) WithCDNBaseURL(url string) *Client {
 func (c *Client) WithAPIBaseURL(url string) *Client {
 	c.apiBaseURL = url
 	return c
+}
+
+// SetCredential updates the authentication credential used for subsequent
+// requests. This can be called at any time, including after [Client.Initialize],
+// to rotate short-lived credentials such as JWTs.
+func (c *Client) SetCredential(cred auth.Credential) {
+	c.cred = cred
+	if c.secretManager != nil {
+		c.secretManager.SetCredential(cred)
+	}
 }
 
 // WithLogger sets the logger for the client.
@@ -224,9 +242,9 @@ func (c *Client) Initialize(ctx context.Context, expectedManifest []byte) error 
 
 	c.secretManager = secretmanager.New(secretUpdater.UpdateSecret, apiKeyDropOnUnauthorized)
 
-	c.log.DebugContext(ctx, "Offering API key")
-	if err := c.secretManager.OfferAPIKey(ctx, c.apiKey); err != nil {
-		return fmt.Errorf("offering API key to secret manager: %w", err)
+	c.log.DebugContext(ctx, "Offering credential")
+	if err := c.secretManager.OfferCredential(ctx, c.cred); err != nil {
+		return fmt.Errorf("offering credential to secret manager: %w", err)
 	}
 	return nil
 }
@@ -300,7 +318,7 @@ func (c *Client) ListModels(ctx context.Context) ([]byte, error) {
 // returns the response. The caller is responsible for closing the
 // response body. An [ResponseError] is returned for non-2xx status codes.
 func (c *Client) doAPIRequest(req *http.Request) (*http.Response, error) {
-	req.Header.Set("Authorization", fmt.Sprintf("%s %s", auth.Bearer, c.apiKey))
+	c.cred.Apply(req.Header)
 	req.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
 	req.Header.Set(constants.PrivatemodeClientHeader, constants.PrivatemodeClientSDK)
 	req.Header.Set(constants.PrivatemodeSecretIDHeader, c.currentSecret.ID)
@@ -369,6 +387,6 @@ type attestedMeshCAAdapter struct {
 	expectedMf   []byte
 }
 
-func (a attestedMeshCAAdapter) GetMeshCA(ctx context.Context, apiKey string) (*x509.Certificate, error) {
-	return a.attestGetter.GetAttestedMeshCA(ctx, a.expectedMf, apiKey)
+func (a attestedMeshCAAdapter) GetMeshCA(ctx context.Context, cred auth.Credential) (*x509.Certificate, error) {
+	return a.attestGetter.GetAttestedMeshCA(ctx, a.expectedMf, cred)
 }

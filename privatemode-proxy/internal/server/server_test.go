@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
+	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -798,7 +799,7 @@ func (s *stubSecretManager) ForceUpdate(_ context.Context) error {
 	return nil
 }
 
-func (s *stubSecretManager) OfferAPIKey(context.Context, string) error {
+func (s *stubSecretManager) OfferCredential(context.Context, auth.Credential) error {
 	return nil
 }
 

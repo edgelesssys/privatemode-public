@@ -8,12 +8,15 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
 	"github.com/edgelesssys/continuum/internal/model"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
@@ -28,8 +31,8 @@ type Adapter struct {
 }
 
 // New creates a new InferenceAdapter for the OpenAI API.
-func New(workloadTasks []string, cipher inference.ResponseCipherCreator, ocspStatusFile string, forwarder inference.MutatingForwarder, reporter inference.UsageReporter, log *slog.Logger) (*Adapter, error) {
-	baseAdapter, err := inference.New(workloadTasks, cipher, ocspStatusFile, forwarder, reporter, log)
+func New(workloadTasks []string, secrets inference.SecretGetter, ocspStatusFile string, encForwarder encforward.Forwarder, reporter inference.UsageReporter, log *slog.Logger) (*Adapter, error) {
+	baseAdapter, err := inference.New(workloadTasks, secrets, ocspStatusFile, encForwarder, reporter, log)
 	if err != nil {
 		return nil, err
 	}
@@ -70,38 +73,65 @@ func (a *Adapter) HandlesCatchAll() bool {
 // forwardModelsRequest forwards a request to the models endpoint of vllm,
 // and augments the response with the task vllm is running with.
 func (a *Adapter) forwardModelsRequest(w http.ResponseWriter, r *http.Request) {
-	mutate := func(request string) (mutatedRequest string, err error) {
-		result := request
-		data := gjson.Get(request, "data")
+	mutate := func(body []byte) ([]byte, error) {
+		data := gjson.GetBytes(body, "data")
 		if !data.Exists() || !data.IsArray() {
-			return request, nil
+			return body, nil
 		}
 
 		var mutateErr error
-		data.ForEach(func(key, _ gjson.Result) bool {
+		data.ForEach(func(key, value gjson.Result) bool {
+			if !value.IsObject() {
+				return true
+			}
 			path := "data." + key.String() + ".tasks"
-			result, mutateErr = sjson.Set(result, path, a.WorkloadTasks)
+			body, mutateErr = sjson.SetBytes(body, path, a.WorkloadTasks)
 			return mutateErr == nil // continue if no error
 		})
-
-		return result, mutateErr
+		if mutateErr != nil {
+			return nil, fmt.Errorf("injecting tasks into model list: %w", mutateErr)
+		}
+		return body, nil
 	}
-	a.Forwarder.Forward(
+
+	a.EncForwarder.ForwardPlain(
 		w, r,
 		forwarder.NoRequestMutation,
-		forwarder.RawResponseMapper(mutate),
+		mapSuccessResponseBody(mutate),
 	)
 }
 
 func (a *Adapter) forwardSpecificModelRequest(w http.ResponseWriter, r *http.Request) {
-	mutate := func(request string) (mutatedRequest string, err error) {
-		return sjson.Set(request, "tasks", a.WorkloadTasks)
+	mutate := func(body []byte) ([]byte, error) {
+		body, err := sjson.SetBytes(body, "tasks", a.WorkloadTasks)
+		if err != nil {
+			return nil, fmt.Errorf("injecting tasks into model: %w", err)
+		}
+		return body, nil
 	}
-	a.Forwarder.Forward(
+
+	a.EncForwarder.ForwardPlain(
 		w, r,
 		forwarder.NoRequestMutation,
-		forwarder.RawResponseMapper(mutate),
+		mapSuccessResponseBody(mutate),
 	)
+}
+
+func mapSuccessResponseBody(fn func([]byte) ([]byte, error)) forwarder.ResponseMapper {
+	return func(resp *http.Response) (forwarder.Response, error) {
+		unaryResp, err := forwarder.ReadUnaryResponse(resp, constants.MaxUnaryResponseBodyBytes)
+		if err != nil {
+			return nil, fmt.Errorf("reading upstream response body: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return unaryResp, nil
+		}
+		unaryResp.Body, err = fn(unaryResp.Body)
+		if err != nil {
+			return nil, err
+		}
+		return unaryResp, nil
+	}
 }
 
 func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Request) {

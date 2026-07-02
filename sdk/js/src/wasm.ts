@@ -62,7 +62,8 @@ export async function initWasm(
 
 export async function initialize(
   manifest: string,
-  apiKey: string,
+  authType: string,
+  authValue: string,
   apiBaseURL: string,
   enableLogging: boolean,
 ): Promise<void> {
@@ -70,12 +71,19 @@ export async function initialize(
 
   const initializeWasm = (globalThis as Record<string, unknown>).initialize as (
     manifest: string,
-    apiKey: string,
+    authType: string,
+    authValue: string,
     apiBaseURL: string,
     enableLogging: boolean,
   ) => Promise<void>;
 
-  await initializeWasm(manifest, apiKey, apiBaseURL, enableLogging);
+  await initializeWasm(
+    manifest,
+    authType,
+    authValue,
+    apiBaseURL,
+    enableLogging,
+  );
 }
 
 export async function updateSecret(): Promise<void> {
@@ -162,7 +170,8 @@ export async function listModels(): Promise<string> {
 }
 
 export function initializeOffline(
-  apiKey: string,
+  authType: string,
+  authValue: string,
   apiBaseURL: string,
   enableLogging: boolean,
 ): void {
@@ -170,12 +179,24 @@ export function initializeOffline(
 
   const initializeOfflineWasm = (globalThis as Record<string, unknown>)
     .initializeOffline as (
-    apiKey: string,
+    authType: string,
+    authValue: string,
     apiBaseURL: string,
     enableLogging: boolean,
   ) => void;
 
-  initializeOfflineWasm(apiKey, apiBaseURL, enableLogging);
+  initializeOfflineWasm(authType, authValue, apiBaseURL, enableLogging);
+}
+
+export function setAuth(authType: string, authValue: string): void {
+  ensureInitialized();
+
+  const setAuthWasm = (globalThis as Record<string, unknown>).setAuth as (
+    authType: string,
+    authValue: string,
+  ) => void;
+
+  setAuthWasm(authType, authValue);
 }
 
 export function exportSecret(): string {

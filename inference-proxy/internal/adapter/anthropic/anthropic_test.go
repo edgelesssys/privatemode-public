@@ -1,7 +1,6 @@
 package anthropic
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -9,12 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/adaptertest"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -146,7 +144,7 @@ func TestForwardMessagesRequest(t *testing.T) {
 
 			log := slog.Default()
 			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
-			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, &stubUsageReporter{}, log)
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: fwd}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, anthropic.MessagesEndpoint, strings.NewReader(tc.clientRequest))
@@ -192,9 +190,9 @@ func TestRegisterRoutes(t *testing.T) {
 
 			adapter := &Adapter{
 				Adapter: &inference.Adapter{
-					Cipher:        &stubCipher{},
-					Forwarder:     &stubForwarder{},
-					UsageReporter: &stubUsageReporter{},
+					Secrets:       &adaptertest.Secrets{},
+					EncForwarder:  adaptertest.EncForwarder{},
+					UsageReporter: &adaptertest.UsageReporter{},
 					WorkloadTasks: []string{constants.WorkloadTaskGenerate},
 					Log:           slog.Default(),
 					OCSPStatus:    []ocsp.StatusInfo{{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}},
@@ -215,35 +213,6 @@ func TestRegisterRoutes(t *testing.T) {
 			assert.Equal(tc.expectedCode, responseRecorder.Code)
 		})
 	}
-}
-
-type stubCipher struct {
-	secretMap map[string][]byte
-}
-
-func (c *stubCipher) Secret(_ context.Context, id string) ([]byte, error) {
-	return c.secretMap[id], nil
-}
-
-func (c *stubCipher) NewResponseCipher() cipher.ResponseCipher {
-	return c
-}
-
-func (c *stubCipher) DecryptRequest(context.Context) func(encryptedData string) (res string, err error) {
-	return func(encryptedData string) (res string, err error) {
-		return encryptedData, nil
-	}
-}
-
-func (c *stubCipher) EncryptResponse(context.Context) func(plainData string) (string, error) {
-	return func(plainData string) (res string, err error) {
-		return plainData, nil
-	}
-}
-
-type stubForwarder struct{}
-
-func (f *stubForwarder) Forward(http.ResponseWriter, *http.Request, forwarder.RequestMutator, forwarder.ResponseMapper, ...forwarder.Opts) {
 }
 
 func TestUsageExtraction(t *testing.T) {
@@ -329,9 +298,9 @@ func TestUsageExtraction(t *testing.T) {
 			ocspFile := filepath.Join(t.TempDir(), "ocsp.json")
 			require.NoError(t, os.WriteFile(ocspFile, ocspStatus, 0o644))
 
-			reporter := &stubUsageReporter{}
+			reporter := &adaptertest.UsageReporter{}
 			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default())
-			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &stubCipher{}, ocspFile, fwd, reporter, slog.Default())
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: fwd}, reporter, slog.Default())
 			require.NoError(t, err)
 
 			ctx := requestid.WithContext(t.Context(), "test-request-id")
@@ -344,30 +313,9 @@ func TestUsageExtraction(t *testing.T) {
 			assert.Equal(t, http.StatusOK, responseRecorder.Code)
 
 			assert.Eventually(t, func() bool {
-				report, ok := reporter.latestReport()
+				report, ok := reporter.LatestReport()
 				return ok && report.Stats == tc.wantUsage
 			}, time.Second, 10*time.Millisecond)
 		})
 	}
-}
-
-type stubUsageReporter struct {
-	mu     sync.Mutex
-	latest *usagecollector.SubmitUsageReportRequest
-}
-
-func (r *stubUsageReporter) Submit(_ context.Context, req usagecollector.SubmitUsageReportRequest) error {
-	r.mu.Lock()
-	r.latest = &req
-	r.mu.Unlock()
-	return nil
-}
-
-func (r *stubUsageReporter) latestReport() (usagecollector.SubmitUsageReportRequest, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.latest == nil {
-		return usagecollector.SubmitUsageReportRequest{}, false
-	}
-	return *r.latest, true
 }

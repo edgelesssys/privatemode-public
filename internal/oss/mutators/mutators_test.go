@@ -5,12 +5,22 @@ package mutators
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestGenerateShardKey(t *testing.T) {
@@ -78,6 +88,224 @@ func TestGenerateShardKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+// imageDataURL builds a base64 data URL with rawBytes of random image data.
+func imageDataURL(t *testing.T, rawBytes int) string {
+	t.Helper()
+	raw := make([]byte, rawBytes)
+	_, err := rand.Read(raw)
+	require.NoError(t, err)
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(raw)
+}
+
+// part is one content part. Its fields cover every layout the injector must handle across the
+// OpenAI and Anthropic formats; building the body with json.Marshal (see makeBody) guarantees
+// valid escaping for any input. omitempty keeps each part minimal, and the pointer Text
+// distinguishes an absent text field from a present-but-empty one (the empty-value test).
+type part struct {
+	Type     string         `json:"type"`
+	Text     *string        `json:"text,omitempty"`      // text part
+	ImageURL any            `json:"image_url,omitempty"` // OpenAI: {"url":...} object or a bare string
+	Source   map[string]any `json:"source,omitempty"`    // Anthropic: {"type":...,"data"|"url":...}
+	Content  []part         `json:"content,omitempty"`   // Anthropic tool_result nesting
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// makeBody marshals a chat-completions body with one user message per parts slice and an
+// optional cache salt. json.Marshal handles all escaping, so callers pass raw values.
+func makeBody(t *testing.T, cacheSalt string, messages ...[]part) string {
+	t.Helper()
+	type message struct {
+		Role    string `json:"role"`
+		Content []part `json:"content"`
+	}
+	msgs := make([]message, 0, len(messages))
+	for _, parts := range messages {
+		msgs = append(msgs, message{Role: "user", Content: parts})
+	}
+	b, err := json.Marshal(struct {
+		CacheSalt string    `json:"cache_salt,omitempty"`
+		Messages  []message `json:"messages"`
+	}{CacheSalt: cacheSalt, Messages: msgs})
+	require.NoError(t, err)
+	return string(b)
+}
+
+// chatBodyWithImage builds a /chat/completions body with a text part and an image part.
+func chatBodyWithImage(t *testing.T, cacheSalt, text, imageURL string) string {
+	return makeBody(t, cacheSalt, []part{
+		{Type: "text", Text: ptr(text)},
+		{Type: "image_url", ImageURL: map[string]any{"url": imageURL}},
+	})
+}
+
+// runInjector runs the ShardKeyInjector mutator (with an empty default cache salt) on a
+// request with the given body.
+func runInjector(t *testing.T, body string) *http.Request {
+	t.Helper()
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	require.NoError(t, ShardKeyInjector("")(r))
+	return r
+}
+
+// wantTokens returns the token count for a body whose only shard content is its messages
+// array, with each image swapped for a one-embedding placeholder. The placeholder keeps the
+// surrounding quotes, so messages length changes by placeholderLen + 2 - len(rawToken) per
+// image, where rawToken is the JSON-encoded value (matching what replaceImages substitutes,
+// including any escaping). Result is divided into tokens.
+func wantTokens(t *testing.T, body string, images ...string) int {
+	t.Helper()
+	const placeholderLen = constants.ImageEmbeddingTokens * constants.ShardKeyCharsPerToken
+	contentLen := len(gjson.Get(body, "messages").String())
+	for _, img := range images {
+		raw, err := json.Marshal(img)
+		require.NoError(t, err)
+		contentLen += placeholderLen + 2 - len(raw)
+	}
+	return contentLen / constants.ShardKeyCharsPerToken
+}
+
+func TestShardKeyInjectorImages(t *testing.T) {
+	// 4 MiB of raw data -> >5 MiB of base64. Counted as raw bytes this would be ~1.4M tokens
+	// and exceed the 1M shard key limit; counted by embedding size it is one embedding.
+	largeImg := imageDataURL(t, 4*1024*1024)
+	require.Greater(t, len(largeImg), 4*1024*1024)
+
+	// Three random test images.
+	img1, img2, img3 := imageDataURL(t, 2048), imageDataURL(t, 2048), imageDataURL(t, 2048)
+
+	// Adversarial URL with chars that JSON escapes (quote, backslash, newline): matching on the
+	// decoded value would miss it; matching on the raw token bounds it. json.Marshal makes the
+	// escaping exact.
+	escapedImageURL := "data:image/png;base64," + strings.Repeat("A", 5*1024*1024) + "\"\\\nABC"
+
+	testCases := map[string]struct {
+		body         string
+		images       []string // images embedded in body, used to derive the expected token count
+		wantShardKey bool
+	}{
+		"large image not rejected": {
+			body:   chatBodyWithImage(t, "salt", "describe this", largeImg),
+			images: []string{largeImg}, wantShardKey: true,
+		},
+		"multiple images per message and across messages each count as an embedding": {
+			body: makeBody(
+				t, "salt",
+				[]part{
+					{Type: "image_url", ImageURL: map[string]any{"url": img1}},
+					{Type: "image_url", ImageURL: map[string]any{"url": img2}},
+				},
+				[]part{{Type: "image_url", ImageURL: map[string]any{"url": img3}}},
+			),
+			images: []string{img1, img2, img3}, wantShardKey: true,
+		},
+		"the same image twice counts as two embeddings": {
+			// The seen-map only avoids a redundant replace pass; ReplaceAll already swaps both
+			// occurrences, so a repeated image must still count as two embeddings.
+			body: makeBody(t, "salt", []part{
+				{Type: "image_url", ImageURL: map[string]any{"url": img1}},
+				{Type: "image_url", ImageURL: map[string]any{"url": img1}},
+			}),
+			images: []string{img1, img1}, wantShardKey: true,
+		},
+		"content length is set without a shard key": {
+			// No cache_salt and an empty default salt -> no shard key, but the token count is set.
+			body:   chatBodyWithImage(t, "", "hi", img1),
+			images: []string{img1},
+		},
+		"openai string-form image_url counted by embedding size": {
+			body: makeBody(t, "salt", []part{
+				{Type: "image_url", ImageURL: img1},
+			}),
+			images: []string{img1}, wantShardKey: true,
+		},
+		"anthropic base64 image counted by embedding size": {
+			body: makeBody(t, "salt", []part{
+				{Type: "image", Source: map[string]any{"type": "base64", "data": img1}},
+			}),
+			images: []string{img1}, wantShardKey: true,
+		},
+		"anthropic url image counted by embedding size": {
+			body: makeBody(t, "salt", []part{
+				{Type: "image", Source: map[string]any{"type": "url", "url": img1}},
+			}),
+			images: []string{img1}, wantShardKey: true,
+		},
+		"anthropic tool-result nested image counted by embedding size": {
+			// Tool results nest the image one level deeper (content[].content[].source.data).
+			body: makeBody(t, "salt", []part{
+				{Type: "tool_result", Content: []part{
+					{Type: "image", Source: map[string]any{"type": "base64", "data": img1}},
+				}},
+			}),
+			images: []string{img1}, wantShardKey: true,
+		},
+		"empty image value is skipped, not over-matched": {
+			// res.Raw is `""`; replacing it would rewrite every empty string (here the text part).
+			body: makeBody(t, "salt", []part{
+				{Type: "text", Text: ptr("")},
+				{Type: "image_url", ImageURL: map[string]any{"url": ""}},
+			}),
+			wantShardKey: true,
+		},
+		"image with JSON-escaped characters is still bounded": {
+			body: makeBody(t, "salt", []part{
+				{Type: "image_url", ImageURL: map[string]any{"url": escapedImageURL}},
+			}),
+			images: []string{escapedImageURL}, wantShardKey: true,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+
+			r := runInjector(t, tc.body)
+
+			shardKey := r.Header.Get(constants.PrivatemodeShardKeyHeader)
+			if tc.wantShardKey {
+				// A non-empty shard key also confirms generation did not overflow the 1M limit.
+				assert.NotEmpty(shardKey)
+			} else {
+				assert.Empty(shardKey)
+			}
+
+			tokens, err := strconv.Atoi(r.Header.Get(constants.PrivatemodeContentLengthTokensHeader))
+			require.NoError(err)
+			assert.Equal(wantTokens(t, tc.body, tc.images...), tokens)
+		})
+	}
+}
+
+func TestShardKeyInjectorImageContent(t *testing.T) {
+	assert := assert.New(t)
+
+	bodyA := chatBodyWithImage(t, "salt", "hello", imageDataURL(t, 1024))
+	bodyB := chatBodyWithImage(t, "salt", "hello", imageDataURL(t, 1024))
+
+	keyA := runInjector(t, bodyA).Header.Get(constants.PrivatemodeShardKeyHeader)
+	keyB := runInjector(t, bodyB).Header.Get(constants.PrivatemodeShardKeyHeader)
+	keyARepeat := runInjector(t, bodyA).Header.Get(constants.PrivatemodeShardKeyHeader)
+
+	assert.NotEmpty(keyA)
+	assert.Equal(keyA, keyARepeat, "same content must yield the same shard key")
+	assert.NotEqual(keyA, keyB, "different images must yield different shard keys")
+}
+
+func TestImagePlaceholder(t *testing.T) {
+	assert := assert.New(t)
+
+	p := imagePlaceholder("some-image-data")
+	// The placeholder makes the image count as exactly one embedding worth of tokens.
+	assert.Len(p, constants.ImageEmbeddingTokens*constants.ShardKeyCharsPerToken)
+	assert.Equal(constants.ImageEmbeddingTokens, len(p)/constants.ShardKeyCharsPerToken)
+	// It is the sha256 hex hash repeated, so it starts with that hash.
+	assert.True(strings.HasPrefix(p, fmt.Sprintf("%x", sha256.Sum256([]byte("some-image-data")))))
+	// Different data yields a different placeholder.
+	assert.NotEqual(p, imagePlaceholder("other-image-data"))
 }
 
 func BenchmarkGenerateShardKey_1M(b *testing.B) {
