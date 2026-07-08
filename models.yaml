@@ -26,17 +26,6 @@ data:
       "veritysetup_version": "2.8.4",
       "file_hash_sha256": "3120af8ed8a63429b96bb35abf74e0bffa280849ab4e01e312d85f889191262f"
     }
-  leon-se-gemma-3-27b-it-fp8-dynamic: |-
-    {
-      "model_source": "https://huggingface.co/leon-se/gemma-3-27b-it-FP8-Dynamic",
-      "commit_hash": "2e4fc5ed3246ba970ac6692918b616163bd23fb7",
-      "excluded_files": "",
-      "root_hash": "e3fff8605ef065e2584ac54e855e5425fa35ede40d62927d73826ca7aa6325bc",
-      "hash_offset": "29313785856",
-      "erofs_version": "1.9",
-      "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "81b1a44226e31434d3a2d23a8b676fc47211bc208b474a6363d0017db931b7b1"
-    }
   mistralai-voxtral-mini-3b-2507: |-
     {
       "model_source": "https://huggingface.co/mistralai/Voxtral-Mini-3B-2507",
@@ -69,28 +58,6 @@ data:
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
       "file_hash_sha256": "ac1b25abaa8c4dbdb5ba1065bbcbff1eedba9a24632277f1215a87d9467a35d3"
-    }
-  stelterlab-qwen3-coder-30b-a3b-instruct-awq: |-
-    {
-      "model_source": "https://huggingface.co/stelterlab/Qwen3-Coder-30B-A3B-Instruct-AWQ",
-      "commit_hash": "c28643ed0902d6cefd8f49068fec9623d153e54e",
-      "excluded_files": "",
-      "root_hash": "4372027feda20edb608174f6a7eb66259c83c61dce814f9e3f0d54de88deb235",
-      "hash_offset": "16714424320",
-      "erofs_version": "1.9",
-      "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "8d01af78b5df6b251ba6a091917ee9dc1ecbd8d15412abd2a681a9bfdf950384"
-    }
-  nvidia-kimi-k2-5-nvfp4: |-
-    {
-      "model_source": "https://huggingface.co/nvidia/Kimi-K2.5-NVFP4",
-      "commit_hash": "c0285e649c34d4386b01e38abca642c06cbe014e",
-      "excluded_files": "",
-      "root_hash": "ed52d8702466cf59b43f5b28f3c7223d4abf16a884e8fe83b91a921258d3c6b4",
-      "hash_offset": "590851039232",
-      "erofs_version": "1.9",
-      "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "8dd2fd2371cb7676a771c0b24802e95126b15aa480693afb695d200950eedb4a"
     }
   nvidia-gemma-4-31b-it-nvfp4: |-
     {

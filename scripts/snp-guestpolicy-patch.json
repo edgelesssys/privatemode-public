@@ -1,0 +1,14 @@
+[
+  [
+    {
+      "op": "test",
+      "path": "/Platform",
+      "value": "Metal-QEMU-SNP-GPU"
+    },
+    {
+      "op": "replace",
+      "path": "/GuestPolicy/PageSwapDisable",
+      "value": true
+    }
+  ]
+]
