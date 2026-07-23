@@ -92,3 +92,14 @@ data:
       "veritysetup_version": "2.8.6",
       "file_hash_sha256": "f31d74aaebccea1fa99d88fbad598e1c11901fc75e8e8a566de904f4b8088b40"
     }
+  deepseek-ai-deepseek-ocr-2: |-
+    {
+      "model_source": "https://huggingface.co/deepseek-ai/DeepSeek-OCR-2",
+      "commit_hash": "aaa02f3811945a91062062994c5c4a3f4c0af2b0",
+      "excluded_files": "",
+      "root_hash": "173c5941da5e2d0b625c479e228151a2129bcc5af2bfc89e03ae475c1d047f83",
+      "hash_offset": "6789312512",
+      "erofs_version": "1.9.2",
+      "veritysetup_version": "2.8.6",
+      "file_hash_sha256": "290626832a457426b221b4405d14c8a729ea339abed85b700df21266e524446c"
+    }

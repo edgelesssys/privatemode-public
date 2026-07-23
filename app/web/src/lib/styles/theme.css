@@ -2,7 +2,8 @@
     /* Text */
     --color-text-primary: #011C22;
     --color-text-secondary: #6b7280;
-    --color-text-tertiary: #9ca3af;
+    /* Must keep >= 4.5:1 contrast (WCAG AA) on all light surfaces, incl. --color-bg-surface-tertiary */
+    --color-text-tertiary: #667085;
     --color-text-heading: #1a1a1a;
     --color-text-muted: #666;
     --color-text-inverse: #ffffff;
@@ -70,7 +71,8 @@
     /* Text */
     --color-text-primary: #e4e4e7;
     --color-text-secondary: #a1a1aa;
-    --color-text-tertiary: #71717a;
+    /* Must keep >= 4.5:1 contrast (WCAG AA) on all dark surfaces, incl. --color-bg-surface-tertiary */
+    --color-text-tertiary: #9898a1;
     --color-text-heading: #f4f4f5;
     --color-text-muted: #a1a1aa;
     --color-text-inverse: #18181b;
@@ -130,6 +132,6 @@
     --color-dropdown-text: #f4f4f5;
     --color-dropdown-hover: #52525b;
     --color-dropdown-border: #52525b;
-    --color-dropdown-muted: #a1a1aa;
+    --color-dropdown-muted: #b4b4bc;
     --color-dropdown-accent: #22b8cf;
 }

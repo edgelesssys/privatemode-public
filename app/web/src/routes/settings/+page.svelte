@@ -2,6 +2,7 @@
   import { chatStore } from '$lib/chatStore';
   import { ArrowLeft, Trash2, Monitor, Sun, Moon } from 'lucide-svelte';
   import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import { themePreference } from '$lib/themeStore';
   import type { ThemePreference } from '$lib/themeStore';
   import {
@@ -60,11 +61,11 @@
   function handleDeleteAllChats() {
     chatStore.clear();
     showDeleteConfirm = false;
-    goto('/');
+    goto(resolve('/'));
   }
 
   function handleBack() {
-    goto('/');
+    goto(resolve('/'));
   }
 </script>
 
@@ -85,10 +86,11 @@
       <h2>Appearance</h2>
       <p class="setting-description">Choose your preferred color theme</p>
       <div class="theme-picker">
-        {#each themeOptions as option}
+        {#each themeOptions as option (option.value)}
           <button
             class="theme-option"
             class:active={currentTheme === option.value}
+            aria-pressed={currentTheme === option.value}
             onclick={() => setTheme(option.value)}
           >
             <option.icon size={18} />
@@ -115,10 +117,11 @@
         </p>
       {:else}
         <div class="transcription-model-picker">
-          {#each availableTranscriptionModels as model}
+          {#each availableTranscriptionModels as model (model.id)}
             <button
               class="transcription-model-option"
               class:active={currentTranscriptionModel === model.id}
+              aria-pressed={currentTranscriptionModel === model.id}
               onclick={() => setTranscriptionModel(model.id)}
             >
               <span class="model-label"

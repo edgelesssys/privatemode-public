@@ -70,6 +70,8 @@
 
     node.addEventListener('mouseenter', handleMouseEnter);
     node.addEventListener('mouseleave', handleMouseLeave);
+    node.addEventListener('focusin', handleMouseEnter);
+    node.addEventListener('focusout', handleMouseLeave);
 
     return {
       update(newParams: { text: string; delay: number }) {
@@ -90,6 +92,8 @@
         hideTooltip();
         node.removeEventListener('mouseenter', handleMouseEnter);
         node.removeEventListener('mouseleave', handleMouseLeave);
+        node.removeEventListener('focusin', handleMouseEnter);
+        node.removeEventListener('focusout', handleMouseLeave);
       },
     };
   }

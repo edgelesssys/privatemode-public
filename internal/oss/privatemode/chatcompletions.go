@@ -31,12 +31,28 @@ type ChatCompletionsStream struct {
 	reader *sse.Reader
 	body   io.ReadCloser
 	done   bool
+	// Header contains the decrypted response headers.
+	Header http.Header
 }
 
 // ChatCompletions sends an encrypted chat completions request and
 // returns the decrypted response.
 func (c *Client) ChatCompletions(ctx context.Context, body []byte) ([]byte, error) {
-	req, err := c.prepareChatCompletionsRequest(ctx, body)
+	resp, err := c.ChatCompletionsWithOptions(ctx, body, RequestOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
+}
+
+// ChatCompletionsWithOptions sends an encrypted chat completions request and
+// preserves the response headers.
+func (c *Client) ChatCompletionsWithOptions(
+	ctx context.Context,
+	body []byte,
+	opts RequestOptions,
+) (*Response, error) {
+	req, err := c.prepareChatCompletionsRequest(ctx, body, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +68,7 @@ func (c *Client) ChatCompletions(ctx context.Context, body []byte) ([]byte, erro
 		return nil, fmt.Errorf("reading decrypted response: %w", err)
 	}
 
-	return decrypted, nil
+	return &Response{Header: resp.Header.Clone(), Body: decrypted}, nil
 }
 
 // StreamChatCompletions sends an encrypted chat completions request
@@ -62,7 +78,17 @@ func (c *Client) ChatCompletions(ctx context.Context, body []byte) ([]byte, erro
 // The request body should include `"stream": true“. The caller must
 // close the returned stream when done.
 func (c *Client) StreamChatCompletions(ctx context.Context, body []byte) (*ChatCompletionsStream, error) {
-	req, err := c.prepareChatCompletionsRequest(ctx, body)
+	return c.StreamChatCompletionsWithOptions(ctx, body, RequestOptions{})
+}
+
+// StreamChatCompletionsWithOptions sends an encrypted streaming chat
+// completions request and preserves the response headers.
+func (c *Client) StreamChatCompletionsWithOptions(
+	ctx context.Context,
+	body []byte,
+	opts RequestOptions,
+) (*ChatCompletionsStream, error) {
+	req, err := c.prepareChatCompletionsRequest(ctx, body, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -80,16 +106,22 @@ func (c *Client) StreamChatCompletions(ctx context.Context, body []byte) (*ChatC
 	return &ChatCompletionsStream{
 		reader: sse.NewReader(resp.Body, constants.MaxSSELineBytes),
 		body:   resp.Body,
+		Header: resp.Header.Clone(),
 	}, nil
 }
 
 // prepareChatCompletionsRequest builds the plain HTTP request and applies
 // the relevant request mutators.
-func (c *Client) prepareChatCompletionsRequest(ctx context.Context, body []byte) (*http.Request, error) {
+func (c *Client) prepareChatCompletionsRequest(
+	ctx context.Context,
+	body []byte,
+	opts RequestOptions,
+) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
+	req.Header = cloneRequestHeader(opts.Header)
 	req.Header.Set("Content-Type", "application/json")
 
 	chatModelExtractor := func(req *http.Request) (string, error) {

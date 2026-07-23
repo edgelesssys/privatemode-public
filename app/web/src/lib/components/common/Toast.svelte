@@ -13,10 +13,15 @@
       <div
         class="toast"
         class:error={toast.type === 'error'}
+        role={toast.type === 'error' ? 'alert' : 'status'}
       >
-        <span class="toast-message"
-          >{#if toast.dangerouslyRenderHTML}{@html toast.message}{:else}{toast.message}{/if}</span
-        >
+        <span class="toast-message">
+          {toast.message}
+          {#if toast.link}
+            <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- callers pass resolve()d or external URLs -->
+            <a href={toast.link.href}>{toast.link.label}</a>
+          {/if}
+        </span>
         <button
           class="toast-close"
           type="button"

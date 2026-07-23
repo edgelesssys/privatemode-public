@@ -1,10 +1,16 @@
 import './wasm_exec.js';
+import { PrivatemodeAPIError } from './errors.js';
 
 // Go is provided by wasm_exec.js
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const Go: any;
 
 let initialized = false;
+
+export interface WasmAPIResponse {
+  body: string;
+  headers: Headers;
+}
 
 export async function initWasm(
   wasmSource: BufferSource | Response | Promise<Response>,
@@ -104,19 +110,31 @@ export async function fetchManifest(): Promise<string> {
   return fetchManifestWasm();
 }
 
-export async function chatCompletions(body: string): Promise<string> {
+export async function chatCompletions(
+  body: string,
+  headers?: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<WasmAPIResponse> {
   ensureInitialized();
 
   const chatCompletionsWasm = (globalThis as Record<string, unknown>)
-    .chatCompletions as (body: string) => Promise<string>;
+    .chatCompletions as (
+    body: string,
+    headers?: Record<string, string>,
+    signal?: AbortSignal,
+  ) => Promise<unknown>;
 
-  return chatCompletionsWasm(body);
+  return normalizeWasmResponse(
+    await callWasm(() => chatCompletionsWasm(body, headers, signal)),
+  );
 }
 
 export async function streamChatCompletions(
   body: string,
   onChunk: (chunk: string) => void,
   signal?: AbortSignal,
+  onHeaders?: (headers: Headers) => void,
+  headers?: Record<string, string>,
 ): Promise<void> {
   ensureInitialized();
 
@@ -125,9 +143,21 @@ export async function streamChatCompletions(
     body: string,
     onChunk: (chunk: string) => void,
     signal?: AbortSignal,
+    onHeaders?: (headers: Record<string, string>) => void,
+    headers?: Record<string, string>,
   ) => Promise<void>;
 
-  return streamChatCompletionsWasm(body, onChunk, signal);
+  return callWasm(() =>
+    streamChatCompletionsWasm(
+      body,
+      onChunk,
+      signal,
+      onHeaders
+        ? (responseHeaders) => onHeaders(new Headers(responseHeaders))
+        : undefined,
+      headers,
+    ),
+  );
 }
 
 export async function unstructured(
@@ -142,31 +172,46 @@ export async function unstructured(
     optionsJSON: string,
   ) => Promise<string>;
 
-  return unstructuredWasm(files, optionsJSON);
+  return callWasm(() => unstructuredWasm(files, optionsJSON));
 }
 
 export async function transcribeAudio(
   file: { name: string; content: Uint8Array; contentType?: string },
   optionsJSON: string,
-): Promise<string> {
+  headers?: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<WasmAPIResponse> {
   ensureInitialized();
 
   const transcribeAudioWasm = (globalThis as Record<string, unknown>)
     .transcribeAudio as (
     file: { name: string; content: Uint8Array; contentType?: string },
     optionsJSON: string,
-  ) => Promise<string>;
+    headers?: Record<string, string>,
+    signal?: AbortSignal,
+  ) => Promise<unknown>;
 
-  return transcribeAudioWasm(file, optionsJSON);
+  return normalizeWasmResponse(
+    await callWasm(() =>
+      transcribeAudioWasm(file, optionsJSON, headers, signal),
+    ),
+  );
 }
 
-export async function listModels(): Promise<string> {
+export async function listModels(
+  headers?: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<WasmAPIResponse> {
   ensureInitialized();
 
-  const listModelsWasm = (globalThis as Record<string, unknown>)
-    .listModels as () => Promise<string>;
+  const listModelsWasm = (globalThis as Record<string, unknown>).listModels as (
+    headers?: Record<string, string>,
+    signal?: AbortSignal,
+  ) => Promise<unknown>;
 
-  return listModelsWasm();
+  return normalizeWasmResponse(
+    await callWasm(() => listModelsWasm(headers, signal)),
+  );
 }
 
 export function initializeOffline(
@@ -243,4 +288,58 @@ export function errNoSecretForID(): string {
 function ensureInitialized() {
   if (!initialized)
     throw new Error('WASM not initialized. Call initWasm() first.');
+}
+
+async function callWasm<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw normalizeWasmError(error);
+  }
+}
+
+function normalizeWasmError(error: unknown): unknown {
+  if (!(error instanceof Error) || error.name !== 'PrivatemodeAPIError') {
+    return error;
+  }
+
+  const raw = error as Error & {
+    body?: unknown;
+    headers?: unknown;
+    status?: unknown;
+  };
+  if (typeof raw.status !== 'number' || typeof raw.body !== 'string') {
+    return error;
+  }
+
+  let body: unknown = raw.body;
+  try {
+    body = JSON.parse(raw.body) as unknown;
+  } catch {
+    // Preserve non-JSON response bodies as text.
+  }
+  const headers =
+    raw.headers && typeof raw.headers === 'object'
+      ? new Headers(raw.headers as HeadersInit)
+      : undefined;
+  return new PrivatemodeAPIError(error.message, raw.status, body, headers, {
+    cause: error,
+  });
+}
+
+function normalizeWasmResponse(value: unknown): WasmAPIResponse {
+  if (!value || typeof value !== 'object') {
+    throw new TypeError('WASM API response must be an object.');
+  }
+  const raw = value as { body?: unknown; headers?: unknown };
+  if (typeof raw.body !== 'string') {
+    throw new TypeError('WASM API response body must be a string.');
+  }
+  if (!raw.headers || typeof raw.headers !== 'object') {
+    throw new TypeError('WASM API response headers must be an object.');
+  }
+  return {
+    body: raw.body,
+    headers: new Headers(raw.headers as HeadersInit),
+  };
 }

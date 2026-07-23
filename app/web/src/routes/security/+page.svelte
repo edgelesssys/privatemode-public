@@ -9,6 +9,7 @@
     Cpu,
   } from 'lucide-svelte';
   import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import { privatemodeClient } from '$lib/clientStore';
 
   let manifestHash = $state('');
@@ -50,7 +51,7 @@
   });
 
   function handleBack() {
-    goto('/');
+    goto(resolve('/'));
   }
 </script>
 
@@ -82,12 +83,18 @@
     </section>
 
     <section class="security-section verified-section">
-      <div class="check-badge">
-        <CircleCheck
-          size={20}
-          color="#22c55e"
-        />
-      </div>
+      {#if manifestHash}
+        <div
+          class="check-badge"
+          role="img"
+          aria-label="Verified"
+        >
+          <CircleCheck
+            size={20}
+            color="var(--color-accent-green)"
+          />
+        </div>
+      {/if}
       <div class="section-header">
         <BadgeCheck size={24} />
         <h2>Remote attestation</h2>
@@ -112,17 +119,28 @@
           Learn how to reproduce this hash
         </a>
       {:else}
-        <p class="data-loading">Loading...</p>
+        <p
+          class="data-loading"
+          role="status"
+        >
+          Loading...
+        </p>
       {/if}
     </section>
 
     <section class="security-section verified-section">
-      <div class="check-badge">
-        <CircleCheck
-          size={20}
-          color="#22c55e"
-        />
-      </div>
+      {#if trustedMeasurement}
+        <div
+          class="check-badge"
+          role="img"
+          aria-label="Verified"
+        >
+          <CircleCheck
+            size={20}
+            color="var(--color-accent-green)"
+          />
+        </div>
+      {/if}
       <div class="section-header">
         <Hammer size={24} />
         <h2>Reproducible software</h2>
@@ -147,17 +165,28 @@
           Learn how to reproduce this hash
         </a>
       {:else}
-        <p class="data-loading">Loading...</p>
+        <p
+          class="data-loading"
+          role="status"
+        >
+          Loading...
+        </p>
       {/if}
     </section>
 
     <section class="security-section verified-section">
-      <div class="check-badge">
-        <CircleCheck
-          size={20}
-          color="#22c55e"
-        />
-      </div>
+      {#if minimumTCB}
+        <div
+          class="check-badge"
+          role="img"
+          aria-label="Verified"
+        >
+          <CircleCheck
+            size={20}
+            color="var(--color-accent-green)"
+          />
+        </div>
+      {/if}
       <div class="section-header">
         <Cpu size={24} />
         <h2>Hardware-based security</h2>
@@ -194,7 +223,12 @@
           </div>
         </div>
       {:else}
-        <p class="data-loading">Loading...</p>
+        <p
+          class="data-loading"
+          role="status"
+        >
+          Loading...
+        </p>
       {/if}
     </section>
 

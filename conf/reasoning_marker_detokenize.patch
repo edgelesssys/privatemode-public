@@ -1,0 +1,40 @@
+diff --git a/vllm/tokenizers/detokenizer_utils.py b/vllm/tokenizers/detokenizer_utils.py
+index 8e73d5dc5..64e638e7d 100644
+--- a/vllm/tokenizers/detokenizer_utils.py
++++ b/vllm/tokenizers/detokenizer_utils.py
+@@ -4,6 +4,10 @@
+ 
+ from vllm.tokenizers import TokenizerLike
+ 
++# Reasoning markers after which the slow detokenizer must NOT insert a
++# join-space (see _convert_tokens_to_string_with_added_encoders).
++_REASONING_MARKERS_NO_TRAILING_SPACE = frozenset({"<think>", "</think>"})
++
+ 
+ def _replace_none_with_empty(tokens: list[str | None]):
+     for i, token in enumerate(tokens):
+@@ -46,9 +50,21 @@ def _convert_tokens_to_string_with_added_encoders(
+             current_sub_text.append(token)
+     if current_sub_text:
+         sub_texts.append(convert_tokens_to_string(current_sub_text))
+-    if spaces_between_special_tokens:
+-        return " ".join(sub_texts)
+-    return "".join(sub_texts)
++    if not spaces_between_special_tokens:
++        return "".join(sub_texts)
++    # Join with a single space, EXCEPT immediately after a reasoning marker.
++    # Byte-level BPE tokenizers (e.g. kimi's tiktoken) already encode leading
++    # spaces in their word tokens, so the join-space after <think>/</think> is
++    # a spurious leading space on the reasoning/content opener. Fed back through
++    # the chat template and re-tokenized every agentic turn, it ratchets the
++    # opener up to the huge whitespace-run tokens; suppressing it only for these
++    # markers leaves all other boundaries (tool-call section, etc.) unchanged.
++    parts: list[str] = []
++    for i, sub_text in enumerate(sub_texts):
++        if i > 0 and sub_texts[i - 1] not in _REASONING_MARKERS_NO_TRAILING_SPACE:
++            parts.append(" ")
++        parts.append(sub_text)
++    return "".join(parts)
+ 
+ 
+ # 5 is an arbitrary value that should work for all

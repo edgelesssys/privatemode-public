@@ -33,12 +33,19 @@ export type AuthCredential =
  */
 export type AuthProvider = () => AuthCredential | Promise<AuthCredential>;
 
-/** Options for configuring {@link PrivatemodeAI}. */
-export interface PrivatemodeAIOptions {
+/** Options for configuring {@link PrivatemodeCore}. */
+export interface PrivatemodeCoreOptions {
+  /**
+   * Privatemode API key to authenticate with. Shorthand for an {@link auth}
+   * provider that always returns this key. Mutually exclusive with `auth`.
+   */
+  apiKey?: string;
+
   /**
    * Authentication provider, invoked before every request to obtain the
-   * credential to use. Use this to authenticate with an API key, a Clerk JWT,
-   * or anonymously, or to rotate short-lived credentials.
+   * credential to use. Use this to authenticate with a Clerk JWT or
+   * anonymously, or to rotate short-lived credentials. Mutually exclusive
+   * with {@link apiKey}.
    */
   auth?: AuthProvider;
 
@@ -116,10 +123,25 @@ export interface VerifyResult {
   manifest: Manifest;
 }
 
-/**
- * Secure, OpenAI-compatible client for Privatemode.
- */
-export class PrivatemodeAI {
+/** @internal Options applied to a low-level Privatemode API request. */
+export interface PrivatemodeRequestOptions {
+  headers?: HeadersInit;
+  signal?: AbortSignal;
+}
+
+/** @internal A successful low-level Privatemode API response. */
+export interface PrivatemodeResponse {
+  body: unknown;
+  headers: Headers;
+}
+
+/** @internal Options applied to a low-level streaming request. */
+export interface PrivatemodeStreamOptions extends PrivatemodeRequestOptions {
+  onResponseHeaders?: (headers: Headers) => void;
+}
+
+/** @internal Low-level implementation used by the OpenAI transport. */
+export class PrivatemodeCore {
   private authProvider: AuthProvider;
   private apiBaseURL: string;
   private isBrowser: boolean;
@@ -131,8 +153,9 @@ export class PrivatemodeAI {
   private onSecretUpdate?: (secret: ExportedSecret) => void;
   private verified = false;
   private initialized = false;
+  private hasSecret = false;
 
-  constructor(options: PrivatemodeAIOptions = {}) {
+  constructor(options: PrivatemodeCoreOptions = {}) {
     this.isBrowser =
       typeof window !== 'undefined' &&
       typeof window.document !== 'undefined' &&
@@ -146,13 +169,25 @@ export class PrivatemodeAI {
       );
     }
 
-    if (!options.auth) {
+    if (options.apiKey !== undefined && options.auth !== undefined) {
       throw new Error(
-        'No authentication configured. Pass an `auth` provider to the ' +
-          'PrivatemodeAI client.',
+        'Pass either `apiKey` or an `auth` provider to the PrivatemodeAI ' +
+          'client, not both.',
       );
     }
-    this.authProvider = options.auth;
+    const { apiKey } = options;
+    const auth =
+      options.auth ??
+      (apiKey
+        ? (): AuthCredential => ({ type: 'apiKey', value: apiKey })
+        : undefined);
+    if (!auth) {
+      throw new Error(
+        'No authentication configured. Pass an `apiKey` or an `auth` ' +
+          'provider to the PrivatemodeAI client.',
+      );
+    }
+    this.authProvider = auth;
 
     this.apiBaseURL = options.apiBaseURL ?? 'https://api.privatemode.ai';
     this._manifestBytes = options.manifestBytes ?? null;
@@ -234,6 +269,7 @@ export class PrivatemodeAI {
       await this.initializeWithManifestRetry(cred);
     }
     await updateSecret();
+    this.hasSecret = true;
     if (this.onSecretUpdate) {
       this.onSecretUpdate(this.exportSecret());
     }
@@ -248,16 +284,22 @@ export class PrivatemodeAI {
    *
    * @param body - The JSON request body (OpenAI chat completions
    * format).
-   * @returns The decrypted response body as a parsed object.
+   * @param options - Optional request headers and abort signal.
+   * @returns The parsed response body and response headers.
    * @throws If encryption, sending, or decryption fails.
    */
   public async chatCompletions(
     body: Record<string, unknown>,
-  ): Promise<unknown> {
+    options?: PrivatemodeRequestOptions,
+  ): Promise<PrivatemodeResponse> {
     await this.applyCredential();
     return this.retryWithSecretRefresh(async () => {
-      const resp = await wasmChatCompletions(JSON.stringify(body));
-      return JSON.parse(resp);
+      const resp = await wasmChatCompletions(
+        JSON.stringify(body),
+        headersToRecord(options?.headers),
+        options?.signal,
+      );
+      return { body: JSON.parse(resp.body), headers: resp.headers };
     });
   }
 
@@ -272,12 +314,14 @@ export class PrivatemodeAI {
    * format). Should include `stream: true`.
    * @param options - Optional parameters.
    * @param options.signal - An AbortSignal to cancel the stream.
+   * @param options.headers - Additional request headers.
+   * @param options.onResponseHeaders - Called with the response headers.
    * @returns An async generator yielding decrypted response chunks.
    * @throws If encryption, streaming, or decryption fails.
    */
   public async *streamChatCompletions(
     body: Record<string, unknown>,
-    options?: { signal?: AbortSignal },
+    options?: PrivatemodeStreamOptions,
   ): AsyncGenerator<unknown> {
     await this.applyCredential();
     const generator = await this.retryWithSecretRefresh(async () =>
@@ -294,7 +338,7 @@ export class PrivatemodeAI {
    */
   private async initiateStream(
     body: Record<string, unknown>,
-    options?: { signal?: AbortSignal },
+    options?: PrivatemodeStreamOptions,
   ): Promise<AsyncGenerator<unknown>> {
     const chunks: string[] = [];
     let waiter: (() => void) | null = null;
@@ -313,6 +357,8 @@ export class PrivatemodeAI {
       JSON.stringify(body),
       onChunk,
       options?.signal,
+      options?.onResponseHeaders,
+      headersToRecord(options?.headers),
     );
     streamPromise
       .then(() => {
@@ -416,14 +462,16 @@ export class PrivatemodeAI {
    *
    * @param file - The audio file to transcribe.
    * @param options - Transcription options, including the STT model.
-   * @returns The decrypted response body as a parsed object.
+   * @param requestOptions - Optional request headers and abort signal.
+   * @returns The parsed response body and response headers.
    * @throws If encryption, sending, or decryption fails or the
    * response is invalid JSON.
    */
   public async transcribeAudio(
     file: AudioFile,
     options: AudioTranscriptionOptions,
-  ): Promise<unknown> {
+    requestOptions?: PrivatemodeRequestOptions,
+  ): Promise<PrivatemodeResponse> {
     await this.applyCredential();
     return this.retryWithSecretRefresh(async () => {
       const wasmFile = {
@@ -434,8 +482,13 @@ export class PrivatemodeAI {
             : new Uint8Array(file.content),
         ...(file.contentType ? { contentType: file.contentType } : {}),
       };
-      const resp = await wasmTranscribeAudio(wasmFile, JSON.stringify(options));
-      return JSON.parse(resp);
+      const resp = await wasmTranscribeAudio(
+        wasmFile,
+        JSON.stringify(options),
+        headersToRecord(requestOptions?.headers),
+        requestOptions?.signal,
+      );
+      return { body: JSON.parse(resp.body), headers: resp.headers };
     });
   }
 
@@ -445,13 +498,19 @@ export class PrivatemodeAI {
    *
    * {@link verify} must have been called first.
    *
-   * @returns The parsed JSON response from /v1/models.
+   * @param options - Optional request headers and abort signal.
+   * @returns The parsed response body and response headers from /v1/models.
    * @throws If the request fails.
    */
-  public async listModels(): Promise<unknown> {
+  public async listModels(
+    options?: PrivatemodeRequestOptions,
+  ): Promise<PrivatemodeResponse> {
     await this.applyCredential();
-    const resp = await wasmListModels();
-    return JSON.parse(resp);
+    const resp = await wasmListModels(
+      headersToRecord(options?.headers),
+      options?.signal,
+    );
+    return { body: JSON.parse(resp.body), headers: resp.headers };
   }
 
   /**
@@ -481,6 +540,12 @@ export class PrivatemodeAI {
    */
   public importSecret(secret: ExportedSecret): void {
     wasmImportSecret(secret.id, secret.data, secret.expiresAtUnix);
+    this.hasSecret = true;
+  }
+
+  /** @internal Whether inference can proceed without automatic setup. */
+  public get readyForInference(): boolean {
+    return this.initialized && this.hasSecret;
   }
 
   // TODO(msanft): Expose manifest fetching on the client?
@@ -690,4 +755,13 @@ export interface AudioTranscriptionOptions {
   response_format?: 'json' | 'verbose_json';
   /** Sampling temperature. */
   temperature?: number;
+  /** @internal Additional flattened multipart fields. */
+  additional_fields?: Record<string, string[]>;
+}
+
+function headersToRecord(
+  headers: HeadersInit | undefined,
+): Record<string, string> | undefined {
+  if (!headers) return undefined;
+  return Object.fromEntries(new Headers(headers));
 }

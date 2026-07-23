@@ -20,10 +20,16 @@
   function groupChatsByDate(chats: Chat[]): GroupedChats {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const lastWeek = new Date(today);
-    lastWeek.setDate(lastWeek.getDate() - 7);
+    const yesterday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 1,
+    );
+    const lastWeek = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() - 7,
+    );
 
     const grouped: GroupedChats = {
       today: [],

@@ -154,7 +154,7 @@ func (e *Etcd) SetSecrets(ctx context.Context, secrets map[string][]byte, ttl in
 
 		// IF the key does not exist (CreateRevision == 0)
 		cmp := clientv3.Compare(clientv3.CreateRevision(keyID), "=", 0)
-		ifs = append(ifs, (*pb.Compare)(&cmp))
+		ifs = append(ifs, cmp.GetCompare())
 
 		// THEN put the secret
 		thens = append(thens, &pb.RequestOp{Request: &pb.RequestOp_RequestPut{RequestPut: &pb.PutRequest{
@@ -215,7 +215,7 @@ func (e *Etcd) DeleteSecrets(ctx context.Context, secrets []string) error {
 		keyID := constants.EtcdInferenceSecretPrefix + id
 		// IF the key exists (CreateRevision > 0)
 		cmp := clientv3.Compare(clientv3.CreateRevision(keyID), ">", 0)
-		ifs = append(ifs, (*pb.Compare)(&cmp))
+		ifs = append(ifs, cmp.GetCompare())
 
 		// THEN delete the secret
 		thens = append(thens, &pb.RequestOp{Request: &pb.RequestOp_RequestDeleteRange{RequestDeleteRange: &pb.DeleteRangeRequest{

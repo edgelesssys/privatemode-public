@@ -157,7 +157,11 @@
   />
 </svelte:head>
 
-<main>
+<div class="app">
+  <a
+    href="#main-content"
+    class="skip-link">Skip to main content</a
+  >
   <Sidebar
     {currentChatId}
     onNewChat={handleNewChat}
@@ -229,11 +233,16 @@
         {/if}
       </div>
     {/if}
-    <div class="page">
+    <main
+      class="page"
+      id="main-content"
+      tabindex="-1"
+    >
       {@render children?.()}
-    </div>
+    </main>
+    <div class="ai-disclosure">You are interacting with an AI system</div>
   </div>
-</main>
+</div>
 
 <Toast />
 
@@ -259,6 +268,48 @@
     font-weight: 600;
   }
 
+  :global(:focus-visible) {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  :global(.sr-only) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .skip-link {
+    position: fixed;
+    top: 8px;
+    left: 8px;
+    z-index: 100;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background-color: var(--color-bg-surface);
+    color: var(--color-text-primary);
+    border: 1px solid var(--color-border);
+    box-shadow: var(--shadow-sm);
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-decoration: none;
+    transform: translateY(calc(-100% - 16px));
+  }
+
+  .skip-link:focus-visible {
+    transform: none;
+  }
+
+  .page:focus-visible {
+    outline: none;
+  }
+
   .content {
     margin-left: 250px;
     display: flex;
@@ -276,6 +327,15 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+  }
+
+  .ai-disclosure {
+    flex-shrink: 0;
+    padding: 0.75rem 1rem 1rem;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-align: center;
   }
 
   .limited-banner {

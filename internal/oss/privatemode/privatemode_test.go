@@ -7,8 +7,10 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/stretchr/testify/assert"
@@ -117,6 +119,30 @@ func TestDecryptResponseErrorBody(t *testing.T) {
 			assert.Equal(t, tc.wantBody, string(decrypted.Body))
 		})
 	}
+}
+
+func TestListModelsWithOptionsPreservesHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, "custom-value", req.Header.Get("X-Custom-Header"))
+		assert.Equal(t, "Bearer test-key", req.Header.Get("Authorization"))
+		w.Header().Set("X-Request-ID", "req_models")
+		_, err := w.Write([]byte(`{"data":[],"object":"list"}`))
+		assert.NoError(t, err)
+	}))
+	t.Cleanup(server.Close)
+
+	client := New(auth.APIKey("test-key")).
+		WithAPIBaseURL(server.URL).
+		WithHTTPClient(server.Client())
+	resp, err := client.ListModelsWithOptions(t.Context(), RequestOptions{
+		Header: http.Header{
+			"Authorization":   []string{"Bearer must-be-overridden"},
+			"X-Custom-Header": []string{"custom-value"},
+		},
+	})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"data":[],"object":"list"}`, string(resp.Body))
+	assert.Equal(t, "req_models", resp.Header.Get("X-Request-ID"))
 }
 
 func newTestRequest(t *testing.T) *http.Request {

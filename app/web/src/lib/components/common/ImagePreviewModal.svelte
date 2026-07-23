@@ -1,5 +1,6 @@
 <script lang="ts">
   import { X } from 'lucide-svelte';
+  import { modalFocus } from '$lib/modalFocus';
   import type { AttachedImage } from '$lib/chatStore';
 
   export let image: AttachedImage;
@@ -16,11 +17,17 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="image-preview-overlay"
+  role="dialog"
+  aria-modal="true"
+  aria-label={image.name}
+  tabindex="-1"
+  use:modalFocus
   onclick={onClose}
 >
   <button
     class="image-preview-close"
     type="button"
+    aria-label="Close preview"
     onclick={onClose}
   >
     <X size={24} />

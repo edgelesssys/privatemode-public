@@ -33,6 +33,7 @@
     </span>
   </summary>
   <div class="thinking-content">
+    <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized by DOMPurify in renderMarkdown -->
     {@html renderedReasoning}
   </div>
 </details>

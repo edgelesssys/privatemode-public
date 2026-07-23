@@ -2,6 +2,7 @@
   import { ChevronRight, ChevronLeft, MessageCirclePlus } from 'lucide-svelte';
   import { chatStore } from '$lib/chatStore';
   import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
   import { page } from '$app/stores';
   import SidebarLogo from './SidebarLogo.svelte';
   import ChatList from './ChatList.svelte';
@@ -20,7 +21,7 @@
 
   function handleNewChat() {
     if ($page.url.pathname !== '/') {
-      goto('/');
+      goto(resolve('/'));
     }
     onNewChat();
     onMobileClose();
@@ -29,7 +30,7 @@
   function handleSelectChat(chatId: string) {
     if ($page.url.pathname !== '/') {
       chatStore.currentChatId.set(chatId);
-      goto('/');
+      goto(resolve('/'));
     } else {
       onSelectChat(chatId);
     }
@@ -37,10 +38,11 @@
   }
 </script>
 
-<div
+<nav
   class="sidebar"
   class:collapsed={effectiveCollapsed}
   class:mobile-open={mobileOpen}
+  aria-label="Sidebar"
 >
   <button
     class="collapse-btn"
@@ -82,7 +84,7 @@
   />
 
   <AuthSection collapsed={effectiveCollapsed} />
-</div>
+</nav>
 
 <style>
   .sidebar {

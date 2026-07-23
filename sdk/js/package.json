@@ -24,6 +24,9 @@
   "files": [
     "dist"
   ],
+  "peerDependencies": {
+    "openai": ">=6.46.0 <7"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && cp src/wasm_exec.js dist/wasm_exec.js",
     "dev": "tsc --watch",
@@ -37,12 +40,13 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@types/node": "25.9.4",
-    "@vitest/browser-playwright": "4.1.9",
-    "eslint": "10.5.0",
+    "@types/node": "25.9.5",
+    "@vitest/browser-playwright": "4.1.10",
+    "eslint": "10.6.0",
     "globals": "17.7.0",
+    "openai": "6.46.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.62.0",
-    "vitest": "4.1.9"
+    "typescript-eslint": "8.63.0",
+    "vitest": "4.1.10"
   }
 }

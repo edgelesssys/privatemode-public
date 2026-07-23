@@ -46,15 +46,15 @@
 </script>
 
 <div class="content">
+  <h1 class="sr-only">Privatemode Chat</h1>
   {#if $clientVerifying}
-    <div class="status-message">
+    <div
+      class="status-message"
+      role="status"
+    >
       <p>Verifying secure connection...</p>
       {#if slowConnection}
-        <p
-          class="slow-hint"
-          role="status"
-          aria-live="polite"
-        >
+        <p class="slow-hint">
           This is taking longer than usual - your connection may be slow.
         </p>
       {/if}

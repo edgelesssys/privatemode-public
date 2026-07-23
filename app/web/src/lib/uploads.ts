@@ -1,5 +1,5 @@
-import type { PrivatemodeAI } from 'privatemode-ai';
 import type { AttachedFile, AttachedImage } from './chatStore';
+import type { PrivatemodeClient } from './clientStore';
 
 export const SUPPORTED_IMAGE_TYPES = [
   'image/png',
@@ -97,7 +97,7 @@ export function readImageAsAttached(
 }
 
 export async function extractDocumentText(
-  client: PrivatemodeAI,
+  client: PrivatemodeClient,
   file: globalThis.File,
 ): Promise<AttachedFile> {
   const content = new Uint8Array(await file.arrayBuffer());
@@ -112,18 +112,17 @@ export async function extractDocumentText(
 }
 
 export async function transcribeAudio(
-  client: PrivatemodeAI,
+  client: PrivatemodeClient,
   file: globalThis.File,
   model: string,
 ): Promise<AttachedFile> {
   if (file.size > MAX_AUDIO_FILE_SIZE_BYTES) {
     throw new Error(`${file.name} exceeds the 50 MB audio upload limit`);
   }
-  const content = new Uint8Array(await file.arrayBuffer());
-  const transcription = (await client.transcribeAudio(
-    { name: file.name, content, contentType: file.type },
-    { model },
-  )) as { text?: string };
+  const transcription = await client.audio.transcriptions.create({
+    file,
+    model,
+  });
 
   const text = transcription.text?.trim();
   if (!text) {

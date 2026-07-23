@@ -9,7 +9,9 @@ export interface Model {
   tasks?: string[];
 }
 
-export const privatemodeClient = writable<PrivatemodeAI | null>(null);
+export type PrivatemodeClient = PrivatemodeAI;
+
+export const privatemodeClient = writable<PrivatemodeClient | null>(null);
 export const clientReady = writable<boolean>(false);
 export const clientError = writable<string | null>(null);
 export const clientVerifying = writable<boolean>(true);
@@ -76,6 +78,10 @@ let currentClientOpts: PrivatemodeAIOptions | null = null;
 let currentIdentity: string | null = null;
 let refreshInProgress = false;
 
+function setClient(client: PrivatemodeAI | null): void {
+  privatemodeClient.set(client);
+}
+
 async function performSecretRefresh(): Promise<void> {
   if (!currentClient || !currentClientOpts || currentIdentity === null) return;
   if (refreshInProgress) {
@@ -97,7 +103,7 @@ async function performSecretRefresh(): Promise<void> {
       await fresh.verify();
       await fresh.refreshSecret();
       currentClient = fresh;
-      privatemodeClient.set(fresh);
+      setClient(fresh);
     }
     const exported = currentClient.exportSecret();
     const manifestBytes = currentClient.manifestBytes!;
@@ -158,7 +164,7 @@ if (typeof document !== 'undefined') {
 let modelsRequest: Promise<Model[]> | null = null;
 
 export async function loadModels(
-  client: PrivatemodeAI | null = get(privatemodeClient),
+  client: PrivatemodeClient | null = get(privatemodeClient),
 ): Promise<Model[]> {
   if (!client) return [];
   if (get(modelsLoaded)) return get(models);
@@ -167,10 +173,11 @@ export async function loadModels(
   modelsLoading.set(true);
   modelsError.set(null);
   modelsRequest = (async () => {
-    const resp = (await client.listModels()) as { data: Model[] };
-    models.set(resp.data);
+    const response = await client.models.list();
+    const loadedModels: Model[] = response.data;
+    models.set(loadedModels);
     modelsLoaded.set(true);
-    return resp.data;
+    return loadedModels;
   })();
 
   try {
@@ -252,13 +259,13 @@ export async function initializeClient(): Promise<void> {
       scheduleSecretRefresh(client, exported.expiresAtUnix, opts, identity);
     }
 
-    privatemodeClient.set(client);
+    setClient(client);
     clientReady.set(true);
-    loadModels(client).catch((e) => {
+    loadModels().catch((e) => {
       console.error('Error loading models:', e);
     });
   } catch (e) {
-    privatemodeClient.set(null);
+    setClient(null);
     clientError.set(e instanceof Error ? e.message : 'Verification failed');
     console.error('Failed to verify Privatemode deployment:', e);
   } finally {

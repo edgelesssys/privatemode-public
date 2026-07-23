@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store';
 import { saveImage, loadImage, deleteImages } from './imageStore';
-import type { PrivatemodeAI } from 'privatemode-ai';
+import type OpenAI from 'openai';
+import type { PrivatemodeClient } from './clientStore';
 
 export interface AttachedFile {
   name: string;
@@ -18,17 +19,30 @@ export interface AttachedImage {
 /** Image reference as persisted in localStorage (without the data URL). */
 type PersistedImage = Omit<AttachedImage, 'dataUrl'>;
 
-export interface Message {
+interface MessageBase {
   id: string;
-  role: 'user' | 'assistant' | 'system';
   content: string;
   reasoning?: string;
   thoughtDurationMs?: number;
   timestamp: number;
   attachedFiles?: AttachedFile[];
-  attachedImages?: AttachedImage[];
   isError?: boolean;
 }
+
+interface UserMessage extends MessageBase {
+  role: 'user';
+  attachedImages?: AttachedImage[];
+}
+
+interface NonUserMessage extends MessageBase {
+  role: 'assistant' | 'system';
+  attachedImages?: never;
+}
+
+export type Message = UserMessage | NonUserMessage;
+type NewMessage =
+  | Omit<UserMessage, 'id' | 'timestamp'>
+  | Omit<NonUserMessage, 'id' | 'timestamp'>;
 
 export interface Chat {
   id: string;
@@ -51,7 +65,7 @@ export function countWords(text: string): number {
 }
 
 export interface SendOptions {
-  client: PrivatemodeAI;
+  client: PrivatemodeClient;
   chatId: string;
   modelId: string;
   userMessage: string;
@@ -64,19 +78,33 @@ export interface SendOptions {
 }
 
 type ContentPart =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } };
+  | OpenAI.ChatCompletionContentPartText
+  | OpenAI.ChatCompletionContentPartImage;
 
-interface ApiMessage {
-  role: string;
-  content: string | ContentPart[];
+type PrivatemodeChatCompletionCreateParams =
+  OpenAI.ChatCompletionCreateParamsStreaming & {
+    chat_template_kwargs?: Record<string, boolean>;
+  };
+
+function textApiMessage(
+  role: Message['role'],
+  content: string,
+): OpenAI.ChatCompletionMessageParam {
+  switch (role) {
+    case 'assistant':
+      return { role, content };
+    case 'system':
+      return { role, content };
+    case 'user':
+      return { role, content };
+  }
 }
 
 function buildApiMessages(
   messages: Message[],
   systemPrompt: string | undefined,
-): ApiMessage[] {
-  const result: ApiMessage[] = [];
+): OpenAI.ChatCompletionMessageParam[] {
+  const result: OpenAI.ChatCompletionMessageParam[] = [];
   if (systemPrompt) {
     result.push({ role: 'system', content: systemPrompt });
   }
@@ -87,7 +115,7 @@ function buildApiMessages(
           file.kind === 'audio-transcription'
             ? `The user attached an audio file named "${file.name}". The following is the speech-to-text transcription of that audio:\n\n${file.content}`
             : `[File: ${file.name}]\n\n${file.content}`;
-        result.push({ role: msg.role, content });
+        result.push(textApiMessage(msg.role, content));
       }
     }
     const hasImages = msg.attachedImages && msg.attachedImages.length > 0;
@@ -99,9 +127,9 @@ function buildApiMessages(
       if (msg.content.trim()) {
         parts.push({ type: 'text', text: msg.content });
       }
-      result.push({ role: msg.role, content: parts });
+      result.push({ role: 'user', content: parts });
     } else if (msg.content.trim()) {
-      result.push({ role: msg.role, content: msg.content });
+      result.push(textApiMessage(msg.role, msg.content));
     }
   }
   return result;
@@ -136,13 +164,25 @@ function createChatStore() {
         isStreaming: false,
         lastUserMessageAt:
           chat.lastUserMessageAt ?? chat.updatedAt ?? chat.createdAt,
-        messages: chat.messages.map((msg) => ({
-          ...msg,
-          attachedImages: msg.attachedImages?.map((img) => ({
-            ...img,
-            dataUrl: img.dataUrl ?? '',
-          })),
-        })),
+        messages: chat.messages.map((msg): Message => {
+          if (msg.role !== 'user') {
+            const { attachedImages, ...message } = msg as Omit<
+              NonUserMessage,
+              'attachedImages'
+            > & { attachedImages?: AttachedImage[] };
+            if (attachedImages && attachedImages.length > 0) {
+              console.warn('Ignoring images attached to a non-user message.');
+            }
+            return message;
+          }
+          return {
+            ...msg,
+            attachedImages: msg.attachedImages?.map((img) => ({
+              ...img,
+              dataUrl: img.dataUrl ?? '',
+            })),
+          };
+        }),
       }));
     } catch {
       console.error('Failed to parse stored chats, resetting');
@@ -272,10 +312,7 @@ function createChatStore() {
       return newChat.id;
     },
 
-    addMessage: (
-      chatId: string,
-      message: Omit<Message, 'id' | 'timestamp'>,
-    ) => {
+    addMessage: (chatId: string, message: NewMessage) => {
       const newMessage: Message = {
         ...message,
         id: crypto.randomUUID(),
@@ -469,14 +506,19 @@ function createChatStore() {
       const branchedMessages = sourceChat.messages
         .slice(0, sliceEnd)
         .filter((m) => !m.isError)
-        .map((m) => ({
-          ...m,
-          id: crypto.randomUUID(),
-          attachedImages: m.attachedImages?.map((img) => ({
-            ...img,
-            id: crypto.randomUUID(),
-          })),
-        }));
+        .map(
+          (m): Message =>
+            m.role === 'user'
+              ? {
+                  ...m,
+                  id: crypto.randomUUID(),
+                  attachedImages: m.attachedImages?.map((img) => ({
+                    ...img,
+                    id: crypto.randomUUID(),
+                  })),
+                }
+              : { ...m, id: crypto.randomUUID() },
+        );
 
       const now = Date.now();
       const newChat: Chat = {
@@ -609,7 +651,7 @@ function createChatStore() {
           (m) => m.id !== assistantMessageId,
         );
 
-        const requestBody: Record<string, unknown> = {
+        const requestBody: PrivatemodeChatCompletionCreateParams = {
           model: modelId,
           messages: buildApiMessages(messagesToSend, systemPrompt),
           stream: true,
@@ -626,15 +668,13 @@ function createChatStore() {
         const UPDATE_THROTTLE_MS = 100;
         let lastUpdate = 0;
 
-        for await (const chunk of client.streamChatCompletions(requestBody, {
+        const stream = await client.chat.completions.create(requestBody, {
           signal,
-        })) {
-          const parsed = chunk as {
-            choices: Array<{
-              delta: { content?: string; reasoning?: string };
-            }>;
-          };
-          const delta = parsed.choices[0]?.delta;
+        });
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta as
+            | { content?: string | null; reasoning?: string | null }
+            | undefined;
           if (delta?.reasoning) accumulatedReasoning += delta.reasoning;
           if (delta?.content) accumulatedContent += delta.content;
           if (delta?.content || delta?.reasoning) {
@@ -656,7 +696,10 @@ function createChatStore() {
           thoughtDurationMs,
         );
       } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
+        if (
+          signal.aborted ||
+          (error instanceof Error && error.name === 'AbortError')
+        ) {
           throw error;
         }
         let errorMessage = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;

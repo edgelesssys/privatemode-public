@@ -1,16 +1,16 @@
 diff --git a/vllm/sampling_params.py b/vllm/sampling_params.py
-index a2ed5e68f..e905f9a75 100644
+index 5df2e8cfc..017692e9c 100644
 --- a/vllm/sampling_params.py
 +++ b/vllm/sampling_params.py
-@@ -672,6 +672,7 @@ class SamplingParams(
+@@ -744,6 +744,7 @@ class SamplingParams(
          self._validate_logit_bias(model_config)
          self._validate_logits_processors(model_config)
          self._validate_allowed_token_ids(tokenizer)
 +        self._validate_stop_token_ids(model_config)
          self._validate_spec_decode(speculative_config)
-         self._validate_structured_outputs(structured_outputs_config, tokenizer)
- 
-@@ -735,6 +736,27 @@ class SamplingParams(
+         self._validate_structured_outputs(
+             model_config, structured_outputs_config, tokenizer
+@@ -831,6 +832,27 @@ class SamplingParams(
                  value=invalid_token_ids,
              )
  
@@ -38,26 +38,3 @@ index a2ed5e68f..e905f9a75 100644
      def _validate_logits_processors(self, model_config: ModelConfig) -> None:
          from vllm.v1.sample.logits_processor import (
              validate_logits_processors_parameters,
-diff --git a/vllm/v1/sample/rejection_sampler.py b/vllm/v1/sample/rejection_sampler.py
-index 678654cb7..7fdd6be67 100644
---- a/vllm/v1/sample/rejection_sampler.py
-+++ b/vllm/v1/sample/rejection_sampler.py
-@@ -910,12 +910,17 @@ def sample_recovered_tokens_kernel(
-             other=0.0,
-         )
- 
--        # Local tile reduction
-+        # Local tile reduction.
-+        # Mask out-of-vocabulary entries to -inf so they can never win
-+        # the argmax — prevents producing recovered_id >= vocab_size
-+        # when all valid entries in the last tile have zero probability.
-         score = prob * inv_q
-+        score = tl.where(vocab_mask, score, float("-inf"))
-         local_max, local_id = tl.max(score, axis=0, return_indices=True)
- 
-         if local_max > max_val:
-             max_val = local_max
-             recovered_id = v + local_id
- 
-+    recovered_id = tl.minimum(recovered_id, vocab_size - 1)
-     tl.store(output_token_ids_ptr + token_idx, recovered_id)

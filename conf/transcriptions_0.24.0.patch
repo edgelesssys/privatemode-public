@@ -1,8 +1,8 @@
-diff --git a/vllm/entrypoints/openai/speech_to_text/speech_to_text.py b/vllm/entrypoints/openai/speech_to_text/speech_to_text.py
-index 8c3aed453..3c2ccc52e 100644
---- a/vllm/entrypoints/openai/speech_to_text/speech_to_text.py
-+++ b/vllm/entrypoints/openai/speech_to_text/speech_to_text.py
-@@ -9,7 +9,9 @@ from collections.abc import AsyncGenerator, Callable, Set
+diff --git a/vllm/entrypoints/speech_to_text/base/serving.py b/vllm/entrypoints/speech_to_text/base/serving.py
+index 1cbc4d8f7..a8f3882e5 100644
+--- a/vllm/entrypoints/speech_to_text/base/serving.py
++++ b/vllm/entrypoints/speech_to_text/base/serving.py
+@@ -10,7 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
  from functools import cached_property
  from typing import Final, Literal, TypeAlias, TypeVar, cast
  
@@ -12,37 +12,41 @@ index 8c3aed453..3c2ccc52e 100644
  from fastapi import Request
  from transformers import PreTrainedTokenizerBase
  
-@@ -43,13 +45,18 @@ from vllm.logger import init_logger
+@@ -32,8 +34,7 @@ from vllm.inputs import EncoderDecoderInput, EngineInput
+ from vllm.logger import init_logger
  from vllm.logprobs import FlatLogprobs, Logprob
  from vllm.model_executor.models import SupportsTranscription
- from vllm.multimodal.audio import get_audio_duration, split_audio
+-from vllm.multimodal.audio import get_audio_duration, split_audio
 -from vllm.multimodal.media.audio import load_audio
++from vllm.multimodal.audio import get_audio_duration, resample_audio_pyav, split_audio
  from vllm.outputs import RequestOutput
  from vllm.renderers.inputs import DictPrompt, EncoderDecoderDictPrompt
  from vllm.renderers.inputs.preprocess import parse_enc_dec_prompt, parse_model_prompt
- from vllm.sampling_params import BeamSearchParams, SamplingParams
- from vllm.tokenizers import get_tokenizer
- from vllm.utils.async_utils import merge_async_iterators
-+from vllm.utils.import_utils import PlaceholderModule
-+
-+try:
-+    import librosa
-+except ImportError:
-+    librosa = PlaceholderModule("librosa")  # type: ignore[assignment]
- 
- SpeechToTextResponse: TypeAlias = TranscriptionResponse | TranslationResponse
- SpeechToTextResponseVerbose: TypeAlias = (
-@@ -81,6 +88,51 @@ def asr_inter_chunk_separator(
+@@ -87,6 +88,73 @@ def asr_inter_chunk_separator(
      return "" if language and language.lower() in no_space_languages else " "
  
  
-+def decode_audio(audio_data: bytes, sample_rate: int) -> tuple[np.ndarray, int]:
++def decode_audio(
++    audio_data: bytes,
++    sample_rate: int,
++    max_duration_s: float | None = None,
++) -> tuple[np.ndarray, int]:
++    """Decode audio bytes with PyAV, average to mono and resample to
++    ``sample_rate``.
++
++    Handles container formats (MP4, M4A, WebM) that ``soundfile`` cannot detect
++    from a ``BytesIO`` stream. Raises ``ValueError`` on unsupported input, or if
++    the decoded audio exceeds ``max_duration_s`` (decompression-bomb guard).
++    """
 +    try:
 +        with io.BytesIO(audio_data) as bytes_:
 +            container = cast(InputContainer, av.open(bytes_))
 +            stream = container.streams.audio[0]
 +            sr_native = stream.rate
-+            samples = []
++            if not sr_native:
++                raise ValueError("Invalid or unsupported audio file.")
++            samples: list[np.ndarray] = []
++            total = 0
 +            for frame in container.decode(stream):
 +                frame_array = frame.to_ndarray()
 +
@@ -61,12 +65,20 @@ index 8c3aed453..3c2ccc52e 100644
 +
 +                if frame_array.ndim > 1:
 +                    frame_array = np.mean(frame_array, axis=0)
++
++                total += frame_array.shape[-1]
++                if (
++                    max_duration_s is not None
++                    and total / sr_native > max_duration_s
++                ):
++                    raise ValueError("Maximum audio decode duration exceeded")
++
 +                samples.append(frame_array)
 +            if not samples:
 +                raise ValueError("Failed to decode audio.")
 +            audio = np.concatenate(samples).astype(np.float32)
 +            if sr_native != sample_rate:
-+                audio = librosa.resample(
++                audio = resample_audio_pyav(
 +                    audio,
 +                    orig_sr=sr_native,
 +                    target_sr=sample_rate,
@@ -84,7 +96,38 @@ index 8c3aed453..3c2ccc52e 100644
  class OpenAISpeechToText(OpenAIServing):
      """Base class for speech-to-text operations like transcription and
      translation."""
-@@ -190,7 +242,7 @@ class OpenAISpeechToText(OpenAIServing):
+@@ -161,22 +229,16 @@ class OpenAISpeechToText(OpenAIServing):
+         self,
+         audio_data: bytes,
+     ) -> tuple[list[np.ndarray], float]:
+-        # Decode audio bytes.  For container formats (MP4, M4A, WebM) that
+-        # soundfile cannot detect from a BytesIO stream, _load_audio_bytes
+-        # transparently falls back to ffmpeg via an in-memory fd.
++        # Decode audio bytes with PyAV. For container formats (MP4, M4A, WebM)
++        # that soundfile cannot detect from a BytesIO stream, PyAV decodes them
++        # frame-by-frame directly.
+         # NOTE resample to model SR here for efficiency. This is also a
+         # pre-requisite for chunking, as it assumes Whisper SR.
+-        try:
+-            with io.BytesIO(audio_data) as buf:
+-                y, sr = load_audio(
+-                    buf,
+-                    sr=self.asr_config.sample_rate,
+-                    max_duration_s=self.max_audio_decode_duration_s,
+-                )
+-        except ValueError:
+-            raise
+-        except Exception as exc:
+-            raise ValueError("Invalid or unsupported audio file.") from exc
++        y, sr = decode_audio(
++            audio_data,
++            int(self.asr_config.sample_rate),
++            max_duration_s=self.max_audio_decode_duration_s,
++        )
+ 
+         duration = get_audio_duration(y=y, sr=sr)
+         do_split_audio = self.asr_config.allow_audio_chunking and (
+@@ -255,7 +317,7 @@ class OpenAISpeechToText(OpenAIServing):
          request: SpeechToTextRequest,
          audio_data: bytes,
          request_id: str,
@@ -93,25 +136,7 @@ index 8c3aed453..3c2ccc52e 100644
          # Validate request
          request.language = self.model_cls.validate_language(request.language)
          request.to_language = (
-@@ -206,16 +258,9 @@ class OpenAISpeechToText(OpenAIServing):
-                 value=len(audio_data) / 1024**2,
-             )
- 
--        # Decode audio bytes.  For container formats (MP4, M4A, WebM) that
--        # soundfile cannot detect from a BytesIO stream, _load_audio_bytes
--        # transparently falls back to ffmpeg via an in-memory fd.
-         # NOTE resample to model SR here for efficiency. This is also a
-         # pre-requisite for chunking, as it assumes Whisper SR.
--        try:
--            with io.BytesIO(audio_data) as buf:
--                y, sr = load_audio(buf, sr=self.asr_config.sample_rate)
--        except Exception as exc:
--            raise ValueError("Invalid or unsupported audio file.") from exc
-+        y, sr = decode_audio(audio_data, int(self.asr_config.sample_rate))
- 
-         duration = get_audio_duration(y=y, sr=sr)
-         do_split_audio = self.asr_config.allow_audio_chunking and (
-@@ -245,6 +290,8 @@ class OpenAISpeechToText(OpenAIServing):
+@@ -283,6 +345,8 @@ class OpenAISpeechToText(OpenAIServing):
              )
  
          parsed_prompts: list[DictPrompt] = []
@@ -120,11 +145,11 @@ index 8c3aed453..3c2ccc52e 100644
          for chunk in chunks:
              stt_params = request.build_stt_params(
                  audio=chunk,
-@@ -262,10 +309,12 @@ class OpenAISpeechToText(OpenAIServing):
+@@ -300,10 +364,12 @@ class OpenAISpeechToText(OpenAIServing):
                  parsed_prompt = parse_model_prompt(self.model_config, prompt)
  
              parsed_prompts.append(parsed_prompt)
-+            start_times.append(chunk_offset / sr)
++            start_times.append(chunk_offset / self.asr_config.sample_rate)
 +            chunk_offset += len(chunk)
  
          engine_inputs = await self.renderer.render_cmpl_async(parsed_prompts)
@@ -134,7 +159,7 @@ index 8c3aed453..3c2ccc52e 100644
  
      def _preprocess_verbose_prompt(self, prompt: EncoderDecoderDictPrompt):
          dec_prompt = prompt["decoder_prompt"]
-@@ -350,7 +399,7 @@ class OpenAISpeechToText(OpenAIServing):
+@@ -388,7 +454,7 @@ class OpenAISpeechToText(OpenAIServing):
                      SpeechToTextSegment,
                      segment_class(
                          id=len(segments),
@@ -143,7 +168,7 @@ index 8c3aed453..3c2ccc52e 100644
                          start=start_time + BASE_OFFSET * start_timestamp,
                          end=start_time + BASE_OFFSET * end_timestamp,
                          temperature=request.temperature,
-@@ -426,7 +475,7 @@ class OpenAISpeechToText(OpenAIServing):
+@@ -464,7 +530,7 @@ class OpenAISpeechToText(OpenAIServing):
  
          lora_request = self._maybe_get_adapters(request)
  
@@ -152,7 +177,7 @@ index 8c3aed453..3c2ccc52e 100644
              request=request,
              audio_data=audio_data,
              request_id=request_id,
-@@ -548,16 +597,13 @@ class OpenAISpeechToText(OpenAIServing):
+@@ -586,16 +652,13 @@ class OpenAISpeechToText(OpenAIServing):
                  )
              result_generator = merge_async_iterators(*list_result_generator)
              async for idx, op in result_generator:

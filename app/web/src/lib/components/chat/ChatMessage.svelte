@@ -38,14 +38,14 @@
             width="16"
             height="16"
           />
-          Privatemode
+          Privatemode AI
         </span>
       </div>
     {/if}
     {#if (message.attachedImages && message.attachedImages.length > 0) || (message.attachedFiles && message.attachedFiles.length > 0)}
       <div class="attached-files">
         {#if message.attachedImages}
-          {#each message.attachedImages as image}
+          {#each message.attachedImages as image (image)}
             <ImageChip
               {image}
               onPreview={onPreviewImage}
@@ -53,7 +53,7 @@
           {/each}
         {/if}
         {#if message.attachedFiles}
-          {#each message.attachedFiles as file}
+          {#each message.attachedFiles as file (file)}
             <FileChip
               {file}
               onPreview={onPreviewTranscription}
@@ -63,11 +63,16 @@
       </div>
     {/if}
     {#if isLastStreaming && !message.content && !message.reasoning}
-      <div class="loading-indicator">
+      <div
+        class="loading-indicator"
+        role="status"
+      >
         <Loader2
           size={18}
           class="spinning"
+          aria-hidden="true"
         />
+        <span class="sr-only">Generating response</span>
       </div>
     {/if}
     {#if message.role === 'assistant' && message.reasoning}
@@ -79,6 +84,7 @@
     {/if}
     {#if message.content}
       <div class="message-content">
+        <!-- eslint-disable-next-line svelte/no-at-html-tags -- sanitized by DOMPurify in renderMarkdown -->
         {@html message.renderedContent}
       </div>
     {/if}
@@ -90,6 +96,8 @@
     <Tooltip text="Copy message">
       <button
         class="copy-message-button"
+        type="button"
+        aria-label="Copy message"
         disabled={isLastStreaming}
       >
         <Copy size={16} />
@@ -99,6 +107,8 @@
       <Tooltip text="Branch off from here">
         <button
           class="branch-message-button"
+          type="button"
+          aria-label="Branch off from here"
           disabled={isLastStreaming}
         >
           <GitBranch size={16} />
@@ -295,7 +305,7 @@
   }
 
   .message.user .message-content :global(a) {
-    color: #93c5fd;
+    color: var(--color-accent);
   }
 
   .message-content :global(table) {
@@ -406,7 +416,8 @@
     opacity: 0;
   }
 
-  .message.user:hover .message-actions {
+  .message.user:hover .message-actions,
+  .message.user .message-actions:focus-within {
     opacity: 1;
   }
 

@@ -4,7 +4,10 @@
 package privatemode
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"net/http"
 	"testing"
 
 	"github.com/edgelesssys/continuum/internal/oss/auth"
@@ -40,4 +43,35 @@ func TestTranscribeAudio(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestBuildAudioTranscriptionBodyAdditionalFields(t *testing.T) {
+	body, contentType, err := buildAudioTranscriptionBody(
+		AudioFile{Name: "sample.mp3", Content: []byte("audio"), ContentType: "audio/mpeg"},
+		AudioTranscriptionOptions{
+			Model: "voxtral-mini-3b",
+			AdditionalFields: map[string][]string{
+				"timestamp_granularities[]": {"word", "segment"},
+			},
+		},
+	)
+	require.NoError(t, err)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", contentType)
+	require.NoError(t, req.ParseMultipartForm(int64(len(body))))
+	t.Cleanup(func() {
+		if req.MultipartForm != nil {
+			_ = req.MultipartForm.RemoveAll()
+		}
+	})
+
+	require.Equal(t, []string{"word", "segment"}, req.MultipartForm.Value["timestamp_granularities[]"])
+	file, _, err := req.FormFile("file")
+	require.NoError(t, err)
+	defer file.Close()
+	gotAudio, err := io.ReadAll(file)
+	require.NoError(t, err)
+	require.Equal(t, []byte("audio"), gotAudio)
 }

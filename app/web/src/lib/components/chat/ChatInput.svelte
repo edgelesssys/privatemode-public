@@ -20,6 +20,7 @@
     modelsLoaded,
     modelsLoading,
   } from '$lib/clientStore';
+  import type { PrivatemodeClient } from '$lib/clientStore';
   import {
     DEFAULT_TRANSCRIPTION_MODEL_ID,
     getAvailableTranscriptionModels,
@@ -32,10 +33,10 @@
     transcribeAudio,
   } from '$lib/uploads';
   import { onMount } from 'svelte';
-  import type { PrivatemodeAI } from 'privatemode-ai';
+  import { resolve } from '$app/paths';
   import { showToast } from '$lib/toastStore';
 
-  export let privatemodeAIClient: PrivatemodeAI | null;
+  export let privatemodeAIClient: PrivatemodeClient | null;
   export let currentChatId: string | null;
   export let onChatCreated: (chatId: string) => void = () => {};
   export let draftMessage: Message | null = null;
@@ -265,7 +266,10 @@
         signal: abortController.signal,
       });
     } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
+      if (
+        abortController.signal.aborted ||
+        (error instanceof Error && error.name === 'AbortError')
+      ) {
         console.log('Generation cancelled by user');
       } else {
         console.error('Error generating response:', error);
@@ -291,12 +295,19 @@
   }
 
   function showErrorToast(message: string, error?: unknown) {
-    let text = message;
-    if (error instanceof Error && (error as any).status === 401) {
-      text +=
-        ' Your API key may be invalid or expired. <a href="/settings">Update your API key</a>.';
-    }
-    showToast(text, { type: 'error', dangerouslyRenderHTML: true });
+    const isAuthError =
+      error instanceof Error && (error as { status?: number }).status === 401;
+    showToast(
+      isAuthError
+        ? `${message} Your API key may be invalid or expired.`
+        : message,
+      {
+        type: 'error',
+        link: isAuthError
+          ? { href: resolve('/settings'), label: 'Update your API key' }
+          : undefined,
+      },
+    );
   }
 
   function readImageFile(file: globalThis.File, fallbackName?: string) {
@@ -316,6 +327,11 @@
 
   async function uploadAudioFiles(files: globalThis.File[]) {
     if (files.length === 0) return;
+    const client = privatemodeAIClient;
+    if (!client) {
+      showErrorToast('Privatemode is still connecting. Please try again.');
+      return;
+    }
     const model = selectedTranscriptionModel;
     if (!model) {
       showErrorToast(
@@ -328,7 +344,7 @@
     isUploadingAudio = true;
     try {
       for (const f of files) {
-        const attached = await transcribeAudio(privatemodeAIClient!, f, model);
+        const attached = await transcribeAudio(client, f, model);
         attachedFiles = [...attachedFiles, attached];
       }
     } catch (error) {
@@ -344,10 +360,15 @@
 
   async function uploadDocumentFiles(files: globalThis.File[]) {
     if (files.length === 0) return;
+    const client = privatemodeAIClient;
+    if (!client) {
+      showErrorToast('Privatemode is still connecting. Please try again.');
+      return;
+    }
     isUploadingDocuments = true;
     try {
       for (const f of files) {
-        const attached = await extractDocumentText(privatemodeAIClient!, f);
+        const attached = await extractDocumentText(client, f);
         attachedFiles = [...attachedFiles, attached];
       }
     } catch (error) {
@@ -491,6 +512,7 @@
   <div
     class="chat-input-wrapper"
     role="region"
+    aria-label="Message input"
   >
     <ChatErrorBanner
       {chatModelUnavailable}
@@ -505,20 +527,21 @@
   <div
     class="chat-input-wrapper"
     role="region"
+    aria-label="Message input"
   >
     {#if attachedFiles.length > 0 || attachedImages.length > 0 || loadingImageCount > 0}
       <div class="attached-files">
-        {#each Array(loadingImageCount) as _}
+        {#each Array.from({ length: loadingImageCount }, (_, i) => i) as i (i)}
           <LoadingImageChip />
         {/each}
-        {#each attachedImages as image, index}
+        {#each attachedImages as image, index (image)}
           <ImageChip
             {image}
             onPreview={(img) => (previewImage = img)}
             onRemove={() => removeImage(index)}
           />
         {/each}
-        {#each attachedFiles as file, index}
+        {#each attachedFiles as file, index (file)}
           <FileChip
             {file}
             onPreview={(f) => (previewTranscription = f)}
@@ -534,6 +557,7 @@
       onkeydown={handleKeyDown}
       onpaste={handlePaste}
       placeholder="Type a message..."
+      aria-label="Type a message"
       class="chat-input"
       rows="1"
       disabled={isGenerating}
@@ -641,6 +665,7 @@
             <button
               class="send-button stop"
               type="button"
+              aria-label="Stop generating"
               onclick={stopGeneration}
             >
               <Square size={20} />
@@ -655,6 +680,7 @@
             <button
               class="send-button"
               type="button"
+              aria-label="Send message"
               onclick={sendMessage}
               disabled={!canSend}
             >
@@ -684,7 +710,7 @@
 <style>
   .chat-input-wrapper {
     margin-top: auto;
-    margin-bottom: 30px;
+    margin-bottom: 8px;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -698,7 +724,7 @@
   }
 
   .chat-input-wrapper:focus-within {
-    border-color: var(--color-border-secondary);
+    border-color: var(--color-accent);
   }
 
   .chat-input {
@@ -720,6 +746,11 @@
   .chat-input:disabled {
     cursor: not-allowed;
     opacity: 0.6;
+  }
+
+  .chat-input::placeholder {
+    color: var(--color-text-secondary);
+    opacity: 1;
   }
 
   .button-row {
@@ -809,15 +840,19 @@
     height: 100%;
   }
 
+  /* On mobile the attach labels are hidden visually but kept in the
+     accessibility tree so the buttons retain their accessible names. */
   @media (max-width: 768px) {
     .attach-label {
-      display: none;
-    }
-  }
-
-  @media (max-width: 768px) {
-    .chat-input-wrapper {
-      margin-bottom: 15px;
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
   }
 </style>

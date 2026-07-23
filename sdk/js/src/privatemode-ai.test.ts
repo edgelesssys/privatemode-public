@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { PrivatemodeAI, type AuthProvider } from './privatemode-ai.js';
+import { describe, it, expect, vi } from 'vitest';
+import { PrivatemodeCore, type AuthProvider } from './privatemode-ai.js';
 import * as wasm from './wasm.js';
 
 /** Build an API-key {@link AuthProvider} for tests. */
@@ -16,48 +16,55 @@ const browserWasmURL = isNode
   ? undefined
   : new URL('../../wasm/privatemode.wasm', import.meta.url).href;
 
-describe('PrivatemodeAI', () => {
-  let prevValue: string | undefined;
-
-  beforeAll(() => {
-    if (RUN_INTEGRATION_TESTS && isNode) {
-      prevValue = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-    }
-  });
-
-  afterAll(() => {
-    if (RUN_INTEGRATION_TESTS && isNode) {
-      if (prevValue !== undefined) {
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevValue;
-      } else {
-        delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      }
-    }
-  });
-
+describe('PrivatemodeCore', () => {
   describe('constructor', () => {
     it('throws if no authentication is provided', () => {
       expect(
-        () => new PrivatemodeAI({ dangerouslyAllowBrowser: !isNode }),
+        () => new PrivatemodeCore({ dangerouslyAllowBrowser: !isNode }),
       ).toThrow(/No authentication configured/);
     });
 
     it('uses the provided auth provider', () => {
-      const client = new PrivatemodeAI({
+      const client = new PrivatemodeCore({
         auth: apiKeyAuth('test-key'),
         dangerouslyAllowBrowser: !isNode,
       });
-      expect(client).toBeInstanceOf(PrivatemodeAI);
+      expect(client).toBeInstanceOf(PrivatemodeCore);
+    });
+
+    it('uses the provided API key', () => {
+      const client = new PrivatemodeCore({
+        apiKey: 'test-key',
+        dangerouslyAllowBrowser: !isNode,
+      });
+      expect(client).toBeInstanceOf(PrivatemodeCore);
+    });
+
+    it('treats an empty API key as missing authentication', () => {
+      expect(
+        () =>
+          new PrivatemodeCore({ apiKey: '', dangerouslyAllowBrowser: !isNode }),
+      ).toThrow(/No authentication configured/);
+    });
+
+    it('throws if both an API key and an auth provider are provided', () => {
+      expect(
+        () =>
+          new PrivatemodeCore({
+            apiKey: 'test-key',
+            auth: apiKeyAuth('test-key'),
+            dangerouslyAllowBrowser: !isNode,
+          }),
+      ).toThrow(/not both/);
     });
 
     it('uses custom baseURL', () => {
-      const client = new PrivatemodeAI({
+      const client = new PrivatemodeCore({
         auth: apiKeyAuth('test-key'),
         apiBaseURL: 'https://custom.example.com',
         dangerouslyAllowBrowser: !isNode,
       });
-      expect(client).toBeInstanceOf(PrivatemodeAI);
+      expect(client).toBeInstanceOf(PrivatemodeCore);
     });
   });
 
@@ -65,7 +72,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!RUN_INTEGRATION_TESTS)(
       'fetches manifest and verifies the Privatemode deployment',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth(import.meta.env.PRIVATEMODE_API_KEY),
           apiBaseURL: TEST_API_BASE_URL,
           browserWasmURL,
@@ -84,7 +91,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!RUN_INTEGRATION_TESTS)(
       'refreshes the encryption secret',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth(import.meta.env.PRIVATEMODE_API_KEY),
           apiBaseURL: TEST_API_BASE_URL,
           browserWasmURL,
@@ -101,7 +108,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!RUN_INTEGRATION_TESTS)(
       'sends an encrypted chat completions request and returns a decrypted response',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth(import.meta.env.PRIVATEMODE_API_KEY),
           apiBaseURL: TEST_API_BASE_URL,
           browserWasmURL,
@@ -111,7 +118,7 @@ describe('PrivatemodeAI', () => {
         await client.verify();
         await client.refreshSecret();
 
-        const response = (await client.chatCompletions({
+        const response = await client.chatCompletions({
           model: 'gpt-oss-120b',
           messages: [
             {
@@ -121,16 +128,17 @@ describe('PrivatemodeAI', () => {
             },
           ],
           max_tokens: 500,
-        })) as {
+        });
+        const body = response.body as {
           choices: {
             message: {
               content: string | null;
             };
           }[];
         };
-        expect(response.choices).toBeDefined();
-        expect(response.choices.length).toBeGreaterThan(0);
-        const msg = response.choices[0].message;
+        expect(body.choices).toBeDefined();
+        expect(body.choices.length).toBeGreaterThan(0);
+        const msg = body.choices[0].message;
         const text = (msg.content ?? '').toLowerCase();
         expect(text).toContain('hello');
       },
@@ -142,7 +150,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!RUN_INTEGRATION_TESTS)(
       'streams an encrypted chat completions request and returns decrypted chunks',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth(import.meta.env.PRIVATEMODE_API_KEY),
           apiBaseURL: TEST_API_BASE_URL,
           browserWasmURL,
@@ -192,7 +200,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!RUN_INTEGRATION_TESTS)(
       'aborts a streaming request when the signal is triggered',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth(import.meta.env.PRIVATEMODE_API_KEY),
           apiBaseURL: TEST_API_BASE_URL,
           browserWasmURL,
@@ -245,7 +253,7 @@ describe('PrivatemodeAI', () => {
       'exports a secret from a verified client and imports it into an offline-initialized client',
       async () => {
         // Export a secret from client a)
-        const verifiedClient = new PrivatemodeAI({
+        const verifiedClient = new PrivatemodeCore({
           auth: apiKeyAuth(import.meta.env.PRIVATEMODE_API_KEY),
           apiBaseURL: TEST_API_BASE_URL,
           browserWasmURL,
@@ -262,7 +270,7 @@ describe('PrivatemodeAI', () => {
 
         // Import that secret into client b), without exchanging
         // a secret with the deployment again.
-        const offlineClient = new PrivatemodeAI({
+        const offlineClient = new PrivatemodeCore({
           auth: apiKeyAuth(import.meta.env.PRIVATEMODE_API_KEY),
           apiBaseURL: TEST_API_BASE_URL,
           browserWasmURL,
@@ -276,7 +284,7 @@ describe('PrivatemodeAI', () => {
         offlineClient.importSecret(exportedSecret);
 
         // Check that inference works with client b)
-        const response = (await offlineClient.chatCompletions({
+        const response = await offlineClient.chatCompletions({
           model: 'gpt-oss-120b',
           messages: [
             {
@@ -286,16 +294,17 @@ describe('PrivatemodeAI', () => {
             },
           ],
           max_tokens: 500,
-        })) as {
+        });
+        const body = response.body as {
           choices: {
             message: {
               content: string | null;
             };
           }[];
         };
-        expect(response.choices).toBeDefined();
-        expect(response.choices.length).toBeGreaterThan(0);
-        const text = (response.choices[0].message.content ?? '').toLowerCase();
+        expect(body.choices).toBeDefined();
+        expect(body.choices.length).toBeGreaterThan(0);
+        const text = (body.choices[0].message.content ?? '').toLowerCase();
         expect(text).toContain('hello');
       },
       120_000,
@@ -306,7 +315,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!RUN_INTEGRATION_TESTS)(
       'sends an encrypted unstructured request and returns a decrypted response',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth(import.meta.env.PRIVATEMODE_API_KEY),
           apiBaseURL: TEST_API_BASE_URL,
           browserWasmURL,
@@ -378,7 +387,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!isNode)(
       'retries chatCompletions after refreshing expired secret',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth('test-key'),
         });
 
@@ -392,9 +401,12 @@ describe('PrivatemodeAI', () => {
             if (callCount === 1) {
               throw new Error(wasm.errNoSecretForID() + ' xyz');
             }
-            return JSON.stringify({
-              choices: [{ message: { content: 'Success' } }],
-            });
+            return {
+              body: JSON.stringify({
+                choices: [{ message: { content: 'Success' } }],
+              }),
+              headers: new Headers({ 'x-request-id': 'req_chat' }),
+            };
           });
 
         await client.verify();
@@ -406,9 +418,10 @@ describe('PrivatemodeAI', () => {
 
         expect(callCount).toBe(2);
         expect(wasmMocks.mockUpdateSecret).toHaveBeenCalledTimes(1);
-        expect(response).toEqual({
+        expect(response.body).toEqual({
           choices: [{ message: { content: 'Success' } }],
         });
+        expect(response.headers.get('x-request-id')).toBe('req_chat');
 
         mockChatCompletions.mockRestore();
         wasmMocks.restoreAll();
@@ -418,7 +431,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!isNode)(
       'retries streamChatCompletions after refreshing expired secret',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth('test-key'),
         });
 
@@ -468,7 +481,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!isNode)(
       'retries unstructured after refreshing expired secret',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth('test-key'),
         });
 
@@ -506,7 +519,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!isNode)(
       'retries transcribeAudio after refreshing expired secret',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth('test-key'),
         });
 
@@ -520,7 +533,10 @@ describe('PrivatemodeAI', () => {
             if (callCount === 1) {
               throw new Error(wasm.errNoSecretForID() + ' xyz');
             }
-            return JSON.stringify({ text: 'Success' });
+            return {
+              body: JSON.stringify({ text: 'Success' }),
+              headers: new Headers({ 'x-request-id': 'req_audio' }),
+            };
           });
 
         try {
@@ -537,7 +553,8 @@ describe('PrivatemodeAI', () => {
 
           expect(callCount).toBe(2);
           expect(wasmMocks.mockUpdateSecret).toHaveBeenCalledTimes(1);
-          expect(response).toEqual({ text: 'Success' });
+          expect(response.body).toEqual({ text: 'Success' });
+          expect(response.headers.get('x-request-id')).toBe('req_audio');
         } finally {
           mockTranscribeAudio.mockRestore();
           wasmMocks.restoreAll();
@@ -546,7 +563,7 @@ describe('PrivatemodeAI', () => {
     );
 
     it.skipIf(!isNode)('does not retry on non-secret errors', async () => {
-      const client = new PrivatemodeAI({
+      const client = new PrivatemodeCore({
         auth: apiKeyAuth('test-key'),
       });
 
@@ -577,7 +594,7 @@ describe('PrivatemodeAI', () => {
     });
 
     it.skipIf(!isNode)('throws error if refreshSecret fails', async () => {
-      const client = new PrivatemodeAI({
+      const client = new PrivatemodeCore({
         auth: apiKeyAuth('test-key'),
       });
 
@@ -613,7 +630,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!isNode)(
       'only retries once on repeated secret errors',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth('test-key'),
         });
 
@@ -649,7 +666,7 @@ describe('PrivatemodeAI', () => {
     it.skipIf(!isNode)(
       'retries verify() with new manifest on manifest mismatch',
       async () => {
-        const client = new PrivatemodeAI({
+        const client = new PrivatemodeCore({
           auth: apiKeyAuth('test-key'),
         });
 

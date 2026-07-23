@@ -3,7 +3,6 @@
     LogIn,
     LogOut,
     CreditCard,
-    Key,
     ChartColumn,
     MoreHorizontal,
   } from 'lucide-svelte';

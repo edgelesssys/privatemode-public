@@ -59,7 +59,9 @@
       }
     });
 
+    // eslint-disable-next-line no-useless-assignment -- read on the next run of this reactive block
     previousChatId = chatId;
+    // eslint-disable-next-line no-useless-assignment -- read on the next run of this reactive block
     previousMessageCount = messageCount;
   }
 

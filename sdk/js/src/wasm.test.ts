@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import {
+  chatCompletions,
   initWasm,
   initialize,
   updateSecret,
   privatemodeVersion,
   fetchManifest,
 } from './wasm.js';
+import { PrivatemodeAPIError } from './errors.js';
 
 const isNode = typeof process !== 'undefined' && !!process.versions?.node;
 const manifest = btoa('{}');
@@ -92,6 +94,73 @@ describe('wasm', () => {
       );
       const res = await fetchManifest();
       expect(res).toBe(manifestData);
+    });
+  });
+
+  describe('API errors', () => {
+    it('normalizes successful responses exported by Wasm', async () => {
+      const global = globalThis as Record<string, unknown>;
+      const original = global.chatCompletions;
+      const mock = vi.fn(async () => ({
+        body: JSON.stringify({ id: 'chatcmpl-1' }),
+        headers: { 'x-request-id': 'req_chat' },
+      }));
+      global.chatCompletions = mock;
+
+      try {
+        const response = await chatCompletions('{}', {
+          'x-custom-header': 'custom-value',
+        });
+
+        expect(response.body).toBe(JSON.stringify({ id: 'chatcmpl-1' }));
+        expect(response.headers.get('x-request-id')).toBe('req_chat');
+        expect(mock).toHaveBeenCalledWith(
+          '{}',
+          { 'x-custom-header': 'custom-value' },
+          undefined,
+        );
+      } finally {
+        global.chatCompletions = original;
+      }
+    });
+
+    it('normalizes structured errors exported by Wasm', async () => {
+      const global = globalThis as Record<string, unknown>;
+      const original = global.chatCompletions;
+      const error = Object.assign(new Error('chat completions: Slow down'), {
+        body: JSON.stringify({
+          error: {
+            code: 'rate_limit',
+            message: 'Slow down',
+            type: 'rate_limit_error',
+          },
+        }),
+        headers: { 'retry-after': '2' },
+        name: 'PrivatemodeAPIError',
+        status: 429,
+      });
+      global.chatCompletions = vi.fn(async () => Promise.reject(error));
+
+      try {
+        await expect(chatCompletions('{}')).rejects.toMatchObject({
+          body: {
+            error: {
+              code: 'rate_limit',
+              message: 'Slow down',
+              type: 'rate_limit_error',
+            },
+          },
+          status: 429,
+        });
+        await expect(chatCompletions('{}')).rejects.toBeInstanceOf(
+          PrivatemodeAPIError,
+        );
+        await expect(chatCompletions('{}')).rejects.toMatchObject({
+          headers: expect.any(Headers),
+        });
+      } finally {
+        global.chatCompletions = original;
+      }
     });
   });
 });

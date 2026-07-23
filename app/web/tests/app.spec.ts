@@ -10,6 +10,12 @@ test.describe('General functionality', () => {
     await expect(page.getByPlaceholder('Type a message...')).toBeVisible();
   });
 
+  test('should identify the AI interaction', async ({ page }) => {
+    await expect(
+      page.getByText('You are interacting with an AI system', { exact: true }),
+    ).toBeVisible();
+  });
+
   test('should have sidebar with navigation', async ({ page }) => {
     await expect(page.locator('.new-chat-btn')).toBeVisible();
     await expect(page.locator('a[href="/settings"]')).toBeVisible();
@@ -32,7 +38,9 @@ test.describe('Settings page', () => {
     await expect(
       page.getByRole('heading', { name: 'Appearance' }),
     ).toBeVisible();
-    await expect(page.getByText('System')).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'System', exact: true }),
+    ).toBeVisible();
     await expect(page.getByText('Light')).toBeVisible();
     await expect(page.getByText('Dark')).toBeVisible();
   });
@@ -150,6 +158,33 @@ test.describe('Chat storage', () => {
     await expect(
       page.locator('.chat-item-wrapper').filter({ hasText: 'Test Chat' }),
     ).not.toBeVisible();
+  });
+
+  test('should identify assistant messages as Privatemode AI', async ({
+    page,
+  }) => {
+    const chat = web.createTestChat({
+      messages: [
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Hello from the assistant.',
+          timestamp: Date.now(),
+        },
+      ],
+    });
+    await web.injectTestChat(page, chat);
+    await page.reload();
+    await web.waitForAppReady(page);
+
+    await page
+      .locator('.chat-item-wrapper')
+      .filter({ hasText: 'Test Chat' })
+      .click();
+
+    await expect(page.locator('.message.assistant .role')).toHaveText(
+      'Privatemode AI',
+    );
   });
 });
 

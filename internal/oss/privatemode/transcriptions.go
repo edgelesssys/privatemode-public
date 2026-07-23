@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"slices"
 	"strconv"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
@@ -43,11 +44,30 @@ type AudioTranscriptionOptions struct {
 	ResponseFormat string `json:"response_format,omitempty"`
 	// Temperature controls sampling temperature.
 	Temperature *float32 `json:"temperature,omitempty"`
+	// AdditionalFields contains OpenAI-compatible multipart fields that are not
+	// modeled explicitly above. Field names use the flattened multipart
+	// notation used by the OpenAI SDK, such as "include[]".
+	AdditionalFields map[string][]string `json:"additional_fields,omitempty"`
 }
 
 // TranscribeAudio sends an encrypted request to the OpenAI-compatible
 // audio transcriptions endpoint and returns the decrypted response.
 func (c *Client) TranscribeAudio(ctx context.Context, file AudioFile, opts AudioTranscriptionOptions) ([]byte, error) {
+	resp, err := c.TranscribeAudioWithOptions(ctx, file, opts, RequestOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
+}
+
+// TranscribeAudioWithOptions sends an encrypted request to the OpenAI-compatible
+// audio transcriptions endpoint and preserves the response headers.
+func (c *Client) TranscribeAudioWithOptions(
+	ctx context.Context,
+	file AudioFile,
+	opts AudioTranscriptionOptions,
+	requestOpts RequestOptions,
+) (*Response, error) {
 	if len(file.Content) == 0 {
 		return nil, fmt.Errorf("audio file content must not be empty")
 	}
@@ -70,6 +90,7 @@ func (c *Client) TranscribeAudio(ctx context.Context, file AudioFile, opts Audio
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
+	req.Header = cloneRequestHeader(requestOpts.Header)
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set(constants.PrivatemodeTargetModel, opts.Model)
 
@@ -84,7 +105,7 @@ func (c *Client) TranscribeAudio(ctx context.Context, file AudioFile, opts Audio
 		return nil, fmt.Errorf("reading decrypted response: %w", err)
 	}
 
-	return decrypted, nil
+	return &Response{Header: resp.Header.Clone(), Body: decrypted}, nil
 }
 
 func buildAudioTranscriptionBody(file AudioFile, opts AudioTranscriptionOptions) ([]byte, string, error) {
@@ -112,6 +133,18 @@ func buildAudioTranscriptionBody(file AudioFile, opts AudioTranscriptionOptions)
 	if opts.Temperature != nil {
 		if err := writer.WriteField("temperature", strconv.FormatFloat(float64(*opts.Temperature), 'f', -1, 32)); err != nil {
 			return nil, "", fmt.Errorf("writing temperature field: %w", err)
+		}
+	}
+	fieldNames := make([]string, 0, len(opts.AdditionalFields))
+	for name := range opts.AdditionalFields {
+		fieldNames = append(fieldNames, name)
+	}
+	slices.Sort(fieldNames)
+	for _, name := range fieldNames {
+		for _, value := range opts.AdditionalFields[name] {
+			if err := writer.WriteField(name, value); err != nil {
+				return nil, "", fmt.Errorf("writing %s field: %w", name, err)
+			}
 		}
 	}
 

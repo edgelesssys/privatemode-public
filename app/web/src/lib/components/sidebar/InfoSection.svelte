@@ -8,6 +8,7 @@
     TriangleAlert,
   } from 'lucide-svelte';
   import { clientError, clientReady, clientVerifying } from '$lib/clientStore';
+  import { resolve } from '$app/paths';
 
   export let collapsed: boolean;
   export let onMobileClose: () => void;
@@ -18,6 +19,7 @@
     {#if $clientError && !$clientVerifying}
       <p
         class="info-item error-info"
+        role="status"
         title={collapsed ? 'Connection failed' : ''}
       >
         <TriangleAlert size={18} />
@@ -27,6 +29,7 @@
         >
       </p>
     {:else if $clientVerifying}
+      <!-- No live region here: the chat page already announces this state. -->
       <p
         class="info-item connecting-info"
         title={collapsed ? 'Connecting...' : ''}
@@ -40,7 +43,7 @@
     {:else if $clientReady}
       <a
         class="info-item security-info"
-        href="/security"
+        href={resolve('/security')}
         on:click={onMobileClose}
         title={collapsed ? 'Your session is secure' : ''}
       >
@@ -53,7 +56,7 @@
     {/if}
     <a
       class="info-item"
-      href="/settings"
+      href={resolve('/settings')}
       on:click={onMobileClose}
       title={collapsed ? 'Settings' : ''}
     >

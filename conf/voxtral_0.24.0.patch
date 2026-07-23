@@ -1,25 +1,25 @@
-diff --git a/vllm/entrypoints/openai/speech_to_text/speech_to_text.py b/vllm/entrypoints/openai/speech_to_text/speech_to_text.py
-index 3c2ccc52e..6277389a1 100644
---- a/vllm/entrypoints/openai/speech_to_text/speech_to_text.py
-+++ b/vllm/entrypoints/openai/speech_to_text/speech_to_text.py
-@@ -40,13 +40,13 @@ from vllm.entrypoints.openai.speech_to_text.protocol import (
- )
- from vllm.entrypoints.utils import get_max_tokens
+diff --git a/vllm/entrypoints/speech_to_text/base/serving.py b/vllm/entrypoints/speech_to_text/base/serving.py
+index a8f3882e5..23ac43b7f 100644
+--- a/vllm/entrypoints/speech_to_text/base/serving.py
++++ b/vllm/entrypoints/speech_to_text/base/serving.py
+@@ -30,13 +30,13 @@ from vllm.entrypoints.serve.engine.typing import SpeechToTextRequest
+ from vllm.entrypoints.serve.utils.api_utils import get_max_tokens
+ from vllm.entrypoints.serve.utils.request_logger import RequestLogger
  from vllm.exceptions import VLLMValidationError
 -from vllm.inputs import EncoderDecoderInput, EngineInput
 +from vllm.inputs import EncoderDecoderInput, EngineInput, PromptType
  from vllm.logger import init_logger
  from vllm.logprobs import FlatLogprobs, Logprob
  from vllm.model_executor.models import SupportsTranscription
- from vllm.multimodal.audio import get_audio_duration, split_audio
+ from vllm.multimodal.audio import get_audio_duration, resample_audio_pyav, split_audio
  from vllm.outputs import RequestOutput
 -from vllm.renderers.inputs import DictPrompt, EncoderDecoderDictPrompt
 +from vllm.renderers.inputs import DictPrompt
  from vllm.renderers.inputs.preprocess import parse_enc_dec_prompt, parse_model_prompt
  from vllm.sampling_params import BeamSearchParams, SamplingParams
  from vllm.tokenizers import get_tokenizer
-@@ -88,6 +88,185 @@ def asr_inter_chunk_separator(
-     return "" if language and language.lower() in no_space_languages else " "
+@@ -155,6 +155,185 @@ def decode_audio(
+         raise ValueError("Invalid or unsupported audio file.") from exc
  
  
 +def voxtralInitTokens(tokenizer: PreTrainedTokenizerBase) -> list[int]:
@@ -201,10 +201,10 @@ index 3c2ccc52e..6277389a1 100644
 +    return segments
 +
 +
- def decode_audio(audio_data: bytes, sample_rate: int) -> tuple[np.ndarray, int]:
-     try:
-         with io.BytesIO(audio_data) as bytes_:
-@@ -303,8 +482,7 @@ class OpenAISpeechToText(OpenAIServing):
+ class OpenAISpeechToText(OpenAIServing):
+     """Base class for speech-to-text operations like transcription and
+     translation."""
+@@ -358,8 +537,7 @@ class OpenAISpeechToText(OpenAIServing):
  
              parsed_prompt: DictPrompt
              if request.response_format == "verbose_json":
@@ -214,7 +214,7 @@ index 3c2ccc52e..6277389a1 100644
              else:
                  parsed_prompt = parse_model_prompt(self.model_config, prompt)
  
-@@ -316,8 +494,18 @@ class OpenAISpeechToText(OpenAIServing):
+@@ -371,8 +549,18 @@ class OpenAISpeechToText(OpenAIServing):
  
          return engine_inputs, start_times, duration
  
@@ -235,7 +235,7 @@ index 3c2ccc52e..6277389a1 100644
  
          if not (isinstance(dec_prompt, dict) and "prompt" in dec_prompt):
              raise VLLMValidationError(
-@@ -330,7 +518,7 @@ class OpenAISpeechToText(OpenAIServing):
+@@ -385,7 +573,7 @@ class OpenAISpeechToText(OpenAIServing):
              "<|notimestamps|>", "<|0.00|>"
          )
  
@@ -244,7 +244,7 @@ index 3c2ccc52e..6277389a1 100644
  
      @staticmethod
      def _get_decoder_prompt_len(engine_inputs: list[EngineInput]) -> int:
-@@ -372,6 +560,69 @@ class OpenAISpeechToText(OpenAIServing):
+@@ -427,6 +615,69 @@ class OpenAISpeechToText(OpenAIServing):
          Note: No_speech_prob field is not supported
          in this implementation and will be None. See docs for details.
          """
@@ -315,7 +315,7 @@ index 3c2ccc52e..6277389a1 100644
          init_token = self.tokenizer.encode("<|0.00|>", add_special_tokens=False)[0]
          if tokens[-1] == self.tokenizer.eos_token_id:
 diff --git a/vllm/model_executor/models/voxtral.py b/vllm/model_executor/models/voxtral.py
-index 42e811eda..b82c01394 100644
+index baf6d5c73..b44ea19a2 100644
 --- a/vllm/model_executor/models/voxtral.py
 +++ b/vllm/model_executor/models/voxtral.py
 @@ -311,6 +311,7 @@ class VoxtralForConditionalGeneration(
@@ -326,7 +326,7 @@ index 42e811eda..b82c01394 100644
  
      packed_modules_mapping = {
          "qkv_proj": ["q_proj", "k_proj", "v_proj"],
-@@ -434,13 +435,18 @@ class VoxtralForConditionalGeneration(
+@@ -438,13 +439,18 @@ class VoxtralForConditionalGeneration(
      ) -> SpeechToTextConfig:
          tokenizer = cached_tokenizer_from_config(model_config)
          audio_config = tokenizer.instruct.audio_encoder.audio_config

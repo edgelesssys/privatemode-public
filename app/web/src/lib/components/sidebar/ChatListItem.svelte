@@ -62,6 +62,7 @@
     <input
       class="rename-input"
       type="text"
+      aria-label="Chat name"
       bind:value={renameValue}
       bind:this={inputElement}
       on:keydown={handleKeydown}
@@ -74,6 +75,7 @@
         <button
           class="rename-btn"
           type="button"
+          aria-label="Rename chat"
           on:click={onStartRename}
         >
           <Pencil size={16} />
@@ -83,6 +85,7 @@
         <button
           class="delete-btn"
           type="button"
+          aria-label="Delete chat"
           on:click={onDelete}
         >
           <Trash2 size={16} />
@@ -143,7 +146,9 @@
   }
 
   .chat-item-wrapper:hover .rename-btn,
-  .chat-item-wrapper:hover .delete-btn {
+  .chat-item-wrapper:hover .delete-btn,
+  .chat-item-wrapper:focus-within .rename-btn,
+  .chat-item-wrapper:focus-within .delete-btn {
     opacity: 1;
   }
 
@@ -165,6 +170,5 @@
     color: var(--color-text-primary);
     padding: 0.25rem 0.5rem;
     font-size: 0.875rem;
-    outline: none;
   }
 </style>

@@ -6,9 +6,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"strings"
 	"syscall/js"
 	"time"
 
@@ -226,11 +229,16 @@ func (w *privatemodeWasmWrapper) fetchManifest(this js.Value, args []js.Value) a
 // response from the /v1/chat/completions endpoint.
 // Arguments:
 //   - args[0]: JSON request body (string)
+//   - args[1]: (optional) additional request headers.
+//   - args[2]: (optional) JS AbortSignal for cancellation.
 //
-// The returned Promise resolves with the decrypted response body as a
-// string, or rejects with a JS Error on failure.
+// The returned Promise resolves with the decrypted response body and headers,
+// or rejects with a JS Error on failure. If the AbortSignal is triggered,
+// the request is cancelled and the Promise rejects with an AbortError.
 func (w *privatemodeWasmWrapper) chatCompletions(this js.Value, args []js.Value) any {
 	body := args[0].String()
+	opts := requestOptionsFromArg(args, 1)
+	abortSignal := abortSignalFromArg(args, 2)
 
 	promiseConstructor := js.Global().Get("Promise")
 	promiseFunc := func(_ js.Value, promiseArgs []js.Value) any {
@@ -238,12 +246,22 @@ func (w *privatemodeWasmWrapper) chatCompletions(this js.Value, args []js.Value)
 		reject := promiseArgs[1]
 
 		go func() {
-			resp, err := w.client.ChatCompletions(context.Background(), []byte(body))
-			if err != nil {
-				reject.Invoke(js.Global().Get("Error").New(fmt.Sprintf("chat completions: %s", err)))
+			ctx, release, aborted := contextWithAbortSignal(context.Background(), abortSignal)
+			defer release()
+			if aborted {
+				reject.Invoke(newDOMAbortError())
 				return
 			}
-			resolve.Invoke(js.ValueOf(string(resp)))
+			resp, err := w.client.ChatCompletionsWithOptions(ctx, []byte(body), opts)
+			if err != nil {
+				if ctx.Err() != nil {
+					reject.Invoke(newDOMAbortError())
+					return
+				}
+				reject.Invoke(newJSError(err, "chat completions: %s", err))
+				return
+			}
+			resolve.Invoke(newJSResponse(resp))
 		}()
 
 		return nil
@@ -261,6 +279,8 @@ func (w *privatemodeWasmWrapper) chatCompletions(this js.Value, args []js.Value)
 //   - args[0]: JSON request body (string). Should include "stream": true.
 //   - args[1]: JS callback function called with each decrypted chunk (string).
 //   - args[2]: (optional) JS AbortSignal for cancellation.
+//   - args[3]: (optional) JS callback called with the response headers.
+//   - args[4]: (optional) additional request headers.
 //
 // The returned Promise resolves with undefined when the stream ends,
 // or rejects with a JS Error on failure. If the AbortSignal is
@@ -269,11 +289,12 @@ func (w *privatemodeWasmWrapper) chatCompletions(this js.Value, args []js.Value)
 func (w *privatemodeWasmWrapper) streamChatCompletions(this js.Value, args []js.Value) any {
 	body := args[0].String()
 	onChunk := args[1]
-
-	var abortSignal js.Value
-	if len(args) > 2 && !args[2].IsUndefined() && !args[2].IsNull() {
-		abortSignal = args[2]
+	var onHeaders js.Value
+	if len(args) > 3 && !args[3].IsUndefined() && !args[3].IsNull() {
+		onHeaders = args[3]
 	}
+	opts := requestOptionsFromArg(args, 4)
+	abortSignal := abortSignalFromArg(args, 2)
 
 	promiseConstructor := js.Global().Get("Promise")
 	promiseFunc := func(_ js.Value, promiseArgs []js.Value) any {
@@ -281,34 +302,26 @@ func (w *privatemodeWasmWrapper) streamChatCompletions(this js.Value, args []js.
 		reject := promiseArgs[1]
 
 		go func() {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			// If an AbortSignal was provided, listen for the abort event
-			// and cancel the Go context when it fires.
-			if abortSignal.Truthy() {
-				if abortSignal.Get("aborted").Bool() {
-					reject.Invoke(newDOMAbortError())
-					return
-				}
-				onAbort := js.FuncOf(func(_ js.Value, _ []js.Value) any {
-					cancel()
-					return nil
-				})
-				defer onAbort.Release()
-				abortSignal.Call("addEventListener", "abort", onAbort, map[string]any{"once": true})
+			ctx, release, aborted := contextWithAbortSignal(context.Background(), abortSignal)
+			defer release()
+			if aborted {
+				reject.Invoke(newDOMAbortError())
+				return
 			}
 
-			stream, err := w.client.StreamChatCompletions(ctx, []byte(body))
+			stream, err := w.client.StreamChatCompletionsWithOptions(ctx, []byte(body), opts)
 			if err != nil {
 				if ctx.Err() != nil {
 					reject.Invoke(newDOMAbortError())
 					return
 				}
-				reject.Invoke(js.Global().Get("Error").New(fmt.Sprintf("stream chat completions: %s", err)))
+				reject.Invoke(newJSError(err, "stream chat completions: %s", err))
 				return
 			}
 			defer stream.Close()
+			if onHeaders.Truthy() {
+				onHeaders.Invoke(js.ValueOf(headerToJS(stream.Header)))
+			}
 
 			for chunk, err := range stream.All() {
 				if err != nil {
@@ -316,7 +329,7 @@ func (w *privatemodeWasmWrapper) streamChatCompletions(this js.Value, args []js.
 						reject.Invoke(newDOMAbortError())
 						return
 					}
-					reject.Invoke(js.Global().Get("Error").New(fmt.Sprintf("reading stream chunk: %s", err)))
+					reject.Invoke(newJSError(err, "reading stream chunk: %s", err))
 					return
 				}
 				onChunk.Invoke(js.ValueOf(string(chunk)))
@@ -337,6 +350,83 @@ func (w *privatemodeWasmWrapper) streamChatCompletions(this js.Value, args []js.
 // matching what the browser's AbortController produces.
 func newDOMAbortError() js.Value {
 	return js.Global().Get("DOMException").New("The operation was aborted.", "AbortError")
+}
+
+// abortSignalFromArg returns the optional JS AbortSignal at index, or the
+// zero js.Value if the argument is absent.
+func abortSignalFromArg(args []js.Value, index int) js.Value {
+	if len(args) <= index || args[index].IsUndefined() || args[index].IsNull() {
+		return js.Value{}
+	}
+	return args[index]
+}
+
+// contextWithAbortSignal derives a context that is cancelled when the given
+// JS AbortSignal fires. It returns the context, a release function that must
+// be deferred, and whether the signal had already been aborted.
+func contextWithAbortSignal(ctx context.Context, abortSignal js.Value) (_ context.Context, release func(), aborted bool) {
+	ctx, cancel := context.WithCancel(ctx)
+	if !abortSignal.Truthy() {
+		return ctx, cancel, false
+	}
+	if abortSignal.Get("aborted").Bool() {
+		cancel()
+		return ctx, cancel, true
+	}
+	onAbort := js.FuncOf(func(_ js.Value, _ []js.Value) any {
+		cancel()
+		return nil
+	})
+	abortSignal.Call("addEventListener", "abort", onAbort, map[string]any{"once": true})
+	return ctx, func() {
+		cancel()
+		onAbort.Release()
+	}, false
+}
+
+func requestOptionsFromArg(args []js.Value, index int) privatemode.RequestOptions {
+	if len(args) <= index || args[index].IsUndefined() || args[index].IsNull() {
+		return privatemode.RequestOptions{}
+	}
+
+	value := args[index]
+	keys := js.Global().Get("Object").Call("keys", value)
+	header := make(http.Header, keys.Length())
+	for i := range keys.Length() {
+		name := keys.Index(i).String()
+		header.Set(name, value.Get(name).String())
+	}
+	return privatemode.RequestOptions{Header: header}
+}
+
+func headerToJS(header http.Header) map[string]any {
+	headers := make(map[string]any, len(header))
+	for name, values := range header {
+		headers[name] = strings.Join(values, ", ")
+	}
+	return headers
+}
+
+func newJSResponse(resp *privatemode.Response) js.Value {
+	return js.ValueOf(map[string]any{
+		"body":    string(resp.Body),
+		"headers": headerToJS(resp.Header),
+	})
+}
+
+// newJSError creates a JS Error for err with a message built from format and
+// args. If err wraps a [privatemode.ResponseError], the API response details
+// are attached to the JS error.
+func newJSError(err error, format string, args ...any) js.Value {
+	jsErr := js.Global().Get("Error").New(fmt.Sprintf(format, args...))
+	var responseErr *privatemode.ResponseError
+	if errors.As(err, &responseErr) {
+		jsErr.Set("name", "PrivatemodeAPIError")
+		jsErr.Set("status", responseErr.StatusCode)
+		jsErr.Set("body", string(responseErr.Body))
+		jsErr.Set("headers", js.ValueOf(headerToJS(responseErr.Header)))
+	}
+	return jsErr
 }
 
 // unstructured returns a JS Promise that resolves with the decrypted
@@ -388,7 +478,7 @@ func (w *privatemodeWasmWrapper) unstructured(this js.Value, args []js.Value) an
 		go func() {
 			resp, err := w.client.Unstructured(context.Background(), files, opts)
 			if err != nil {
-				reject.Invoke(js.Global().Get("Error").New(fmt.Sprintf("unstructured: %s", err)))
+				reject.Invoke(newJSError(err, "unstructured: %s", err))
 				return
 			}
 			resolve.Invoke(js.ValueOf(string(resp)))
@@ -408,9 +498,12 @@ func (w *privatemodeWasmWrapper) unstructured(this js.Value, args []js.Value) an
 //   - args[0]: JS file object with "name" (string), "content"
 //     (Uint8Array), and optional "contentType" (string).
 //   - args[1]: JSON-encoded options string.
+//   - args[2]: (optional) additional request headers.
+//   - args[3]: (optional) JS AbortSignal for cancellation.
 //
-// The returned Promise resolves with the decrypted response body as a
-// string, or rejects with a JS Error on failure.
+// The returned Promise resolves with the decrypted response body and headers,
+// or rejects with a JS Error on failure. If the AbortSignal is triggered,
+// the request is cancelled and the Promise rejects with an AbortError.
 func (w *privatemodeWasmWrapper) transcribeAudio(this js.Value, args []js.Value) any {
 	jsFile := args[0]
 	jsContent := jsFile.Get("content")
@@ -433,6 +526,8 @@ func (w *privatemodeWasmWrapper) transcribeAudio(this js.Value, args []js.Value)
 				js.Global().Get("Error").New(fmt.Sprintf("transcribe audio: parsing options: %s", err)))
 		}
 	}
+	requestOpts := requestOptionsFromArg(args, 2)
+	abortSignal := abortSignalFromArg(args, 3)
 
 	promiseConstructor := js.Global().Get("Promise")
 	promiseFunc := func(_ js.Value, promiseArgs []js.Value) any {
@@ -442,12 +537,22 @@ func (w *privatemodeWasmWrapper) transcribeAudio(this js.Value, args []js.Value)
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()
-			resp, err := w.client.TranscribeAudio(ctx, file, opts)
-			if err != nil {
-				reject.Invoke(js.Global().Get("Error").New(fmt.Sprintf("transcribe audio: %s", err)))
+			ctx, release, aborted := contextWithAbortSignal(ctx, abortSignal)
+			defer release()
+			if aborted {
+				reject.Invoke(newDOMAbortError())
 				return
 			}
-			resolve.Invoke(js.ValueOf(string(resp)))
+			resp, err := w.client.TranscribeAudioWithOptions(ctx, file, opts, requestOpts)
+			if err != nil {
+				if errors.Is(ctx.Err(), context.Canceled) {
+					reject.Invoke(newDOMAbortError())
+					return
+				}
+				reject.Invoke(newJSError(err, "transcribe audio: %s", err))
+				return
+			}
+			resolve.Invoke(newJSResponse(resp))
 		}()
 
 		return nil
@@ -460,14 +565,19 @@ func (w *privatemodeWasmWrapper) transcribeAudio(this js.Value, args []js.Value)
 
 // listModels returns a JS Promise that resolves with the JSON response
 // from the /v1/models endpoint.
-// It takes no JS arguments.
+// Arguments:
+//   - args[0]: (optional) additional request headers.
+//   - args[1]: (optional) JS AbortSignal for cancellation.
 //
 // [initialize] must have been called before calling this, as the
 // API key and base URL are set during initialization.
 //
-// The returned Promise resolves with the response body as a string,
-// or rejects with a JS Error on failure.
+// The returned Promise resolves with the response body and headers, or rejects
+// with a JS Error on failure. If the AbortSignal is triggered, the request
+// is cancelled and the Promise rejects with an AbortError.
 func (w *privatemodeWasmWrapper) listModels(this js.Value, args []js.Value) any {
+	opts := requestOptionsFromArg(args, 0)
+	abortSignal := abortSignalFromArg(args, 1)
 	promiseConstructor := js.Global().Get("Promise")
 
 	promiseFunc := func(_ js.Value, promiseArgs []js.Value) any {
@@ -477,12 +587,22 @@ func (w *privatemodeWasmWrapper) listModels(this js.Value, args []js.Value) any 
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			resp, err := w.client.ListModels(ctx)
-			if err != nil {
-				reject.Invoke(js.Global().Get("Error").New(fmt.Sprintf("listing models: %s", err)))
+			ctx, release, aborted := contextWithAbortSignal(ctx, abortSignal)
+			defer release()
+			if aborted {
+				reject.Invoke(newDOMAbortError())
 				return
 			}
-			resolve.Invoke(js.ValueOf(string(resp)))
+			resp, err := w.client.ListModelsWithOptions(ctx, opts)
+			if err != nil {
+				if errors.Is(ctx.Err(), context.Canceled) {
+					reject.Invoke(newDOMAbortError())
+					return
+				}
+				reject.Invoke(newJSError(err, "listing models: %s", err))
+				return
+			}
+			resolve.Invoke(newJSResponse(resp))
 		}()
 
 		return nil

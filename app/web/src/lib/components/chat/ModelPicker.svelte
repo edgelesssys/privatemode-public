@@ -2,15 +2,14 @@
   import { onMount } from 'svelte';
   import { ChevronUp, ChevronDown } from 'lucide-svelte';
   import Tooltip from '../common/Tooltip.svelte';
-  import type { Model } from '$lib/clientStore';
+  import type { Model, PrivatemodeClient } from '$lib/clientStore';
   import { modelConfig, DEFAULT_MODEL_ID } from '$lib/models';
   import {
     loadModels as loadModelsFromClient,
     models as modelsStore,
   } from '$lib/clientStore';
-  import type { PrivatemodeAI } from 'privatemode-ai';
 
-  export let privatemodeAIClient: PrivatemodeAI | null = null;
+  export let privatemodeAIClient: PrivatemodeClient | null = null;
   export let selectedModel: string = '';
   export let disabled: boolean = false;
   export let lockedModel: string | undefined = undefined;
@@ -21,9 +20,10 @@
   let isOpen = false;
   let loading = false;
   let error: string | null = null;
-  let loadedClient: PrivatemodeAI | null = null;
+  let loadedClient: PrivatemodeClient | null = null;
   let pickerElement: HTMLDivElement;
   let dropdownElement: HTMLDivElement;
+  let buttonElement: HTMLButtonElement;
 
   onMount(() => {
     const savedModel = localStorage.getItem(SELECTED_MODEL_KEY);
@@ -40,15 +40,18 @@
     };
 
     document.addEventListener('click', handleClickOutside);
+    document.addEventListener('keydown', handleKeydown);
     window.addEventListener('online', handleOnline);
 
     return () => {
       document.removeEventListener('click', handleClickOutside);
+      document.removeEventListener('keydown', handleKeydown);
       window.removeEventListener('online', handleOnline);
     };
   });
 
   $: if (privatemodeAIClient && privatemodeAIClient !== loadedClient) {
+    // eslint-disable-next-line no-useless-assignment -- read on the next run of this reactive block
     loadedClient = privatemodeAIClient;
     loadModels();
   }
@@ -56,6 +59,13 @@
   function handleClickOutside(event: MouseEvent) {
     if (pickerElement && !pickerElement.contains(event.target as Node)) {
       isOpen = false;
+    }
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && isOpen) {
+      isOpen = false;
+      buttonElement?.focus();
     }
   }
 
@@ -142,6 +152,8 @@
     <button
       class="model-button"
       type="button"
+      aria-expanded={isOpen}
+      bind:this={buttonElement}
       on:click={togglePicker}
     >
       <span class="model-name"
@@ -163,13 +175,18 @@
       bind:this={dropdownElement}
     >
       {#if loading}
-        <div class="loading">Loading models...</div>
+        <div
+          class="loading"
+          role="status"
+        >
+          Loading models...
+        </div>
       {:else if error}
         <div class="error">{error}</div>
       {:else if filteredModels.length === 0}
         <div class="empty">No models available</div>
       {:else}
-        {#each filteredModels as model}
+        {#each filteredModels as model (model.id)}
           <button
             class="model-option"
             class:selected={model.id === selectedModel}

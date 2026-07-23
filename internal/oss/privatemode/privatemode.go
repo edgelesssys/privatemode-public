@@ -38,6 +38,19 @@ type ResponseError struct {
 	Body       []byte
 }
 
+// RequestOptions configures an API request.
+type RequestOptions struct {
+	// Header contains additional request headers. Headers controlled by the
+	// Privatemode client take precedence over values supplied here.
+	Header http.Header
+}
+
+// Response contains a successful API response.
+type Response struct {
+	Header http.Header
+	Body   []byte
+}
+
 func (e *ResponseError) Error() string {
 	return fmt.Sprintf("unexpected status code %d: %s", e.StatusCode, e.Body)
 }
@@ -296,10 +309,21 @@ func (c *Client) ImportSecret(s secretmanager.Secret) error {
 
 // ListModels fetches the list of available models from the API.
 func (c *Client) ListModels(ctx context.Context) ([]byte, error) {
+	resp, err := c.ListModelsWithOptions(ctx, RequestOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
+}
+
+// ListModelsWithOptions fetches the list of available models from the API and
+// preserves the response headers.
+func (c *Client) ListModelsWithOptions(ctx context.Context, opts RequestOptions) (*Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBaseURL+"/v1/models", nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
+	req.Header = cloneRequestHeader(opts.Header)
 	resp, err := c.doAPIRequest(req)
 	if err != nil {
 		return nil, err
@@ -311,7 +335,14 @@ func (c *Client) ListModels(ctx context.Context) ([]byte, error) {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 
-	return respBody, nil
+	return &Response{Header: resp.Header.Clone(), Body: respBody}, nil
+}
+
+func cloneRequestHeader(header http.Header) http.Header {
+	if header == nil {
+		return make(http.Header)
+	}
+	return header.Clone()
 }
 
 // doAPIRequest sets common Privatemode headers on req, sends it, and

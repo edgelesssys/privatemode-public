@@ -61,6 +61,7 @@
   <button
     class="org-subtitle"
     type="button"
+    aria-expanded={open}
     bind:this={buttonRef}
     on:click={toggle}
   >

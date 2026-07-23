@@ -1,4 +1,7 @@
-<div class="image-chip loading-image-chip">
+<div
+  class="image-chip loading-image-chip"
+  role="status"
+>
   <div class="image-thumbnail-placeholder">
     <div class="loading-spinner"></div>
   </div>
