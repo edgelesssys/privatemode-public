@@ -1,11 +1,104 @@
 # sitecustomize.py - auto-loaded by CPython on startup if on sys.path.
 #
-# Suppresses a narrow, known-noisy print() from the remote-code tokenizer
-# path. The conversion failure is benign and does not affect inference, but
-# the upstream code emits it via print(), which routes the full traceback
-# to stdout. Replace print() with a filter that drops this specific message.
+# 1. Drops a benign, noisy print() from the remote-code tokenizer path.
+# 2. If VLLM_MEM_POLL_SECONDS is set, emits periodic "MEMSTATS {json}" lines
+#    with torch allocator stats (reserved vs. allocated fragmentation) that
+#    nvidia-smi cannot see from outside the process.
 import builtins
+import json
+import os
 import sys
+import threading
+import time
+
+
+def _mem_poll_loop(interval, with_snapshot):
+    last_error = None
+    while True:
+        time.sleep(interval)
+        try:
+            # Never import torch here; sitecustomize loads into every python
+            # subprocess. Only report processes that already use CUDA.
+            torch = sys.modules.get("torch")
+            if torch is None or not hasattr(torch, "cuda"):
+                continue
+            if not torch.cuda.is_initialized():
+                continue
+            snapshot = None  # global snapshot, taken lazily once per poll
+            snapshot_ms = 0
+            for dev in range(torch.cuda.device_count()):
+                # memory_stats() is a free stat read; mem_get_info() runs under
+                # a device guard and would create a ~0.5GiB context on unused
+                # devices, so gate it on reserved>0 (proves a context exists).
+                s = torch.cuda.memory_stats(dev)
+                reserved = s.get("reserved_bytes.all.current", 0)
+                if not reserved:
+                    continue
+                free, total = torch.cuda.mem_get_info(dev)
+                allocated = s.get("allocated_bytes.all.current", 0)
+                rec = {
+                    "ts": round(time.time(), 1),
+                    "pid": os.getpid(),
+                    "dev": dev,
+                    "device_free_mib": free >> 20,
+                    "device_total_mib": total >> 20,
+                    "reserved_mib": reserved >> 20,
+                    "allocated_mib": allocated >> 20,
+                    "resv_unalloc_mib": (reserved - allocated) >> 20,
+                    "inactive_split_mib": s.get("inactive_split_bytes.all.current", 0)
+                    >> 20,
+                    "alloc_retries": s.get("num_alloc_retries", 0),
+                    "ooms": s.get("num_ooms", 0),
+                }
+                if with_snapshot:
+                    # largest_free_block: an alloc bigger than both it and
+                    # device_free fails -> the fragmentation limit.
+                    if snapshot is None:
+                        # holds the allocator lock; disable via
+                        # VLLM_MEM_POLL_SNAPSHOT=0 if snapshot_ms grows large.
+                        t0 = time.monotonic()
+                        snapshot = torch.cuda.memory_snapshot()
+                        snapshot_ms = int((time.monotonic() - t0) * 1000)
+                    largest = 0
+                    free_cached = 0
+                    for seg in snapshot:
+                        if seg.get("device", dev) != dev:
+                            continue
+                        for blk in seg.get("blocks", []):
+                            if blk.get("state") == "inactive":
+                                size = blk.get("size", 0)
+                                free_cached += size
+                                largest = max(largest, size)
+                    rec["largest_free_block_mib"] = largest >> 20
+                    rec["free_cached_mib"] = free_cached >> 20
+                    rec["snapshot_ms"] = snapshot_ms
+                sys.stderr.write("MEMSTATS " + json.dumps(rec) + "\n")
+                sys.stderr.flush()
+            last_error = None
+        except Exception as exc:  # never take down the host process
+            msg = repr(exc)  # log each distinct persistent error only once
+            if msg != last_error:
+                last_error = msg
+                try:
+                    sys.stderr.write("MEMSTATS error: %s\n" % msg)
+                    sys.stderr.flush()
+                except Exception:
+                    pass
+
+
+_mem_poll_seconds = os.environ.get("VLLM_MEM_POLL_SECONDS")
+if _mem_poll_seconds:
+    try:
+        _interval = float(_mem_poll_seconds)
+        if _interval <= 0:  # non-positive would hot-spin the allocator lock
+            raise ValueError("VLLM_MEM_POLL_SECONDS must be > 0")
+        threading.Thread(
+            target=_mem_poll_loop,
+            args=(_interval, os.environ.get("VLLM_MEM_POLL_SNAPSHOT", "1") != "0"),
+            daemon=True,
+        ).start()
+    except Exception:
+        pass
 
 _real_print = builtins.print
 

@@ -16,11 +16,13 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/textproto"
 	"strings"
 	"time"
 
+	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/edgelesssys/continuum/internal/oss/persist"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
 )
@@ -144,10 +146,17 @@ func (f *Forwarder) Forward(
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			log.WarnContext(ctx, "Connection closed by client before request could be fully forwarded", "error", err)
-		} else {
-			log.ErrorContext(ctx, "Failed to forward request", "error", err)
+			HTTPError(w, req, http.StatusInternalServerError, "forwarding request: %s", err)
+			return
 		}
-		HTTPError(w, req, http.StatusInternalServerError, "forwarding request: %s", err)
+		// Upstream failures report as gateway errors (502/504); 500 is for proxy-internal faults.
+		status := http.StatusInternalServerError
+		var upErr *transportError
+		if errors.As(err, &upErr) {
+			status = upErr.status
+		}
+		log.ErrorContext(ctx, "Failed to forward request", "error", err, "status", status)
+		HTTPError(w, req, status, "forwarding request: %s", err)
 		return
 	}
 	// Response body closing happens below, dependent on the mapper.
@@ -180,10 +189,14 @@ func (f *Forwarder) Forward(
 	if err := SendResponse(w, dsResp); err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() == context.Canceled {
 			log.WarnContext(ctx, "Connection closed by client before forwarding finished", "error", err)
-		} else {
-			log.ErrorContext(ctx, "Failed sending response to downstream client", "error", err)
+			return
 		}
-		return
+		// The status and headers are already committed, so we cannot turn this into a gateway
+		// error. Abort the connection instead of letting net/http terminate the chunked stream
+		// cleanly, so the client sees a failed rather than a complete response.
+		log.ErrorContext(ctx, "Failed sending response to downstream client, aborting connection", "error", err)
+		logging.AddSummaryAttrs(ctx, "aborted", true)
+		panic(http.ErrAbortHandler)
 	}
 
 	// Log error status codes
@@ -259,8 +272,11 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 
 	resp, err := f.client.Do(req)
 	if err != nil {
+		// Transport error contacting the upstream: report as a gateway error, not a 500.
+		upErr := newTransportError(err)
+		// No upstream status is available; pass -1 to the retry callback.
 		shouldRetry, retryErr := f.shouldRetry(req.Context(), retryCallback, err.Error(), -1, attempt)
-		return shouldRetry, nil, errors.Join(err, retryErr)
+		return shouldRetry, nil, errors.Join(upErr, retryErr)
 	}
 
 	// Check if we should retry based on status code
@@ -280,6 +296,25 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 	shouldRetry, retryErr := f.shouldRetry(req.Context(), retryCallback, string(bodyBytes), resp.StatusCode, attempt)
 	return shouldRetry, resp, errors.Join(readErr, retryErr)
 }
+
+// transportError wraps a failure contacting the upstream, carrying the gateway status
+// (504 on timeout, else 502) to report downstream instead of a 500.
+type transportError struct {
+	status int
+	err    error
+}
+
+func newTransportError(err error) *transportError {
+	status := http.StatusBadGateway
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		status = http.StatusGatewayTimeout
+	}
+	return &transportError{status: status, err: err}
+}
+
+func (e *transportError) Error() string { return e.err.Error() }
+func (e *transportError) Unwrap() error { return e.err }
 
 // sendWithRetry handles the retry logic for forwarding requests.
 func (f *Forwarder) sendWithRetry(req *http.Request, requestMutator RequestMutator, retryCallback RetryCallback) (*http.Response, error) {

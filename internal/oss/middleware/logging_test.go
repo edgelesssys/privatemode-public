@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSummaryServedLine(t *testing.T) {
+func TestSummaryServedLog(t *testing.T) {
 	respBody := "hello world response"
 	reqBody := strings.Repeat("x", 1234)
 	chunk := "data: chunk\n\n"
@@ -88,7 +88,7 @@ func TestSummaryServedLine(t *testing.T) {
 				assert.Equal(t, "failure", a["outcome"])
 			},
 		},
-		"attrs added via context appear on the line": {
+		"attrs added via context appear on the log": {
 			handler: func(_ http.ResponseWriter, r *http.Request) {
 				logging.AddSummaryAttrs(r.Context(), "pattern", "POST /v1/chat/completions", "apiKey", "secret")
 			},
@@ -111,6 +111,27 @@ func TestSummaryServedLine(t *testing.T) {
 			tc.assert(t, recordToAttrMap(rec.records[0]))
 		})
 	}
+}
+
+func TestSummaryServedLogOnPanic(t *testing.T) {
+	rec := &recordingHandler{}
+	handler := LogRequestSummary(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		logging.AddSummaryAttrs(r.Context(), "aborted", true)
+		panic(http.ErrAbortHandler)
+	}), slog.New(rec), false)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/chat/completions", http.NoBody)
+
+	assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	})
+
+	require.Len(t, rec.records, 1)
+	assert.Equal(t, "Served request", rec.records[0].Message)
+	a := recordToAttrMap(rec.records[0])
+	assert.EqualValues(t, http.StatusOK, a["httpStatus"])
+	assert.Equal(t, true, a["aborted"])
 }
 
 func TestSummaryStartLog(t *testing.T) {

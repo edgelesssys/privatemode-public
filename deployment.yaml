@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: secret-service
-  namespace: continuum-62689e
+  namespace: continuum-9d1620
   labels:
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 spec:
   replicas: 3
   serviceName: secret-service-headless
@@ -15,14 +15,14 @@ spec:
     metadata:
       labels:
         app: secret-service
-        app.kubernetes.io/instance: '62689e'
+        app.kubernetes.io/instance: '9d1620'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
     spec:
       runtimeClassName: contrast-cc
       containers:
         - name: secret-service
-          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.49.0@sha256:a45c4f96fda3efde67389169560c109f5502bc56cb6f39a4b2b94e6f771e6d3b'
+          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.50.0@sha256:c8a5f1000457b9d1c6ee2d972e1e6b36592cb2d5dcdc50a0c1de4d15cc7c3734'
           resources:
             requests:
               memory: 2Gi
@@ -32,7 +32,7 @@ spec:
           args:
             - |
               exec /bin/secret-service \
-                --k8s-namespace=continuum-62689e \
+                --k8s-namespace=continuum-9d1620 \
                 $([ "${HOSTNAME##*-}" = "0" ] && echo "--may-bootstrap") \
                 --etcd-server-cert=/contrast/tls-config/certChain.pem \
                 --etcd-server-key=/contrast/tls-config/key.pem \
@@ -56,10 +56,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-gemma-4-31b
-  namespace: continuum-62689e
+  namespace: continuum-9d1620
   labels:
     app: workload-gemma-4-31b
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 spec:
   replicas: 1
   selector:
@@ -69,7 +69,7 @@ spec:
     metadata:
       labels:
         app: workload-gemma-4-31b
-        app.kubernetes.io/instance: '62689e'
+        app.kubernetes.io/instance: '9d1620'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -90,7 +90,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.49.0@sha256:c1bc08939f6503e05dc2eb2153030bfb3cea286253fc3adf7aaea8ccddb915e4
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.50.0@sha256:ab547e26ac3ee20725b78e068d7a42b9db1232a192fab32cbfc55bbbabf6e888
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -106,7 +106,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-gemma-4-31b-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.49.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.50.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
           args:
             - 'gemma-4-31b'
             - '0'
@@ -222,7 +222,7 @@ spec:
               memory: 80Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-gemma-4-31b-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.49.0@sha256:8867922ed7d4002f5309f9a037307d1fd5309acecdbf433ce223f33a1ca7cd27
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.50.0@sha256:da5e3ffb1b61b11d957e7a86b78d2dc0f87567cf471ed2891f4f6884cacdb5ed
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -234,7 +234,7 @@ spec:
             - '--workload-port=8000'
             - '--workload-ready=http://127.0.0.1:8000/v1/models'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-62689e.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-9d1620.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -242,7 +242,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling,vision'
-            - '--usage-collector-endpoint=usage-collector.continuum-62689e.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-9d1620.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
           volumeMounts:
             - name: inference-proxy-gemma-4-31b-0-identity
@@ -288,10 +288,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-gemma-4-31b-b200
-  namespace: continuum-62689e
+  namespace: continuum-9d1620
   labels:
     app: workload-gemma-4-31b-b200
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 spec:
   replicas: 0
   selector:
@@ -301,7 +301,7 @@ spec:
     metadata:
       labels:
         app: workload-gemma-4-31b-b200
-        app.kubernetes.io/instance: '62689e'
+        app.kubernetes.io/instance: '9d1620'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -322,7 +322,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.49.0@sha256:c1bc08939f6503e05dc2eb2153030bfb3cea286253fc3adf7aaea8ccddb915e4
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.50.0@sha256:ab547e26ac3ee20725b78e068d7a42b9db1232a192fab32cbfc55bbbabf6e888
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -338,7 +338,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-gemma-4-31b-b200-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.49.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.50.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
           args:
             - 'gemma-4-31b-b200'
             - '0'
@@ -454,7 +454,7 @@ spec:
               memory: 80Gi
               "nvidia.com/GB100_B200": 1
         - name: inference-proxy-gemma-4-31b-b200-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.49.0@sha256:8867922ed7d4002f5309f9a037307d1fd5309acecdbf433ce223f33a1ca7cd27
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.50.0@sha256:da5e3ffb1b61b11d957e7a86b78d2dc0f87567cf471ed2891f4f6884cacdb5ed
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -466,7 +466,7 @@ spec:
             - '--workload-port=8000'
             - '--workload-ready=http://127.0.0.1:8000/v1/models'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-62689e.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-9d1620.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -474,7 +474,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling,vision'
-            - '--usage-collector-endpoint=usage-collector.continuum-62689e.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-9d1620.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
           volumeMounts:
             - name: inference-proxy-gemma-4-31b-b200-0-identity
@@ -520,10 +520,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-gpt-oss-120b
-  namespace: continuum-62689e
+  namespace: continuum-9d1620
   labels:
     app: workload-gpt-oss-120b
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 spec:
   replicas: 1
   selector:
@@ -533,7 +533,7 @@ spec:
     metadata:
       labels:
         app: workload-gpt-oss-120b
-        app.kubernetes.io/instance: '62689e'
+        app.kubernetes.io/instance: '9d1620'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -554,7 +554,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.49.0@sha256:c1bc08939f6503e05dc2eb2153030bfb3cea286253fc3adf7aaea8ccddb915e4
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.50.0@sha256:ab547e26ac3ee20725b78e068d7a42b9db1232a192fab32cbfc55bbbabf6e888
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -570,7 +570,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-gpt-oss-120b-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.49.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.50.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
           args:
             - 'gpt-oss-120b'
             - '0'
@@ -681,7 +681,7 @@ spec:
               memory: 64Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-gpt-oss-120b-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.49.0@sha256:8867922ed7d4002f5309f9a037307d1fd5309acecdbf433ce223f33a1ca7cd27
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.50.0@sha256:da5e3ffb1b61b11d957e7a86b78d2dc0f87567cf471ed2891f4f6884cacdb5ed
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -693,7 +693,7 @@ spec:
             - '--workload-port=8000'
             - '--workload-ready=http://127.0.0.1:8000/v1/models'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-62689e.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-9d1620.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -701,7 +701,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling'
-            - '--usage-collector-endpoint=usage-collector.continuum-62689e.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-9d1620.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
           volumeMounts:
             - name: inference-proxy-gpt-oss-120b-0-identity
@@ -747,10 +747,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-kimi-k2-6
-  namespace: continuum-62689e
+  namespace: continuum-9d1620
   labels:
     app: workload-kimi-k2-6
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 spec:
   replicas: 1
   selector:
@@ -760,7 +760,7 @@ spec:
     metadata:
       labels:
         app: workload-kimi-k2-6
-        app.kubernetes.io/instance: '62689e'
+        app.kubernetes.io/instance: '9d1620'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -781,7 +781,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.49.0@sha256:c1bc08939f6503e05dc2eb2153030bfb3cea286253fc3adf7aaea8ccddb915e4
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.50.0@sha256:ab547e26ac3ee20725b78e068d7a42b9db1232a192fab32cbfc55bbbabf6e888
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -797,7 +797,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-kimi-k2-6-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.49.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.50.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
           command:
             - /bin/sh
             - -ec
@@ -846,6 +846,10 @@ spec:
               value: "0"
             - name: PYTHONPATH
               value: /vllm-workspace
+            - name: VLLM_MEM_POLL_SECONDS
+              value: "60"
+            - name: VLLM_MEM_POLL_SNAPSHOT
+              value: "0"
             - name: OTEL_SERVICE_NAME
               value: 'vllm-kimi-k2.6'
             - name: OTEL_EXPORTER_OTLP_TRACES_INSECURE
@@ -864,7 +868,7 @@ spec:
               if [ $(sha256sum /vllm-workspace/kimi_logits_processor.py | cut -d ' ' -f 1) != '9531509c1d63be74e4c0a5c9deedff849c102e87251e45b76db3b86b2932db3d' ]; then echo kimi_logits_processor.py hash mismatch: $(sha256sum /vllm-workspace/kimi_logits_processor.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing sitecustomize.py"
               cp /untrusted-vllm-patch/sitecustomize.py /vllm-workspace/sitecustomize.py
-              if [ $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1) != '7359bf24039724b00873e60a9a6438096113d77b03937b2cac19387a4c6c711b' ]; then echo sitecustomize.py hash mismatch: $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1) != '722f04c60de4101d72b71445a440b0552d1dbc5e4dc81af63664066f54a0d0a1' ]; then echo sitecustomize.py hash mismatch: $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing reasoning_marker_detokenize.patch"
               cp /untrusted-vllm-patch/reasoning_marker_detokenize.patch /vllm-workspace/reasoning_marker_detokenize.patch
               if [ $(sha256sum /vllm-workspace/reasoning_marker_detokenize.patch | cut -d ' ' -f 1) != '7082a6e792c073308ecc3fff7a7d2312a0dd4ce0e14aade6b8861d74123dd793' ]; then echo reasoning_marker_detokenize.patch hash mismatch: $(sha256sum /vllm-workspace/reasoning_marker_detokenize.patch | cut -d ' ' -f 1); exit 1; fi
@@ -894,7 +898,7 @@ spec:
             - '--enable-prompt-tokens-details'
             - '--tensor-parallel-size=4'
             - '--gpu-memory-utilization=0.1'
-            - '--kv-cache-memory-bytes=27g'
+            - '--kv-cache-memory-bytes=25g'
             - '--max-num-seqs=192'
             - '--max-model-len=262144'
             - '--enable-auto-tool-choice'
@@ -942,7 +946,7 @@ spec:
               memory: 120Gi
               "nvidia.com/GB100_B200": 4
         - name: inference-proxy-kimi-k2-6-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.49.0@sha256:8867922ed7d4002f5309f9a037307d1fd5309acecdbf433ce223f33a1ca7cd27
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.50.0@sha256:da5e3ffb1b61b11d957e7a86b78d2dc0f87567cf471ed2891f4f6884cacdb5ed
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -954,7 +958,7 @@ spec:
             - '--workload-port=8000'
             - '--workload-ready=http://127.0.0.1:8000/v1/models'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-62689e.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-9d1620.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -962,7 +966,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling,vision'
-            - '--usage-collector-endpoint=usage-collector.continuum-62689e.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-9d1620.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
           volumeMounts:
             - name: inference-proxy-kimi-k2-6-0-identity
@@ -1008,10 +1012,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-whisper-qwen3-voxtral
-  namespace: continuum-62689e
+  namespace: continuum-9d1620
   labels:
     app: workload-whisper-qwen3-voxtral
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 spec:
   replicas: 1
   selector:
@@ -1021,7 +1025,7 @@ spec:
     metadata:
       labels:
         app: workload-whisper-qwen3-voxtral
-        app.kubernetes.io/instance: '62689e'
+        app.kubernetes.io/instance: '9d1620'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -1042,7 +1046,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.49.0@sha256:c1bc08939f6503e05dc2eb2153030bfb3cea286253fc3adf7aaea8ccddb915e4
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.50.0@sha256:ab547e26ac3ee20725b78e068d7a42b9db1232a192fab32cbfc55bbbabf6e888
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -1058,7 +1062,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-whisper-large-v3-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.49.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.50.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
           args:
             - 'whisper-large-v3'
             - '0'
@@ -1074,7 +1078,7 @@ spec:
             - name: modelweights-whisper-large-v3-0
               devicePath: /dev/modelweights-whisper-large-v3-0
         - name: disk-mounter-qwen3-embedding-4b-1
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.49.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.50.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
           args:
             - 'qwen3-embedding-4b'
             - '1'
@@ -1090,7 +1094,7 @@ spec:
             - name: modelweights-qwen3-embedding-4b-1
               devicePath: /dev/modelweights-qwen3-embedding-4b-1
         - name: disk-mounter-voxtral-mini-3b-2
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.49.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.50.0@sha256:787be019d015020abe286c46a47ec9d0db7469848d5fa43a678c7cabc6fabd8e
           args:
             - 'voxtral-mini-3b'
             - '2'
@@ -1197,7 +1201,7 @@ spec:
               memory: 70Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-whisper-large-v3-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.49.0@sha256:8867922ed7d4002f5309f9a037307d1fd5309acecdbf433ce223f33a1ca7cd27
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.50.0@sha256:da5e3ffb1b61b11d957e7a86b78d2dc0f87567cf471ed2891f4f6884cacdb5ed
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -1209,7 +1213,7 @@ spec:
             - '--workload-port=8000'
             - '--workload-ready=http://127.0.0.1:8000/v1/models'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-62689e.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-9d1620.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1217,7 +1221,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=transcribe'
-            - '--usage-collector-endpoint=usage-collector.continuum-62689e.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-9d1620.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
           volumeMounts:
             - name: inference-proxy-whisper-large-v3-0-identity
@@ -1303,7 +1307,7 @@ spec:
               cpu: "4"
               memory: 24Gi
         - name: inference-proxy-qwen3-embedding-4b-1
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.49.0@sha256:8867922ed7d4002f5309f9a037307d1fd5309acecdbf433ce223f33a1ca7cd27
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.50.0@sha256:da5e3ffb1b61b11d957e7a86b78d2dc0f87567cf471ed2891f4f6884cacdb5ed
           ports:
             - containerPort: 8086
             - containerPort: 8186
@@ -1315,7 +1319,7 @@ spec:
             - '--workload-port=8001'
             - '--workload-ready=http://127.0.0.1:8001/v1/models'
             - '--workload-metrics=http://127.0.0.1:8001/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-62689e.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-9d1620.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1323,7 +1327,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=embed'
-            - '--usage-collector-endpoint=usage-collector.continuum-62689e.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-9d1620.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
           volumeMounts:
             - name: inference-proxy-qwen3-embedding-4b-1-identity
@@ -1433,7 +1437,7 @@ spec:
               cpu: "4"
               memory: 30Gi
         - name: inference-proxy-voxtral-mini-3b-2
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.49.0@sha256:8867922ed7d4002f5309f9a037307d1fd5309acecdbf433ce223f33a1ca7cd27
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.50.0@sha256:da5e3ffb1b61b11d957e7a86b78d2dc0f87567cf471ed2891f4f6884cacdb5ed
           ports:
             - containerPort: 8087
             - containerPort: 8187
@@ -1445,7 +1449,7 @@ spec:
             - '--workload-port=8002'
             - '--workload-ready=http://127.0.0.1:8002/v1/models'
             - '--workload-metrics=http://127.0.0.1:8002/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-62689e.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-9d1620.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1453,7 +1457,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=transcribe'
-            - '--usage-collector-endpoint=usage-collector.continuum-62689e.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-9d1620.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
           volumeMounts:
             - name: inference-proxy-voxtral-mini-3b-2-identity
@@ -1514,7 +1518,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: unstructured-api
-  namespace: continuum-62689e
+  namespace: continuum-9d1620
   labels:
     app: unstructured-api
 spec:
@@ -1526,7 +1530,7 @@ spec:
     metadata:
       labels:
         app: unstructured-api
-        app.kubernetes.io/instance: '62689e'
+        app.kubernetes.io/instance: '9d1620'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -1578,7 +1582,7 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 5
         - name: inference-proxy-unstructured-api
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.49.0@sha256:8867922ed7d4002f5309f9a037307d1fd5309acecdbf433ce223f33a1ca7cd27
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.50.0@sha256:da5e3ffb1b61b11d957e7a86b78d2dc0f87567cf471ed2891f4f6884cacdb5ed
           ports:
             - containerPort: 8085
           args:
@@ -1587,14 +1591,14 @@ spec:
             - --workload-port=8000
             - --workload-live=http://127.0.0.1:8000/healthcheck
             - --workload-ready=http://127.0.0.1:8000/healthcheck
-            - --secret-svc-address=secret-service-internal.continuum-62689e.svc.cluster.local
+            - --secret-svc-address=secret-service-internal.continuum-9d1620.svc.cluster.local
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
             - '--identity-cert-path=/var/run/secrets/identity/tls.crt'
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
-            - '--usage-collector-endpoint=usage-collector.continuum-62689e.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-9d1620.svc.cluster.local:3000'
           volumeMounts:
             - name: unstructured-api-identity
               mountPath: /var/run/secrets/identity
@@ -1619,17 +1623,17 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: coordinator
-  namespace: 'continuum-62689e'
+  namespace: 'continuum-9d1620'
   labels:
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: coordinator
-  namespace: 'continuum-62689e'
+  namespace: 'continuum-9d1620'
   labels:
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 rules:
   - apiGroups:
       - ""
@@ -1652,9 +1656,9 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: coordinator
-  namespace: 'continuum-62689e'
+  namespace: 'continuum-9d1620'
   labels:
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -1662,15 +1666,15 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: coordinator
-    namespace: "continuum-62689e"
+    namespace: "continuum-9d1620"
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator
-  namespace: 'continuum-62689e'
+  namespace: 'continuum-9d1620'
   labels:
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 spec:
   ports:
     - name: userapi
@@ -1691,16 +1695,16 @@ spec:
   publishNotReadyAddresses: true
   selector:
     app.kubernetes.io/name: coordinator
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
   type: ClusterIP
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator-ready
-  namespace: 'continuum-62689e'
+  namespace: 'continuum-9d1620'
   labels:
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 spec:
   ports:
     - name: userapi
@@ -1720,16 +1724,16 @@ spec:
       targetPort: 1313
   selector:
     app.kubernetes.io/name: coordinator
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
   type: ClusterIP
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: coordinator
-  namespace: 'continuum-62689e'
+  namespace: 'continuum-9d1620'
   labels:
-    app.kubernetes.io/instance: '62689e'
+    app.kubernetes.io/instance: '9d1620'
 spec:
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Delete
@@ -1745,7 +1749,7 @@ spec:
         contrast.edgeless.systems/pod-role: coordinator
       labels:
         app.kubernetes.io/name: coordinator
-        app.kubernetes.io/instance: '62689e'
+        app.kubernetes.io/instance: '9d1620'
         privatemode.edgeless.systems/environment: 'production'
     spec:
       affinity:

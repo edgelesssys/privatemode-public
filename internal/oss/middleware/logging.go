@@ -53,29 +53,36 @@ func LogRequestSummary(next http.Handler, log *slog.Logger, logStart bool) http.
 		cw := &countingResponseWriter{ResponseWriter: w}
 
 		start := time.Now()
+
+		// Emit the summary from a defer so it is still recorded when a handler panics. Panics are
+		// still written with their original outcome and status code, because we don't yet have a
+		// recovery middleware.
+		defer func() {
+			duration := time.Since(start)
+
+			status := cw.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+
+			outcome := "success"
+			if status >= http.StatusInternalServerError {
+				outcome = "failure"
+			}
+
+			args = append(
+				args,
+				slog.Int("httpStatus", status),
+				slog.String("outcome", outcome),
+				slog.Duration("duration", duration),
+				slog.Int64("requestSize", cr.n),
+				slog.Int64("responseSize", cw.n),
+			)
+			args = append(args, attrs.Args()...)
+			log.InfoContext(ctx, "Served request", args...)
+		}()
+
 		next.ServeHTTP(cw, r)
-		duration := time.Since(start)
-
-		status := cw.status
-		if status == 0 {
-			status = http.StatusOK
-		}
-
-		outcome := "success"
-		if status >= http.StatusInternalServerError {
-			outcome = "failure"
-		}
-
-		args = append(
-			args,
-			slog.Int("httpStatus", status),
-			slog.String("outcome", outcome),
-			slog.Duration("duration", duration),
-			slog.Int64("requestSize", cr.n),
-			slog.Int64("responseSize", cw.n),
-		)
-		args = append(args, attrs.Args()...)
-		log.InfoContext(ctx, "Served request", args...)
 	})
 }
 

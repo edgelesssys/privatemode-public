@@ -6,9 +6,11 @@ package forwarder
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -121,6 +123,27 @@ func TestForwardStreamingAborted(t *testing.T) {
 	}
 	assert.NoError(scanner.Err())
 	assert.Equal(1, chunkCount, "Should have received 1 complete chunk before abort")
+}
+
+func TestForwardStreamingUpstreamAborts(t *testing.T) {
+	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"field\": \"encryptedData\"}\n\n"))
+		w.(http.Flusher).Flush()
+		// Abort the upstream connection mid-stream so the forwarder's read fails with an
+		// unexpected EOF rather than a clean stream end.
+		panic(http.ErrAbortHandler)
+	}))
+	defer stubServer.Close()
+
+	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	resp := httptest.NewRecorder()
+
+	assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
+		fwd.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
+	})
 }
 
 func TestForwardNonStreaming(t *testing.T) {
@@ -446,6 +469,49 @@ func TestForwardDeletesHopHeaders(t *testing.T) {
 	assert.Empty(got.Header.Get("Trailer"))
 	// Other headers are kept
 	assert.Equal("kept", got.Header.Get("X-App-Header"))
+}
+
+// roundTripFunc adapts a function to an [http.RoundTripper] to inject transport errors.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// timeoutError is a [net.Error] that reports itself as a timeout.
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "i/o timeout" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+func TestForwardTransportErrorStatus(t *testing.T) {
+	tests := map[string]struct {
+		transportErr error
+		wantStatus   int
+	}{
+		"connection failure -> 502 Bad Gateway": {
+			transportErr: &net.OpError{Op: "dial", Err: errors.New("connection refused")},
+			wantStatus:   http.StatusBadGateway,
+		},
+		"timeout -> 504 Gateway Timeout": {
+			transportErr: &net.OpError{Op: "dial", Err: timeoutError{}},
+			wantStatus:   http.StatusGatewayTimeout,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, tc.transportErr
+			})}
+			fwd := New(client, "upstream.invalid:443", SchemeHTTPS, slog.Default())
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+			resp := httptest.NewRecorder()
+			fwd.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
+
+			assert.Equal(t, tc.wantStatus, resp.Code)
+		})
+	}
 }
 
 func TestExtractFlusher(t *testing.T) {
