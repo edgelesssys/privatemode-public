@@ -24,8 +24,8 @@ importers:
         specifier: 17.7.0
         version: 17.7.0
       openai:
-        specifier: 6.46.0
-        version: 6.46.0(ws@8.19.0)
+        specifier: 7.2.0
+        version: 7.2.0(ws@8.19.0)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -744,8 +744,9 @@ packages:
   obug@2.1.1:
     resolution: {integrity: sha512-uTqF9MuPraAQ+IsnPf366RG4cP9RtUi7MLO1N3KEc+wb0a6yKpeL0lmk2IB1jY5KHPAlTc6T/JRdC/YqxHNwkQ==}
 
-  openai@6.46.0:
-    resolution: {integrity: sha512-DFg6jEPT2RO+oAyXtddeUJU8zkGy1OQ1AjGzNIJUMQG03TTqvCpy9tBpQ+2VVVnvrl3E56F8GEin2JYtWpITtA==}
+  openai@7.2.0:
+    resolution: {integrity: sha512-/P0jZP2WDSwSuiilTTcU4mkepzdSAiRrnTK2e9pk9KOzBoE3L9aHz2oIyIXqGbqnnMsGC0Izr223MOUhG2JuvQ==}
+    engines: {node: '>=22.0.0'}
     peerDependencies:
       '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
       '@smithy/hash-node': '>=4.3.0 <5'
@@ -1629,7 +1630,7 @@ snapshots:
 
   obug@2.1.1: {}
 
-  openai@6.46.0(ws@8.19.0):
+  openai@7.2.0(ws@8.19.0):
     optionalDependencies:
       ws: 8.19.0
 

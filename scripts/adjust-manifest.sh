@@ -15,8 +15,7 @@ yq eval -i '.ReferenceValues.snp[].MinimumTCB.SNPVersion=28' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.MicrocodeVersion=88' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumMitigationVector=15' "$manifest"
 
-# configure GuestPolicy and PlatformInfo
-yq eval -i '.ReferenceValues.snp[].GuestPolicy={ "SMT":true, "MigrateMA":false, "Debug":false, "CXLAllowed":false, "PageSwapDisable":true }' "$manifest"
+# configure PlatformInfo
 yq eval -i '.ReferenceValues.snp[].PlatformInfo={ "SMTEnabled":false, "ECCEnabled":true, "AliasCheckComplete":true }' "$manifest"
 
 # add chip ids
@@ -31,12 +30,8 @@ yq eval -i '.ReferenceValues.snp[].AllowedChipIDs=[
 
 if yq -e .ReferenceValues.tdx "$manifest" &>/dev/null; then
   yq eval -i '.ReferenceValues.tdx[].MinTCBEvaluationDataNumber=21' "$manifest"
-  yq eval -i '.ReferenceValues.tdx[].MrSeam="489e585f1c54bc5a02066c8c6ec21619ff0334ec6f21e07e2a35202c59183789c8057e7d97dd591bb08314b185819e72"' "$manifest"
+  yq eval -i '.ReferenceValues.tdx[].MrSeam="346bc77a1846cac214dd2e8edeb9ee4349449d6c3f9ff2c52149a634c27b7fd1bd314c2ef6b973eeebd55742952531a1"' "$manifest"
   yq eval -i '.ReferenceValues.tdx[].AllowedPIIDs=["0c47f6f7587ddb0cfbb0fed9e4537ea7", "6454aa54f4f7490d2b946b6a3c20742c"]' "$manifest"
-
-  # module migration
-  yq eval -i '.ReferenceValues.tdx[1]=.ReferenceValues.tdx[0]' "$manifest"
-  yq eval -i '.ReferenceValues.tdx[1].MrSeam="346bc77a1846cac214dd2e8edeb9ee4349449d6c3f9ff2c52149a634c27b7fd1bd314c2ef6b973eeebd55742952531a1"' "$manifest"
 fi
 
 ### Policies

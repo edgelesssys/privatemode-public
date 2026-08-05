@@ -13,7 +13,8 @@ data:
       "hash_offset": "2666340352",
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "d4ad28fca8e652d3af378fb7caa3fa87dd63b753951bca67a45db9b1000f8b0c"
+      "file_hash_sha256": "d4ad28fca8e652d3af378fb7caa3fa87dd63b753951bca67a45db9b1000f8b0c",
+      "file_size_bytes": 2687344640
     }
   facebook-opt-125m: |-
     {
@@ -24,7 +25,8 @@ data:
       "hash_offset": "753115136",
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "3120af8ed8a63429b96bb35abf74e0bffa280849ab4e01e312d85f889191262f"
+      "file_hash_sha256": "3120af8ed8a63429b96bb35abf74e0bffa280849ab4e01e312d85f889191262f",
+      "file_size_bytes": 759058432
     }
   mistralai-voxtral-mini-3b-2507: |-
     {
@@ -35,7 +37,8 @@ data:
       "hash_offset": "9363795968",
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "f6a655ccbcb231e789dfe33f84cbee813c35067000e47ce02d1ec04819da5751"
+      "file_hash_sha256": "f6a655ccbcb231e789dfe33f84cbee813c35067000e47ce02d1ec04819da5751",
+      "file_size_bytes": 9437544448
     }
   openai-gpt-oss-120b: |-
     {
@@ -46,7 +49,8 @@ data:
       "hash_offset": "65276874752",
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "74cb2e9482e611d895c24b2b5e9187f3aa8002df8b2c7fda7ebacb924dc748e8"
+      "file_hash_sha256": "74cb2e9482e611d895c24b2b5e9187f3aa8002df8b2c7fda7ebacb924dc748e8",
+      "file_size_bytes": 65790877696
     }
   openai-whisper-large-v3: |-
     {
@@ -57,18 +61,8 @@ data:
       "hash_offset": "9265782784",
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "ac1b25abaa8c4dbdb5ba1065bbcbff1eedba9a24632277f1215a87d9467a35d3"
-    }
-  nvidia-gemma-4-31b-it-nvfp4: |-
-    {
-      "model_source": "https://huggingface.co/nvidia/Gemma-4-31B-IT-NVFP4",
-      "commit_hash": "1365cf7aa2de42546878b8d2e4a425019a0be514",
-      "excluded_files": "",
-      "root_hash": "e60b3dbcd95c026297db0ec524c8578048d142653c2d68e20c2ec1c45f74ee6c",
-      "hash_offset": "32666148864",
-      "erofs_version": "1.9",
-      "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "2eae04be9d3cb669c43b4447388f68a1b97bf8b16a68fafa4e5eaeccb8229c05"
+      "file_hash_sha256": "ac1b25abaa8c4dbdb5ba1065bbcbff1eedba9a24632277f1215a87d9467a35d3",
+      "file_size_bytes": 9338761216
     }
   moonshotai-kimi-k2-6: |-
     {
@@ -79,7 +73,8 @@ data:
       "hash_offset": "595205042176",
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "0d6c66927e4758f7d860b40fee4ca69146df9c87d001c34a89faff0b9588fc38"
+      "file_hash_sha256": "0d6c66927e4758f7d860b40fee4ca69146df9c87d001c34a89faff0b9588fc38",
+      "file_size_bytes": 599891709952
     }
   nvidia-kimi-k2-6-nvfp4: |-
     {
@@ -90,7 +85,8 @@ data:
       "hash_offset": "595219173376",
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.6",
-      "file_hash_sha256": "f31d74aaebccea1fa99d88fbad598e1c11901fc75e8e8a566de904f4b8088b40"
+      "file_hash_sha256": "f31d74aaebccea1fa99d88fbad598e1c11901fc75e8e8a566de904f4b8088b40",
+      "file_size_bytes": 599905951744
     }
   deepseek-ai-deepseek-ocr-2: |-
     {
@@ -101,5 +97,6 @@ data:
       "hash_offset": "6789312512",
       "erofs_version": "1.9.2",
       "veritysetup_version": "2.8.6",
-      "file_hash_sha256": "290626832a457426b221b4405d14c8a729ea339abed85b700df21266e524446c"
+      "file_hash_sha256": "290626832a457426b221b4405d14c8a729ea339abed85b700df21266e524446c",
+      "file_size_bytes": 6842781696
     }

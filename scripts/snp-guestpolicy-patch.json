@@ -7,8 +7,18 @@
     },
     {
       "op": "replace",
-      "path": "/GuestPolicy/PageSwapDisable",
-      "value": true
+      "path": "/GuestPolicy",
+      "value": {
+        "ABIMajor": 1,
+        "ABIMinor": 58,
+        "SMT": false,
+        "MigrateMA": false,
+        "Debug": false,
+        "SingleSocket": true,
+        "CXLAllowed": false,
+        "MemAES256XTS": true,
+        "PageSwapDisable": true
+      }
     }
   ]
 ]

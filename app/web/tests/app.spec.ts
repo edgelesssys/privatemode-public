@@ -328,7 +328,7 @@ test.describe('File upload', () => {
     page,
   }) => {
     await page.evaluate(() => {
-      localStorage.setItem('privatemode_selected_model', 'gemma-4-31b');
+      localStorage.setItem('privatemode_selected_model', 'kimi-k2.6');
     });
     await page.reload();
     await web.waitForAppReady(page);

@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/edgelesssys/continuum/internal/oss/compat"
-	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/google/uuid"
 )
 
@@ -62,11 +60,6 @@ func FromHeader(header http.Header) string {
 // Returned values are sanitized for logging.
 // Returns [Unknown] if no user request ID is found in the request header.
 func FromUserHeader(header http.Header) string {
-	// Clients before v1.40 used [Header] to provide a user generated request ID
-	version := header.Get(constants.PrivatemodeVersionHeader)
-	if !compat.AtLeastMajorMinor(version, 1, 40) {
-		return fromHeaderWithDefault(header, Header)
-	}
 	return fromHeaderWithDefault(header, UserHeader)
 }
 

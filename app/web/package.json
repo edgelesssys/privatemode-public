@@ -41,7 +41,7 @@
     "dompurify": "^3.4.3",
     "highlight.js": "11.11.1",
     "marked": "^17.0.6",
-    "openai": "6.46.0",
+    "openai": "7.2.0",
     "privatemode-ai": "link:../../sdk/js"
   }
 }

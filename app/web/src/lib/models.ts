@@ -37,17 +37,6 @@ export const modelConfig: Record<string, ModelInfo> = {
     supportsVision: false,
     maxWords: 70000,
   },
-  'gemma-4-31b': {
-    displayName: 'Gemma 4 31B',
-    subtitle: 'Multi-modal model with image understanding',
-    systemPrompt: getSystemPrompt('Gemma 4 31B'),
-    thinkingMode: 'toggle',
-    thinkingToggleParam: 'enable_thinking',
-    thinkingToggleAlwaysSend: true,
-    supportsFileUploads: true,
-    supportsVision: true,
-    maxWords: 70000,
-  },
   'kimi-k2.6': {
     displayName: 'Kimi K2.6',
     subtitle: 'Reasoning model with a large context window',

@@ -62,7 +62,10 @@ spec:
             - "--insecureAPIConnection=true"
             {{- end }}
             {{- if .Values.config.sharedPromptCache.enabled }}
-            - "--sharedPromptCache"
+            - "--sharedPromptCache=true"
+            {{- end }}
+            {{- if .Values.config.sharedPromptCache.promptCacheSalt.enabled }}
+            - "--promptCacheSalt=@/etc/promptCacheSalt/promptCacheSalt"
             {{- end }}
           {{- if or .Values.config.customCA.enabled .Values.config.extraEnv }}
           env:
@@ -95,6 +98,11 @@ spec:
               mountPath: /etc/apiKey
               readOnly: true
             {{- end }}
+            {{- if .Values.config.sharedPromptCache.promptCacheSalt.enabled }}
+            - name: promptcachesalt
+              mountPath: /etc/promptCacheSalt
+              readOnly: true
+            {{- end }}
             {{- if .Values.config.customCA.enabled }}
             - name: custom-ca
               mountPath: /etc/ssl/certs/custom-ca-bundle.crt
@@ -123,6 +131,11 @@ spec:
         - name: apikey
           secret:
             secretName: {{ .Values.config.apiKey.apiKeySecretName }}
+        {{- end }}
+        {{- if .Values.config.sharedPromptCache.promptCacheSalt.enabled }}
+        - name: promptcachesalt
+          secret:
+            secretName: {{ .Values.config.sharedPromptCache.promptCacheSalt.secretName }}
         {{- end }}
         {{- if .Values.config.customCA.enabled }}
         - name: custom-ca

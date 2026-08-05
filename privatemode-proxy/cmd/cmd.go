@@ -86,7 +86,8 @@ func New() *cobra.Command {
 	cmd.Flags().BoolVar(&sharedPromptCache, "sharedPromptCache", false,
 		"If set, caching of prompts between all users of the proxy is enabled. This reduces response times for long conversations or common documents.")
 	cmd.Flags().StringVar(&promptCacheSalt, "promptCacheSalt", "",
-		"The salt used to isolate prompt caches. If empty (default), the same random salt is used for all requests, "+
+		"The salt used to isolate prompt caches. Accepts either a direct literal or a file path prefixed with '@'. "+
+			"If empty (default), the same random salt is used for all requests, "+
 			"enabling sharing the cache between all users of the same proxy. Requires 'sharedPromptCache' to be enabled!")
 
 	cmd.Flags().BoolVar(&insecureAPIConnection, "insecureAPIConnection", false,
@@ -126,8 +127,20 @@ func getPromptCacheSalt() (string, error) {
 	if promptCacheSalt == "" {
 		return openai.RandomPromptCacheSalt(), nil
 	}
+	resolvedPromptCacheSalt := promptCacheSalt
+	if path, ok := strings.CutPrefix(promptCacheSalt, "@"); ok {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("failed to read prompt cache salt file %q: %w", path, err)
+		}
+		resolvedPromptCacheSalt = strings.TrimSpace(string(data))
+	}
 
-	return promptCacheSalt, nil
+	if len(resolvedPromptCacheSalt) < 32 {
+		return "", errors.New("promptCacheSalt must be at least 32 bytes long")
+	}
+
+	return resolvedPromptCacheSalt, nil
 }
 
 func runProxy(cmd *cobra.Command, _ []string) error {

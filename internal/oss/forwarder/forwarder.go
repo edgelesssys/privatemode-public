@@ -145,7 +145,11 @@ func (f *Forwarder) Forward(
 	resp, err := f.sendWithRetry(baseReq, requestMutator, options.retryCallback)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			log.WarnContext(ctx, "Connection closed by client before request could be fully forwarded", "error", err)
+			log.WarnContext(
+				ctx,
+				"Downstream request cancelled (connection lost) before request could be fully forwarded",
+				"error", err,
+			)
 			HTTPError(w, req, http.StatusInternalServerError, "forwarding request: %s", err)
 			return
 		}
@@ -188,7 +192,11 @@ func (f *Forwarder) Forward(
 
 	if err := SendResponse(w, dsResp); err != nil {
 		if errors.Is(err, context.Canceled) || ctx.Err() == context.Canceled {
-			log.WarnContext(ctx, "Connection closed by client before forwarding finished", "error", err)
+			log.WarnContext(
+				ctx,
+				"Downstream request cancelled (connection lost) while sending response",
+				"error", err,
+			)
 			return
 		}
 		// The status and headers are already committed, so we cannot turn this into a gateway

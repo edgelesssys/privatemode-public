@@ -11,10 +11,6 @@ func TestResolve(t *testing.T) {
 		input    string
 		expected string
 	}{
-		"gemma latest to current": {
-			input:    "gemma-latest",
-			expected: "gemma-4-31b",
-		},
 		"gpt oss latest to current": {
 			input:    "gpt-oss-latest",
 			expected: "openai/gpt-oss-120b",

@@ -75,7 +75,7 @@ disk_name="${staging_path}/${model_name}/${root_hash}"
 mkdir -p "${staging_path}/${model_name}"
 mv "${temp_disk}" "${disk_name}"
 
-file_hash=$(sha256sum "${disk_name}" | awk '{print $1}')
+file_size=$(stat -c%s "${disk_name}")
 
 cat <<EOF >"${disk_name}.json"
 {
@@ -86,6 +86,6 @@ cat <<EOF >"${disk_name}.json"
   "hash_offset": "${hash_offset}",
   "erofs_version": "$(mkfs.erofs --version | head -n1 | awk '{print $NF}')",
   "veritysetup_version": "$(veritysetup --version | awk '{print $2}')",
-  "file_hash_sha256": "${file_hash}"
+  "file_size_bytes": ${file_size}
 }
 EOF

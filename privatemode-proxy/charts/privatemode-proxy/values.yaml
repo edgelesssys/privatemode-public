@@ -1,6 +1,6 @@
 replicaCount: 1
 image:
-  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.50.1-pre
+  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.51.1-pre
   pullPolicy: IfNotPresent
   restartPolicy: Always
 service:
@@ -27,7 +27,8 @@ config:
   # API key configuration
   apiKey:
     enabled: true
-    apiKeySecretName: 'privatemode-api-key' # Name of the Kubernetes Secret containing the API
+    # Name of the Kubernetes Secret containing the API key under the key "apiKey".
+    apiKeySecretName: 'privatemode-api-key'
   # API configuration
   apiEndpoint:
     enabled: false
@@ -55,6 +56,11 @@ config:
     fileName: 'ca-bundle.crt'
   sharedPromptCache:
     enabled: false
+    promptCacheSalt:
+      enabled: false
+      # Name of the Kubernetes Secret containing a random string of at least 32 bytes
+      # under the key "promptCacheSalt".
+      secretName: 'privatemode-proxy-prompt-cache-salt'
   # Extra environment variables
   extraEnv: []
   # Set to true to allow the proxy to accept self-signed certificates from the backend

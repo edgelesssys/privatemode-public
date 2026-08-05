@@ -3,11 +3,11 @@ package model
 
 // Well-known model names.
 const (
-	Gemma431B            = "gemma-4-31b"
 	OpenAIWhisperLargeV3 = "openai/whisper-large-v3"
 	OpenAIGPTOSS120B     = "openai/gpt-oss-120b"
 	KimiK26              = "kimi-k2.6"
 	VoxtralMini3b        = "voxtral-mini-3b"
+	DeepSeekOCR2         = "deepseek-ocr-2"
 )
 
 const (
@@ -21,7 +21,6 @@ const (
 
 // modelMap maps model aliases to their billing names.
 var modelMap = map[string]string{
-	"gemma-latest":     Gemma431B,
 	"gpt-oss-latest":   OpenAIGPTOSS120B,
 	"kimi-latest":      KimiK26,
 	"whisper-large-v3": OpenAIWhisperLargeV3,
