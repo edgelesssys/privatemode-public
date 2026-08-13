@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
@@ -170,6 +171,7 @@ func TestWatchSecrets(t *testing.T) {
 				watchResponse: make(chan clientv3.WatchResponse),
 			}
 			etcd := &Etcd{
+				Ready:  &atomic.Bool{},
 				client: stubClient,
 				log:    slog.Default(),
 			}

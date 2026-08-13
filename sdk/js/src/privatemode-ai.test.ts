@@ -248,6 +248,55 @@ describe('PrivatemodeCore', () => {
     );
   });
 
+  describe('streamTranscribeAudio', () => {
+    it.skipIf(!RUN_INTEGRATION_TESTS || !isNode)(
+      'streams an encrypted audio transcription from the live API',
+      async () => {
+        const { readFile } = await import('node:fs/promises');
+        const { resolve } = await import('node:path');
+        const audio = await readFile(
+          resolve(import.meta.dirname, '../../../test/docs/test.mp3'),
+        );
+
+        const client = new PrivatemodeCore({
+          auth: apiKeyAuth(import.meta.env.PRIVATEMODE_API_KEY),
+          apiBaseURL: TEST_API_BASE_URL,
+        });
+
+        await client.verify();
+        await client.refreshSecret();
+
+        type TranscriptionChunk = {
+          choices?: { delta?: { content?: string } }[];
+          usage?: { total_tokens?: number };
+        };
+        const chunks: TranscriptionChunk[] = [];
+        for await (const chunk of client.streamTranscribeAudio(
+          {
+            name: 'test.mp3',
+            content: audio,
+            contentType: 'audio/mpeg',
+          },
+          {
+            model: 'whisper-large-v3',
+            language: 'en',
+            response_format: 'json',
+          },
+        )) {
+          chunks.push(chunk as TranscriptionChunk);
+        }
+
+        expect(chunks.length).toBeGreaterThan(0);
+        const transcript = chunks
+          .flatMap((chunk) => chunk.choices ?? [])
+          .map((choice) => choice.delta?.content ?? '')
+          .join('');
+        expect(transcript.length).toBeGreaterThan(0);
+      },
+      120_000,
+    );
+  });
+
   describe('offline initialization with imported secret', () => {
     it.skipIf(!RUN_INTEGRATION_TESTS)(
       'exports a secret from a verified client and imports it into an offline-initialized client',
@@ -345,45 +394,52 @@ describe('PrivatemodeCore', () => {
     );
   });
 
+  /**
+   * Helper function to mock the per-instance Wasm client. Returns the mock
+   * client so tests can customize methods, and a restore function for the
+   * module-level spies.
+   */
+  function mockWasmFunctions() {
+    const client = {
+      initialize: vi.fn().mockResolvedValue(undefined),
+      initializeOffline: vi.fn(),
+      setAuth: vi.fn(),
+      updateSecret: vi.fn().mockResolvedValue(undefined),
+      fetchManifest: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          SeedShareHash: 'test-hash',
+          Policies: {},
+        }),
+      ),
+      chatCompletions: vi.fn(),
+      embeddings: vi.fn(),
+      streamChatCompletions: vi.fn(),
+      unstructured: vi.fn(),
+      transcribeAudio: vi.fn(),
+      streamTranscribeAudio: vi.fn(),
+      listModels: vi.fn(),
+      exportSecret: vi.fn(),
+      importSecret: vi.fn(),
+      close: vi.fn(),
+    };
+    const mockCreateWasmClient = vi
+      .spyOn(wasm, 'createWasmClient')
+      .mockReturnValue(client as unknown as wasm.WasmClient);
+    const mockErrManifestMismatch = vi
+      .spyOn(wasm, 'errManifestMismatch')
+      .mockReturnValue('manifest mismatch error');
+
+    return {
+      client,
+      mockUpdateSecret: client.updateSecret,
+      restoreAll: () => {
+        mockCreateWasmClient.mockRestore();
+        mockErrManifestMismatch.mockRestore();
+      },
+    };
+  }
+
   describe('automatic secret refresh retry logic', () => {
-    /**
-     * Helper function to mock common WASM functions used in all retry logic tests.
-     * Returns the mocks so tests can customize or restore them.
-     */
-    function mockWasmFunctions() {
-      const mockInitialize = vi.spyOn(wasm, 'initialize').mockResolvedValue();
-      const mockSetAuth = vi.spyOn(wasm, 'setAuth').mockReturnValue(undefined);
-      const mockUpdateSecret = vi
-        .spyOn(wasm, 'updateSecret')
-        .mockResolvedValue();
-      const mockFetchManifest = vi
-        .spyOn(wasm, 'fetchManifest')
-        .mockResolvedValue(
-          JSON.stringify({
-            SeedShareHash: 'test-hash',
-            Policies: {},
-          }),
-        );
-      const mockErrManifestMismatch = vi
-        .spyOn(wasm, 'errManifestMismatch')
-        .mockReturnValue('manifest mismatch error');
-
-      return {
-        mockInitialize,
-        mockSetAuth,
-        mockUpdateSecret,
-        mockFetchManifest,
-        mockErrManifestMismatch,
-        restoreAll: () => {
-          mockInitialize.mockRestore();
-          mockSetAuth.mockRestore();
-          mockUpdateSecret.mockRestore();
-          mockFetchManifest.mockRestore();
-          mockErrManifestMismatch.mockRestore();
-        },
-      };
-    }
-
     it.skipIf(!isNode)(
       'retries chatCompletions after refreshing expired secret',
       async () => {
@@ -394,20 +450,18 @@ describe('PrivatemodeCore', () => {
         const wasmMocks = mockWasmFunctions();
 
         let callCount = 0;
-        const mockChatCompletions = vi
-          .spyOn(wasm, 'chatCompletions')
-          .mockImplementation(async () => {
-            callCount++;
-            if (callCount === 1) {
-              throw new Error(wasm.errNoSecretForID() + ' xyz');
-            }
-            return {
-              body: JSON.stringify({
-                choices: [{ message: { content: 'Success' } }],
-              }),
-              headers: new Headers({ 'x-request-id': 'req_chat' }),
-            };
-          });
+        wasmMocks.client.chatCompletions.mockImplementation(async () => {
+          callCount++;
+          if (callCount === 1) {
+            throw new Error(wasm.errNoSecretForID() + ' xyz');
+          }
+          return {
+            body: JSON.stringify({
+              choices: [{ message: { content: 'Success' } }],
+            }),
+            headers: new Headers({ 'x-request-id': 'req_chat' }),
+          };
+        });
 
         await client.verify();
 
@@ -423,8 +477,44 @@ describe('PrivatemodeCore', () => {
         });
         expect(response.headers.get('x-request-id')).toBe('req_chat');
 
-        mockChatCompletions.mockRestore();
         wasmMocks.restoreAll();
+      },
+    );
+
+    it.skipIf(!isNode)(
+      'retries embeddings after refreshing expired secret',
+      async () => {
+        const client = new PrivatemodeCore({ auth: apiKeyAuth('test-key') });
+        const wasmMocks = mockWasmFunctions();
+        let callCount = 0;
+        wasmMocks.client.embeddings.mockImplementation(async () => {
+          callCount++;
+          if (callCount === 1) {
+            throw new Error(wasm.errNoSecretForID() + ' xyz');
+          }
+          return {
+            body: JSON.stringify({
+              data: [{ embedding: [0.1, 0.2], index: 0, object: 'embedding' }],
+              object: 'list',
+            }),
+            headers: new Headers({ 'x-request-id': 'req_embeddings' }),
+          };
+        });
+
+        try {
+          await client.verify();
+          const response = await client.embeddings({
+            input: ['hello', 'world'],
+            model: 'qwen3-embedding-4b',
+          });
+
+          expect(callCount).toBe(2);
+          expect(wasmMocks.mockUpdateSecret).toHaveBeenCalledTimes(1);
+          expect(response.body).toMatchObject({ object: 'list' });
+          expect(response.headers.get('x-request-id')).toBe('req_embeddings');
+        } finally {
+          wasmMocks.restoreAll();
+        }
       },
     );
 
@@ -438,25 +528,28 @@ describe('PrivatemodeCore', () => {
         const wasmMocks = mockWasmFunctions();
 
         let callCount = 0;
-        const mockStreamCompletions = vi
-          .spyOn(wasm, 'streamChatCompletions')
-          .mockImplementation(async (_body, onChunk) => {
+        wasmMocks.client.streamChatCompletions.mockImplementation(
+          async (
+            _body: string,
+            onChunk: (chunk: string) => Promise<void> | void,
+          ) => {
             callCount++;
             if (callCount === 1) {
               throw new Error(wasm.errNoSecretForID() + ' xyz');
             }
             // Simulate successful streaming
-            onChunk(
+            await onChunk(
               JSON.stringify({
                 choices: [{ delta: { content: 'Hello' } }],
               }),
             );
-            onChunk(
+            await onChunk(
               JSON.stringify({
                 choices: [{ finish_reason: 'stop', delta: {} }],
               }),
             );
-          });
+          },
+        );
 
         await client.verify();
 
@@ -473,8 +566,146 @@ describe('PrivatemodeCore', () => {
         expect(wasmMocks.mockUpdateSecret).toHaveBeenCalledTimes(1);
         expect(chunks.length).toBeGreaterThan(0);
 
-        mockStreamCompletions.mockRestore();
         wasmMocks.restoreAll();
+      },
+    );
+
+    it.skipIf(!isNode)(
+      'applies backpressure while streaming chat completions',
+      async () => {
+        const client = new PrivatemodeCore({ auth: apiKeyAuth('test-key') });
+        const wasmMocks = mockWasmFunctions();
+        let produced = 0;
+        wasmMocks.client.streamChatCompletions.mockImplementation(
+          async (
+            _body: string,
+            onChunk: (chunk: string) => Promise<void> | void,
+          ) => {
+            produced++;
+            await onChunk(JSON.stringify({ id: 'first', choices: [] }));
+            produced++;
+            await onChunk(JSON.stringify({ id: 'second', choices: [] }));
+            produced++;
+          },
+        );
+
+        try {
+          await client.verify();
+          const iterator = client.streamChatCompletions({
+            model: 'test-model',
+            messages: [{ role: 'user', content: 'test' }],
+            stream: true,
+          });
+
+          await expect(iterator.next()).resolves.toMatchObject({
+            value: { id: 'first' },
+            done: false,
+          });
+          expect(produced).toBe(1);
+
+          await expect(iterator.next()).resolves.toMatchObject({
+            value: { id: 'second' },
+            done: false,
+          });
+          expect(produced).toBe(2);
+
+          await expect(iterator.next()).resolves.toEqual({
+            value: undefined,
+            done: true,
+          });
+          expect(produced).toBe(3);
+        } finally {
+          wasmMocks.restoreAll();
+        }
+      },
+    );
+
+    it.skipIf(!isNode)(
+      'unblocks a backpressured producer when the stream is aborted',
+      async () => {
+        const client = new PrivatemodeCore({ auth: apiKeyAuth('test-key') });
+        const wasmMocks = mockWasmFunctions();
+        let producerRejected = false;
+        wasmMocks.client.streamChatCompletions.mockImplementation(
+          async (
+            _body: string,
+            onChunk: (chunk: string) => Promise<void> | void,
+          ) => {
+            try {
+              await onChunk(JSON.stringify({ id: 'first', choices: [] }));
+            } catch (error) {
+              producerRejected = true;
+              throw error;
+            }
+          },
+        );
+
+        try {
+          await client.verify();
+          const controller = new AbortController();
+          const iterator = client.streamChatCompletions(
+            {
+              model: 'test-model',
+              messages: [{ role: 'user', content: 'test' }],
+              stream: true,
+            },
+            { signal: controller.signal },
+          );
+
+          await expect(iterator.next()).resolves.toMatchObject({
+            value: { id: 'first' },
+            done: false,
+          });
+          controller.abort();
+          await expect(iterator.next()).rejects.toMatchObject({
+            name: 'AbortError',
+          });
+          await vi.waitFor(() => expect(producerRejected).toBe(true));
+        } finally {
+          wasmMocks.restoreAll();
+        }
+      },
+    );
+
+    it.skipIf(!isNode)(
+      'rejects the producer when the consumer closes the stream early',
+      async () => {
+        const client = new PrivatemodeCore({ auth: apiKeyAuth('test-key') });
+        const wasmMocks = mockWasmFunctions();
+        let producerError: Error | null = null;
+        wasmMocks.client.streamChatCompletions.mockImplementation(
+          async (
+            _body: string,
+            onChunk: (chunk: string) => Promise<void> | void,
+          ) => {
+            try {
+              await onChunk(JSON.stringify({ id: 'first', choices: [] }));
+              await onChunk(JSON.stringify({ id: 'second', choices: [] }));
+            } catch (error) {
+              producerError = error as Error;
+              throw error;
+            }
+          },
+        );
+
+        try {
+          await client.verify();
+          const iterator = client.streamChatCompletions({
+            model: 'test-model',
+            messages: [{ role: 'user', content: 'test' }],
+            stream: true,
+          });
+
+          await expect(iterator.next()).resolves.toMatchObject({
+            value: { id: 'first' },
+            done: false,
+          });
+          await iterator.return(undefined);
+          await vi.waitFor(() => expect(producerError).not.toBeNull());
+          expect(producerError!.message).toMatch(/consumer closed/i);
+        } finally {
+          wasmMocks.restoreAll();
+        }
       },
     );
 
@@ -488,15 +719,13 @@ describe('PrivatemodeCore', () => {
         const wasmMocks = mockWasmFunctions();
 
         let callCount = 0;
-        const mockUnstructured = vi
-          .spyOn(wasm, 'unstructured')
-          .mockImplementation(async () => {
-            callCount++;
-            if (callCount === 1) {
-              throw new Error(wasm.errNoSecretForID() + ' xyz');
-            }
-            return JSON.stringify([{ text: 'Success' }]);
-          });
+        wasmMocks.client.unstructured.mockImplementation(async () => {
+          callCount++;
+          if (callCount === 1) {
+            throw new Error(wasm.errNoSecretForID() + ' xyz');
+          }
+          return JSON.stringify([{ text: 'Success' }]);
+        });
 
         await client.verify();
 
@@ -511,7 +740,6 @@ describe('PrivatemodeCore', () => {
         expect(wasmMocks.mockUpdateSecret).toHaveBeenCalledTimes(1);
         expect(response).toEqual([{ text: 'Success' }]);
 
-        mockUnstructured.mockRestore();
         wasmMocks.restoreAll();
       },
     );
@@ -526,18 +754,16 @@ describe('PrivatemodeCore', () => {
         const wasmMocks = mockWasmFunctions();
 
         let callCount = 0;
-        const mockTranscribeAudio = vi
-          .spyOn(wasm, 'transcribeAudio')
-          .mockImplementation(async () => {
-            callCount++;
-            if (callCount === 1) {
-              throw new Error(wasm.errNoSecretForID() + ' xyz');
-            }
-            return {
-              body: JSON.stringify({ text: 'Success' }),
-              headers: new Headers({ 'x-request-id': 'req_audio' }),
-            };
-          });
+        wasmMocks.client.transcribeAudio.mockImplementation(async () => {
+          callCount++;
+          if (callCount === 1) {
+            throw new Error(wasm.errNoSecretForID() + ' xyz');
+          }
+          return {
+            body: JSON.stringify({ text: 'Success' }),
+            headers: new Headers({ 'x-request-id': 'req_audio' }),
+          };
+        });
 
         try {
           await client.verify();
@@ -556,7 +782,61 @@ describe('PrivatemodeCore', () => {
           expect(response.body).toEqual({ text: 'Success' });
           expect(response.headers.get('x-request-id')).toBe('req_audio');
         } finally {
-          mockTranscribeAudio.mockRestore();
+          wasmMocks.restoreAll();
+        }
+      },
+    );
+
+    it.skipIf(!isNode)(
+      'retries streamTranscribeAudio after refreshing expired secret',
+      async () => {
+        const client = new PrivatemodeCore({
+          auth: apiKeyAuth('test-key'),
+        });
+
+        const wasmMocks = mockWasmFunctions();
+        let callCount = 0;
+        wasmMocks.client.streamTranscribeAudio.mockImplementation(
+          async (file, options, onChunk) => {
+            callCount++;
+            expect(file.name).toBe('test.wav');
+            expect(JSON.parse(options)).toEqual({
+              model: 'whisper-large-v3',
+              language: 'en',
+            });
+            if (callCount === 1) {
+              throw new Error(wasm.errNoSecretForID() + ' xyz');
+            }
+            await onChunk(
+              JSON.stringify({ type: 'transcript.text.delta', delta: 'Hello' }),
+            );
+            await onChunk(
+              JSON.stringify({ type: 'transcript.text.done', text: 'Hello' }),
+            );
+          },
+        );
+
+        try {
+          await client.verify();
+          const events: unknown[] = [];
+          for await (const event of client.streamTranscribeAudio(
+            {
+              name: 'test.wav',
+              content: new Uint8Array([1, 2, 3]),
+              contentType: 'audio/wav',
+            },
+            { model: 'whisper-large-v3', language: 'en' },
+          )) {
+            events.push(event);
+          }
+
+          expect(callCount).toBe(2);
+          expect(wasmMocks.mockUpdateSecret).toHaveBeenCalledTimes(1);
+          expect(events).toEqual([
+            { type: 'transcript.text.delta', delta: 'Hello' },
+            { type: 'transcript.text.done', text: 'Hello' },
+          ]);
+        } finally {
           wasmMocks.restoreAll();
         }
       },
@@ -570,12 +850,10 @@ describe('PrivatemodeCore', () => {
       const wasmMocks = mockWasmFunctions();
 
       let callCount = 0;
-      const mockChatCompletions = vi
-        .spyOn(wasm, 'chatCompletions')
-        .mockImplementation(async () => {
-          callCount++;
-          throw new Error('Some other error');
-        });
+      wasmMocks.client.chatCompletions.mockImplementation(async () => {
+        callCount++;
+        throw new Error('Some other error');
+      });
 
       await client.verify();
 
@@ -589,7 +867,6 @@ describe('PrivatemodeCore', () => {
       expect(callCount).toBe(1);
       expect(wasmMocks.mockUpdateSecret).not.toHaveBeenCalled();
 
-      mockChatCompletions.mockRestore();
       wasmMocks.restoreAll();
     });
 
@@ -604,12 +881,10 @@ describe('PrivatemodeCore', () => {
       );
 
       let callCount = 0;
-      const mockChatCompletions = vi
-        .spyOn(wasm, 'chatCompletions')
-        .mockImplementation(async () => {
-          callCount++;
-          throw new Error(wasm.errNoSecretForID() + ' xyz');
-        });
+      wasmMocks.client.chatCompletions.mockImplementation(async () => {
+        callCount++;
+        throw new Error(wasm.errNoSecretForID() + ' xyz');
+      });
 
       await client.verify();
 
@@ -623,7 +898,6 @@ describe('PrivatemodeCore', () => {
       expect(callCount).toBe(1);
       expect(wasmMocks.mockUpdateSecret).toHaveBeenCalledTimes(1);
 
-      mockChatCompletions.mockRestore();
       wasmMocks.restoreAll();
     });
 
@@ -637,13 +911,11 @@ describe('PrivatemodeCore', () => {
         const wasmMocks = mockWasmFunctions();
 
         let callCount = 0;
-        const mockChatCompletions = vi
-          .spyOn(wasm, 'chatCompletions')
-          .mockImplementation(async () => {
-            callCount++;
-            // Always throw secret error
-            throw new Error(wasm.errNoSecretForID() + ' xyz');
-          });
+        wasmMocks.client.chatCompletions.mockImplementation(async () => {
+          callCount++;
+          // Always throw secret error
+          throw new Error(wasm.errNoSecretForID() + ' xyz');
+        });
 
         await client.verify();
 
@@ -658,7 +930,6 @@ describe('PrivatemodeCore', () => {
         expect(callCount).toBe(2);
         expect(wasmMocks.mockUpdateSecret).toHaveBeenCalledTimes(1);
 
-        mockChatCompletions.mockRestore();
         wasmMocks.restoreAll();
       },
     );
@@ -676,26 +947,22 @@ describe('PrivatemodeCore', () => {
         const mockWasm = mockWasmFunctions();
 
         let initializeCallCount = 0;
-        mockWasm.mockInitialize = vi
-          .spyOn(wasm, 'initialize')
-          .mockImplementation(async () => {
-            initializeCallCount++;
-            if (initializeCallCount === 1) {
-              throw new Error(wasm.errManifestMismatch());
-            }
-            // Second call succeeds
-          });
+        mockWasm.client.initialize.mockImplementation(async () => {
+          initializeCallCount++;
+          if (initializeCallCount === 1) {
+            throw new Error(wasm.errManifestMismatch());
+          }
+          // Second call succeeds
+        });
 
         let fetchManifestCallCount = 0;
-        mockWasm.mockFetchManifest = vi
-          .spyOn(wasm, 'fetchManifest')
-          .mockImplementation(async () => {
-            fetchManifestCallCount++;
-            if (fetchManifestCallCount === 1) {
-              return originalManifest;
-            }
-            return newManifest;
-          });
+        mockWasm.client.fetchManifest.mockImplementation(async () => {
+          fetchManifestCallCount++;
+          if (fetchManifestCallCount === 1) {
+            return originalManifest;
+          }
+          return newManifest;
+        });
 
         await client.verify();
 
@@ -711,5 +978,30 @@ describe('PrivatemodeCore', () => {
         mockWasm.restoreAll();
       },
     );
+  });
+
+  describe('close', () => {
+    it.skipIf(!isNode)('prevents use after close', async () => {
+      const client = new PrivatemodeCore({ auth: apiKeyAuth('test-key') });
+      const wasmMocks = mockWasmFunctions();
+
+      try {
+        await client.verify();
+        client.close();
+        client.close();
+        expect(wasmMocks.client.close).toHaveBeenCalledTimes(1);
+
+        await expect(client.verify()).rejects.toThrow(/closed/);
+        await expect(
+          client.chatCompletions({
+            model: 'test-model',
+            messages: [{ role: 'user', content: 'test' }],
+          }),
+        ).rejects.toThrow(/closed/);
+        expect(() => client.exportSecret()).toThrow(/closed/);
+      } finally {
+        wasmMocks.restoreAll();
+      }
+    });
   });
 });

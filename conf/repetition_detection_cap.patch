@@ -1,8 +1,8 @@
 diff --git a/vllm/config/model.py b/vllm/config/model.py
-index ab8831de4..8bece410c 100644
+index ab3a56a1fe..312aa35bd7 100644
 --- a/vllm/config/model.py
 +++ b/vllm/config/model.py
-@@ -224,6 +224,12 @@ class ModelConfig:
+@@ -244,6 +244,12 @@ class ModelConfig:
      specified in `SamplingParams`. The default value comes the default for the
      OpenAI Chat Completions API. -1 means no cap, i.e. all (output_length *
      vocab_size) logprobs are allowed to be returned and it may cause OOM."""
@@ -16,10 +16,10 @@ index ab8831de4..8bece410c 100644
      """Indicates the content returned in the logprobs and prompt_logprobs.
      Supported mode:
 diff --git a/vllm/engine/arg_utils.py b/vllm/engine/arg_utils.py
-index c7a9335bb..a37392ef0 100644
+index 219f8ffb08..b801bf91ea 100644
 --- a/vllm/engine/arg_utils.py
 +++ b/vllm/engine/arg_utils.py
-@@ -528,6 +528,9 @@ class EngineArgs:
+@@ -535,6 +535,9 @@ class EngineArgs:
      long_prefill_token_threshold: int = SchedulerConfig.long_prefill_token_threshold
      max_num_seqs: int | None = None
      max_logprobs: int = ModelConfig.max_logprobs
@@ -29,7 +29,7 @@ index c7a9335bb..a37392ef0 100644
      logprobs_mode: LogprobsMode = ModelConfig.logprobs_mode
      use_fp64_gumbel: bool = ModelConfig.use_fp64_gumbel
      disable_log_stats: bool = False
-@@ -834,6 +837,10 @@ class EngineArgs:
+@@ -867,6 +870,10 @@ class EngineArgs:
              **model_kwargs["enable_return_routed_experts"],
          )
          model_group.add_argument("--max-logprobs", **model_kwargs["max_logprobs"])
@@ -40,7 +40,7 @@ index c7a9335bb..a37392ef0 100644
          model_group.add_argument("--logprobs-mode", **model_kwargs["logprobs_mode"])
          model_group.add_argument("--use-fp64-gumbel", **model_kwargs["use_fp64_gumbel"])
          model_group.add_argument(
-@@ -1637,6 +1644,9 @@ class EngineArgs:
+@@ -1709,6 +1716,9 @@ class EngineArgs:
              enforce_eager=self.enforce_eager,
              enable_return_routed_experts=self.enable_return_routed_experts,
              max_logprobs=self.max_logprobs,
@@ -51,7 +51,7 @@ index c7a9335bb..a37392ef0 100644
              use_fp64_gumbel=self.use_fp64_gumbel,
              disable_sliding_window=self.disable_sliding_window,
 diff --git a/vllm/sampling_params.py b/vllm/sampling_params.py
-index 017692e9c..a86bafa0a 100644
+index 97ab54e9f6..6f4148eda4 100644
 --- a/vllm/sampling_params.py
 +++ b/vllm/sampling_params.py
 @@ -142,6 +142,10 @@ class StructuredOutputsParams:
@@ -65,26 +65,30 @@ index 017692e9c..a86bafa0a 100644
  @dataclass
  class RepetitionDetectionParams:
      """Parameters for detecting repetitive N-gram patterns in output tokens."""
-@@ -171,6 +175,18 @@ class RepetitionDetectionParams:
+@@ -171,6 +175,22 @@ class RepetitionDetectionParams:
                  "with min_pattern_size <= max_pattern_size. "
                  "Set both to 0 to disable repetitive pattern detection."
              )
 +        if self.max_pattern_size > _MAX_ABSOLUTE_PATTERN_SIZE:
-+            raise ValueError(
++            raise VLLMValidationError(
 +                f"max_pattern_size must be at most "
 +                f"{_MAX_ABSOLUTE_PATTERN_SIZE}, "
-+                f"got {self.max_pattern_size}."
++                f"got {self.max_pattern_size}.",
++                parameter="repetition_detection.max_pattern_size",
++                value=self.max_pattern_size,
 +            )
 +        if self.min_count > _MAX_ABSOLUTE_MIN_COUNT:
-+            raise ValueError(
++            raise VLLMValidationError(
 +                f"min_count must be at most "
 +                f"{_MAX_ABSOLUTE_MIN_COUNT}, "
-+                f"got {self.min_count}."
++                f"got {self.min_count}.",
++                parameter="repetition_detection.min_count",
++                value=self.min_count,
 +            )
          if self.max_pattern_size > 0 and self.min_count < 2:
-             raise ValueError(
+             raise VLLMValidationError(
                  "min_count must be >= 2 to detect repetitive patterns "
-@@ -749,6 +765,7 @@ class SamplingParams(
+@@ -769,6 +789,7 @@ class SamplingParams(
          self._validate_structured_outputs(
              model_config, structured_outputs_config, tokenizer
          )
@@ -92,7 +96,7 @@ index 017692e9c..a86bafa0a 100644
  
      def _validate_logprobs(self, model_config: ModelConfig) -> None:
          max_logprobs = model_config.max_logprobs
-@@ -886,6 +903,47 @@ class SamplingParams(
+@@ -906,6 +927,47 @@ class SamplingParams(
                      value=invalid_token_ids,
                  )
  
@@ -141,7 +145,7 @@ index 017692e9c..a86bafa0a 100644
          self,
          speculative_config: SpeculativeConfig | None,
 diff --git a/vllm/v1/core/sched/utils.py b/vllm/v1/core/sched/utils.py
-index c7cb6b943..b9f52b51f 100644
+index c7cb6b9436..b9f52b51ff 100644
 --- a/vllm/v1/core/sched/utils.py
 +++ b/vllm/v1/core/sched/utils.py
 @@ -3,7 +3,10 @@

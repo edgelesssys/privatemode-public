@@ -1,12 +1,15 @@
 <script lang="ts">
   import { Brain } from 'lucide-svelte';
   import Tooltip from '../common/Tooltip.svelte';
+  import { t } from '$lib/i18n';
 
   export let active: boolean;
   export let disabled: boolean = false;
   export let onToggle: () => void;
 
-  $: tooltip = `${active ? 'Disable' : 'Enable'} (extended) thinking mode. This lets the model reason more deeply about the request before providing a response`;
+  $: tooltip = $t('chat.thinkingToggle', {
+    action: active ? $t('chat.disable') : $t('chat.enable'),
+  });
 </script>
 
 <Tooltip text={tooltip}>

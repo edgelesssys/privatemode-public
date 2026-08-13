@@ -5,8 +5,10 @@ export type Chat = AppChat & { wordCount: number };
 
 export async function resetApp(page: Page): Promise<void> {
   await page.goto('/');
-  await waitForAppReady(page);
   await clearStorage(page);
+  await page.evaluate(() => {
+    localStorage.setItem('privatemode_locale', 'en');
+  });
   await page.reload();
   await waitForAppReady(page);
 }

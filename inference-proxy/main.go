@@ -15,6 +15,7 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/etcd"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/metrics"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/probe"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/server"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/usagereporter"
 	"github.com/edgelesssys/continuum/internal/mtls"
@@ -52,7 +53,6 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&cfg.adapterTypes, "adapter-type", []string{"openai"}, "type of adapter to use (can be specified multiple times or comma-separated)")
 	cmd.Flags().StringVar(&cfg.workloadAddress, "workload-address", "", "host name or IP the workload can be reached at over TCP")
 	cmd.Flags().StringVar(&cfg.workloadMetricsURL, "workload-metrics", "", "URL of the workload metrics")
-	cmd.Flags().StringVar(&cfg.workloadLiveURL, "workload-live", "", "URL of the workload to check liveness")
 	cmd.Flags().StringVar(&cfg.workloadReadyURL, "workload-ready", "", "URL of the workload to check readiness")
 	cmd.Flags().StringVar(&cfg.ssAddress, "secret-svc-address", "", "host name or IP for the secret service")
 	cmd.Flags().StringVar(&cfg.etcdMemberCert, "etcd-member-cert", filepath.Join(constants.EtcdBasePath(), "etcd.crt"), "path to the etcd member certificate")
@@ -62,6 +62,7 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.identityKeyPath, "identity-key-path", "", "path to the workload identity key")
 	cmd.Flags().StringVar(&cfg.identityCAPath, "identity-ca-path", "", "path to the workload identity CA bundle (used to verify peer identity certs)")
 	cmd.Flags().StringVar(&cfg.workloadTasks, "workload-tasks", "", "comma separated list of tasks the workload supports")
+	cmd.Flags().StringVar(&cfg.workloadModel, "workload-model", "", "model name served by the workload, used for inference health probes")
 	cmd.Flags().StringVar(&cfg.ocspStatusFile, "ocsp-status-file", constants.OCSPStatusFile(), "path to read the OCSP status file from")
 	cmd.Flags().StringVar(&cfg.ucEndpoint, "usage-collector-endpoint", "", "host:port of the API gateway's usage collector RPC")
 	cmd.Flags().StringVar(&cfg.logLevel, logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
@@ -90,7 +91,6 @@ type runConfig struct {
 	adapterTypes       []string
 	workloadAddress    string
 	workloadMetricsURL string
-	workloadLiveURL    string
 	workloadReadyURL   string
 	ssAddress          string
 	etcdMemberCert     string
@@ -100,6 +100,7 @@ type runConfig struct {
 	identityKeyPath    string
 	identityCAPath     string
 	workloadTasks      string
+	workloadModel      string
 	ocspStatusFile     string
 	ucEndpoint         string
 	logLevel           string
@@ -156,9 +157,19 @@ func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
 	}
 	server := server.New(adapters, mtlsIdentity, log)
 
-	metricsServer := metrics.NewServer(cfg.workloadMetricsURL, cfg.workloadLiveURL, cfg.workloadReadyURL, log)
+	workloadBaseURL := "http://" + net.JoinHostPort(cfg.workloadAddress, cfg.workloadPort)
 
 	wg, ctx := errgroup.WithContext(ctx)
+
+	prober := probe.New(workloadBaseURL, cfg.workloadModel, tasks, log)
+
+	metricsServer := metrics.NewServer(cfg.workloadMetricsURL, cfg.workloadReadyURL, prober, etcdWatcher.Ready, log)
+
+	wg.Go(func() error {
+		log.InfoContext(ctx, "Starting workload probe loop")
+		prober.Run(ctx)
+		return nil
+	})
 
 	wg.Go(func() error {
 		log.InfoContext(ctx, "Starting metrics server", "port", cfg.metricsPort)

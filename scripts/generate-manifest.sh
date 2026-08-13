@@ -13,10 +13,9 @@ base_url=https://github.com/edgelesssys/contrast/releases/download/$contrast_ver
 
 # generate and adjust manifest
 ./contrast generate --disable-updates --reference-values=metal-qemu-snp-gpu --reference-value-patches="$dir/scripts/snp-guestpolicy-patch.json" "$dir/deployment.yaml"
-SECRET_SERVICE_DOMAIN=$(yq eval 'select(.metadata.name == "secret-service") | .metadata.labels."app.kubernetes.io/instance"' "$dir/deployment.yaml").secret.privatemode.ai
 SECRET_SERVICE_K8S_INTERNAL_DOMAIN=secret-service-internal.$(yq 'select(.metadata.name == "secret-service") | .metadata.namespace' "$dir/deployment.yaml").svc.cluster.local
 SECRET_SERVICE_K8S_HEADLESS_DOMAIN="*.secret-service-headless.$(yq 'select(.metadata.name == "secret-service") | .metadata.namespace' "$dir/deployment.yaml").svc.cluster.local"
-export SECRET_SERVICE_DOMAIN SECRET_SERVICE_K8S_INTERNAL_DOMAIN SECRET_SERVICE_K8S_HEADLESS_DOMAIN
+export SECRET_SERVICE_K8S_INTERNAL_DOMAIN SECRET_SERVICE_K8S_HEADLESS_DOMAIN
 "$dir/scripts/adjust-manifest.sh" manifest.json
 
 # the machines on Scaleway are Genoa machines, so remove the Milan reference values

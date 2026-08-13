@@ -5,6 +5,7 @@
   import ImageChip from './ImageChip.svelte';
   import ThoughtBlock from './ThoughtBlock.svelte';
   import type { Message, AttachedFile, AttachedImage } from '$lib/chatStore';
+  import { t } from '$lib/i18n';
 
   export let message: Message & {
     renderedContent: string;
@@ -26,7 +27,7 @@
       <div class="message-header error-header">
         <span class="role">
           <CircleAlert size={16} />
-          Error
+          {$t('chat.error')}
         </span>
       </div>
     {:else if message.role === 'assistant'}
@@ -72,7 +73,7 @@
           class="spinning"
           aria-hidden="true"
         />
-        <span class="sr-only">Generating response</span>
+        <span class="sr-only">{$t('chat.generatingResponse')}</span>
       </div>
     {/if}
     {#if message.role === 'assistant' && message.reasoning}
@@ -93,22 +94,22 @@
     class="message-actions"
     class:hidden={isLastStreaming}
   >
-    <Tooltip text="Copy message">
+    <Tooltip text={$t('chat.copyMessage')}>
       <button
         class="copy-message-button"
         type="button"
-        aria-label="Copy message"
+        aria-label={$t('chat.copyMessage')}
         disabled={isLastStreaming}
       >
         <Copy size={16} />
       </button>
     </Tooltip>
     {#if !message.isError}
-      <Tooltip text="Branch off from here">
+      <Tooltip text={$t('chat.branchFromHere')}>
         <button
           class="branch-message-button"
           type="button"
-          aria-label="Branch off from here"
+          aria-label={$t('chat.branchFromHere')}
           disabled={isLastStreaming}
         >
           <GitBranch size={16} />

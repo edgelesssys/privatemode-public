@@ -5,6 +5,7 @@
   import { resolve } from '$app/paths';
   import { themePreference } from '$lib/themeStore';
   import type { ThemePreference } from '$lib/themeStore';
+  import { localePreference, t, type LocalePreference } from '$lib/i18n';
   import {
     models as modelsStore,
     modelsError,
@@ -21,6 +22,7 @@
 
   let showDeleteConfirm = $state(false);
   let currentTheme = $state<ThemePreference>('system');
+  let currentLocalePreference = $state<LocalePreference>('system');
   let currentTranscriptionModel =
     $state<TranscriptionModelID>('whisper-large-v3');
   let availableTranscriptionModels = $derived(
@@ -31,11 +33,15 @@
     const unsubscribeTheme = themePreference.subscribe((v) => {
       currentTheme = v;
     });
+    const unsubscribeLocale = localePreference.subscribe((v) => {
+      currentLocalePreference = v;
+    });
     const unsubscribeTranscriptionModel = transcriptionModel.subscribe((v) => {
       currentTranscriptionModel = v;
     });
     return () => {
       unsubscribeTheme();
+      unsubscribeLocale();
       unsubscribeTranscriptionModel();
     };
   });
@@ -44,19 +50,44 @@
     themePreference.set(value);
   }
 
+  function setLocalePreference(value: LocalePreference) {
+    localePreference.set(value);
+  }
+
   function setTranscriptionModel(value: TranscriptionModelID) {
     transcriptionModel.set(value);
   }
 
   const themeOptions: {
     value: ThemePreference;
-    label: string;
     icon: typeof Monitor;
   }[] = [
-    { value: 'system', label: 'System', icon: Monitor },
-    { value: 'light', label: 'Light', icon: Sun },
-    { value: 'dark', label: 'Dark', icon: Moon },
+    { value: 'system', icon: Monitor },
+    { value: 'light', icon: Sun },
+    { value: 'dark', icon: Moon },
   ];
+
+  const languageOptions: LocalePreference[] = ['system', 'en', 'de'];
+
+  function themeLabel(value: ThemePreference): string {
+    return $t(
+      value === 'system'
+        ? 'settings.themeSystem'
+        : value === 'light'
+          ? 'settings.themeLight'
+          : 'settings.themeDark',
+    );
+  }
+
+  function languageLabel(value: LocalePreference): string {
+    return $t(
+      value === 'system'
+        ? 'settings.languageSystem'
+        : value === 'en'
+          ? 'settings.languageEnglish'
+          : 'settings.languageGerman',
+    );
+  }
 
   function handleDeleteAllChats() {
     chatStore.clear();
@@ -76,15 +107,17 @@
       class="back-btn"
     >
       <ArrowLeft size={20} />
-      Back
+      {$t('common.back')}
     </button>
-    <h1>Settings</h1>
+    <h1>{$t('settings.title')}</h1>
   </div>
 
   <div class="settings-content">
     <section class="setting-section">
-      <h2>Appearance</h2>
-      <p class="setting-description">Choose your preferred color theme</p>
+      <h2>{$t('settings.appearance')}</h2>
+      <p class="setting-description">
+        {$t('settings.appearanceDescription')}
+      </p>
       <div class="theme-picker">
         {#each themeOptions as option (option.value)}
           <button
@@ -94,26 +127,47 @@
             onclick={() => setTheme(option.value)}
           >
             <option.icon size={18} />
-            {option.label}
+            {themeLabel(option.value)}
           </button>
         {/each}
       </div>
     </section>
 
     <section class="setting-section">
-      <h2>Audio transcription</h2>
+      <h2>{$t('settings.language')}</h2>
       <p class="setting-description">
-        Choose the speech-to-text model used for audio uploads
+        {$t('settings.languageDescription')}
+      </p>
+      <div class="theme-picker">
+        {#each languageOptions as option (option)}
+          <button
+            class="theme-option"
+            class:active={currentLocalePreference === option}
+            aria-pressed={currentLocalePreference === option}
+            onclick={() => setLocalePreference(option)}
+          >
+            {languageLabel(option)}
+          </button>
+        {/each}
+      </div>
+    </section>
+
+    <section class="setting-section">
+      <h2>{$t('settings.audioTranscription')}</h2>
+      <p class="setting-description">
+        {$t('settings.audioDescription')}
       </p>
       {#if !$modelsLoaded && $modelsLoading}
-        <p class="empty-model-state">Transcription models are still loading.</p>
+        <p class="empty-model-state">
+          {$t('settings.transcriptionLoading')}
+        </p>
       {:else if !$modelsLoaded && $modelsError}
         <p class="empty-model-state">
-          Failed to load transcription models: {$modelsError}
+          {$t('settings.transcriptionLoadFailed', { error: $modelsError })}
         </p>
       {:else if availableTranscriptionModels.length === 0}
         <p class="empty-model-state">
-          No transcription model is currently available.
+          {$t('settings.noTranscriptionModel')}
         </p>
       {:else}
         <div class="transcription-model-picker">
@@ -137,8 +191,8 @@
     </section>
 
     <section class="setting-section danger-section">
-      <h2>Danger zone</h2>
-      <p class="setting-description">Delete all conversations permanently</p>
+      <h2>{$t('settings.dangerZone')}</h2>
+      <p class="setting-description">{$t('settings.dangerDescription')}</p>
 
       {#if !showDeleteConfirm}
         <button
@@ -146,25 +200,25 @@
           class="danger-btn"
         >
           <Trash2 size={20} />
-          Delete all chats
+          {$t('settings.deleteAllChats')}
         </button>
       {:else}
         <div class="confirm-delete">
           <p class="confirm-text">
-            Are you sure? This action cannot be undone.
+            {$t('settings.deleteAllConfirm')}
           </p>
           <div class="confirm-actions">
             <button
               onclick={handleDeleteAllChats}
               class="confirm-danger-btn"
             >
-              Yes, delete all
+              {$t('settings.yesDeleteAll')}
             </button>
             <button
               onclick={() => (showDeleteConfirm = false)}
               class="cancel-btn"
             >
-              Cancel
+              {$t('common.cancel')}
             </button>
           </div>
         </div>

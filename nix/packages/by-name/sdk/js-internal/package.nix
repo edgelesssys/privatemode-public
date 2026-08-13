@@ -5,6 +5,7 @@
   pnpm_11,
   pnpmConfigHook,
   fetchPnpmDeps,
+  sdk,
 }:
 stdenv.mkDerivation (finalAttrs: {
   pname = "privatemode-internal-js-sdk";
@@ -31,7 +32,7 @@ stdenv.mkDerivation (finalAttrs: {
   buildPhase = ''
     runHook preBuild
 
-    pnpm --dir sdk/js run build
+    PRIVATEMODE_WASM_PATH=${sdk.wasm-internal}/bin/privatemode.wasm pnpm --dir sdk/js run build
 
     runHook postBuild
   '';
@@ -41,8 +42,6 @@ stdenv.mkDerivation (finalAttrs: {
 
     mkdir -p $out/share/
     cp -r sdk/js/dist/* $out/share/
-
-    # TODO(msanft): Bundle the SDK here?
 
     runHook postInstall
   '';

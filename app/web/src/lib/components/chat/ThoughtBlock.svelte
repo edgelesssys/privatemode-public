@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Brain } from 'lucide-svelte';
+  import { locale, t } from '$lib/i18n';
 
   export let renderedReasoning: string;
   export let isStreaming: boolean;
@@ -9,10 +10,14 @@
     const seconds = ms / 1000;
     if (seconds < 10) {
       const rounded = Math.max(0.1, Math.round(seconds * 10) / 10);
-      return `${rounded} ${rounded === 1 ? 'second' : 'seconds'}`;
+      return $t(rounded === 1 ? 'chat.second' : 'chat.seconds', {
+        count: rounded.toLocaleString($locale),
+      });
     }
     const rounded = Math.round(seconds);
-    return `${rounded} ${rounded === 1 ? 'second' : 'seconds'}`;
+    return $t(rounded === 1 ? 'chat.second' : 'chat.seconds', {
+      count: rounded.toLocaleString($locale),
+    });
   }
 </script>
 
@@ -24,11 +29,13 @@
     <Brain size={16} />
     <span class="thinking-label">
       {#if isStreaming}
-        Thinking
+        {$t('chat.thinking')}
       {:else if thoughtDurationMs}
-        Thought for {formatThoughtDuration(thoughtDurationMs)}
+        {$t('chat.thoughtFor', {
+          duration: formatThoughtDuration(thoughtDurationMs),
+        })}
       {:else}
-        Thinking
+        {$t('chat.thinking')}
       {/if}
     </span>
   </summary>

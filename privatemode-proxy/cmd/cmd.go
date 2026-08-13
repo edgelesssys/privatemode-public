@@ -26,6 +26,7 @@ var (
 	logLevel                     string
 	logFormat                    string
 	apiKeyStr                    string
+	disableAPIKeyFallback        bool
 	workspace                    string
 	apiEndpoint                  string
 	port                         string
@@ -68,8 +69,9 @@ func New() *cobra.Command {
 
 	cmd.Flags().StringVar(&apiKeyStr, "apiKey", "",
 		"The API key for the Privatemode API. Accepts either a direct literal or a file path prefixed with '@'. If no key is set, the proxy will not authenticate with the API.")
-	cmd.Flags().String("ssEndpoint", "", "")
-	must(cmd.Flags().MarkDeprecated("ssEndpoint", "direct connection to the secret-service is no longer required"))
+	cmd.Flags().BoolVar(&disableAPIKeyFallback, "disableAPIKeyFallback", false,
+		"Do not use the configured API key for forwarded requests.")
+	must(cmd.Flags().MarkHidden("disableAPIKeyFallback"))
 	cmd.Flags().StringVar(&apiEndpoint, "apiEndpoint", constants.APIEndpoint, "The endpoint for the Privatemode API")
 	cmd.Flags().StringVar(&port, "port", "8080",
 		"The port on which the proxy listens for incoming API requests.")
@@ -99,8 +101,6 @@ func New() *cobra.Command {
 	cmd.Flags().StringVar(&tlsKeyPath, "tlsKeyPath", "", "The path to the TLS key. If not provided, the server will start without TLS.")
 
 	// Contrast flags
-	cmd.Flags().String("coordinatorEndpoint", "", "")
-	must(cmd.Flags().MarkDeprecated("coordinatorEndpoint", "direct connection to the Coordinator is no longer required"))
 	cmd.Flags().StringVar(&cdnBaseURL, "cdnBaseURL", "https://cdn.confidential.cloud/privatemode/v2", "Base URL to retrieve deployment information from.")
 	must(cmd.Flags().MarkHidden("cdnBaseURL"))
 
@@ -194,6 +194,7 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 		InsecureAPIConnection:        insecureAPIConnection,
 		APIEndpoint:                  apiEndpoint,
 		APIKey:                       apiKey,
+		DisableAPIKeyFallback:        disableAPIKeyFallback,
 		PromptCacheSalt:              cacheSalt,
 		NvidiaOCSPAllowUnknown:       nvidiaOCSPAllowUnknown,
 		NvidiaOCSPRevokedGracePeriod: time.Duration(nvidiaOCSPRevokedGracePeriod) * time.Hour,

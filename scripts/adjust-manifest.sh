@@ -32,6 +32,10 @@ if yq -e .ReferenceValues.tdx "$manifest" &>/dev/null; then
   yq eval -i '.ReferenceValues.tdx[].MinTCBEvaluationDataNumber=21' "$manifest"
   yq eval -i '.ReferenceValues.tdx[].MrSeam="346bc77a1846cac214dd2e8edeb9ee4349449d6c3f9ff2c52149a634c27b7fd1bd314c2ef6b973eeebd55742952531a1"' "$manifest"
   yq eval -i '.ReferenceValues.tdx[].AllowedPIIDs=["0c47f6f7587ddb0cfbb0fed9e4537ea7", "6454aa54f4f7490d2b946b6a3c20742c"]' "$manifest"
+
+  # module migration
+  yq eval -i '.ReferenceValues.tdx[1]=.ReferenceValues.tdx[0]' "$manifest"
+  yq eval -i '.ReferenceValues.tdx[1].MrSeam="ab62561a173acbd18ee50ff37750db44184c6cf5e886df74247cc575e163b04c34b9e18374757c235affa614d4127f6b"' "$manifest"
 fi
 
 ### Policies
@@ -39,10 +43,6 @@ fi
 # add required SAN for secret-service mesh cert.
 yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) += [env(SECRET_SERVICE_K8S_INTERNAL_DOMAIN)]' "$manifest"
 yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) += [strenv(SECRET_SERVICE_K8S_HEADLESS_DOMAIN)]' "$manifest"
-yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) += [env(SECRET_SERVICE_DOMAIN)]' "$manifest"
-
-# always accepts the production URL. This is required so the manifest set during staging is still valid for production.
-yq eval -i '(.Policies[] | select(.WorkloadSecretID | contains("secret-service")).SANs) += ["secret.privatemode.ai"]' "$manifest"
 
 # SAN[0] is used as the Common Name of the certificate
 # The secret-service acts as our etcd root user, therefore requires root as the certs CN.

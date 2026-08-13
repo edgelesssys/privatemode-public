@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/edgelesssys/continuum/internal/oss/httputil"
 	"github.com/edgelesssys/continuum/internal/oss/process"
@@ -19,29 +20,33 @@ import (
 // Server is the metrics server.
 type Server struct {
 	workloadMetricsURL string
+	prober             prober
 	log                *slog.Logger
 	handler            http.Handler
 	httpClient         httpClient
 	metricsGatherer    prometheus.Gatherer
 	metricsFormat      expfmt.Format
+	serverReady        *atomic.Bool
 }
 
 // NewServer creates a new Server.
-func NewServer(workloadMetricsURL, workloadLiveURL, workloadReadyURL string, log *slog.Logger) *Server {
+func NewServer(workloadMetricsURL, workloadReadyURL string, prober prober, serverReady *atomic.Bool, log *slog.Logger) *Server {
 	mux := http.NewServeMux()
 	s := &Server{
 		workloadMetricsURL: workloadMetricsURL,
+		prober:             prober,
 		log:                log,
 		handler:            mux,
 		httpClient:         httputil.NewClient(),
 		metricsGatherer:    prometheus.DefaultGatherer,
 		metricsFormat:      expfmt.NewFormat(expfmt.TypeTextPlain),
+		serverReady:        serverReady,
 	}
 	mux.HandleFunc("/metrics", s.handleMetrics)
 	mux.HandleFunc("/livez", handleHealth)
-	mux.HandleFunc("/readyz", handleHealth)
-	if workloadLiveURL != "" {
-		mux.Handle("/workload-livez", s.workloadHealthHandler(workloadLiveURL))
+	mux.HandleFunc("/readyz", s.handleReadiness)
+	if prober != nil {
+		mux.HandleFunc("/workload-livez", s.workloadLivenessHandler)
 	}
 	if workloadReadyURL != "" {
 		mux.Handle("/workload-readyz", s.workloadHealthHandler(workloadReadyURL))
@@ -118,8 +123,25 @@ func (s *Server) workloadHealthHandler(url string) http.Handler {
 	})
 }
 
+func (s *Server) workloadLivenessHandler(w http.ResponseWriter, _ *http.Request) {
+	if err := s.prober.Err(); err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+}
+
+func (s *Server) handleReadiness(w http.ResponseWriter, _ *http.Request) {
+	if !s.serverReady.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+}
+
 func handleHealth(_ http.ResponseWriter, _ *http.Request) {}
 
 type httpClient interface {
 	Do(*http.Request) (*http.Response, error)
+}
+
+type prober interface {
+	Err() error
 }

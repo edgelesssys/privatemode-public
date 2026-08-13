@@ -1,8 +1,8 @@
 diff --git a/vllm/tokenizers/detokenizer_utils.py b/vllm/tokenizers/detokenizer_utils.py
-index 8e73d5dc5..64e638e7d 100644
+index 516f1b70e7..ab55ab2cbe 100644
 --- a/vllm/tokenizers/detokenizer_utils.py
 +++ b/vllm/tokenizers/detokenizer_utils.py
-@@ -4,6 +4,10 @@
+@@ -7,6 +7,10 @@ import json
  
  from vllm.tokenizers import TokenizerLike
  
@@ -13,7 +13,7 @@ index 8e73d5dc5..64e638e7d 100644
  
  def _replace_none_with_empty(tokens: list[str | None]):
      for i, token in enumerate(tokens):
-@@ -46,9 +50,21 @@ def _convert_tokens_to_string_with_added_encoders(
+@@ -49,9 +53,21 @@ def _convert_tokens_to_string_with_added_encoders(
              current_sub_text.append(token)
      if current_sub_text:
          sub_texts.append(convert_tokens_to_string(current_sub_text))

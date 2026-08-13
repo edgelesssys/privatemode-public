@@ -100,3 +100,15 @@ data:
       "file_hash_sha256": "290626832a457426b221b4405d14c8a729ea339abed85b700df21266e524446c",
       "file_size_bytes": 6842781696
     }
+  nvidia-glm-5-2-nvfp4: |-
+    {
+      "model_source": "https://huggingface.co/nvidia/GLM-5.2-NVFP4",
+      "commit_hash": "aec724e8c7b8ee9db3b48c01c320f63f9cdaf8aa",
+      "excluded_files": "",
+      "root_hash": "303b752bd7f87b5d9721db9e8fbe3b4676bc0ac9641a8e22d8878c26fb00a098",
+      "hash_offset": "464874364928",
+      "erofs_version": "1.9.2",
+      "veritysetup_version": "2.8.6",
+      "file_hash_sha256": "f5837aa367118e995bd0ac8271db5c20c5ba10de2829d1adf5888f6a25559a6b",
+      "file_size_bytes": 468534808576
+    }

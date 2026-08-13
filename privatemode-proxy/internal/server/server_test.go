@@ -40,16 +40,17 @@ const (
 func TestChatCompletionsPromptEncryption(t *testing.T) {
 	apiKey := testAPIKey
 	testCases := map[string]struct {
-		clientVersion    string
-		proxyAPIKey      *string
-		prompt           any
-		requestCacheSalt string
-		proxyCacheSalt   string
-		expectStatusCode int
-		expectedHeaders  map[string]string
-		expectedBody     string
-		requestMutator   func(*http.Request)
-		isApp            bool
+		clientVersion         string
+		proxyAPIKey           *string
+		disableAPIKeyFallback bool
+		prompt                any
+		requestCacheSalt      string
+		proxyCacheSalt        string
+		expectStatusCode      int
+		expectedHeaders       map[string]string
+		expectedBody          string
+		requestMutator        func(*http.Request)
+		isApp                 bool
 	}{
 		"with privatemode-proxy API key": {
 			proxyAPIKey:      &apiKey,
@@ -73,6 +74,22 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 			requestMutator: func(req *http.Request) {
 				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", testAPIKey))
 			},
+		},
+		"with disabled API key fallback and request API key": {
+			proxyAPIKey:           &apiKey,
+			disableAPIKeyFallback: true,
+			expectStatusCode:      http.StatusOK,
+			prompt:                "Hello",
+			requestMutator: func(req *http.Request) {
+				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", testAPIKey))
+			},
+		},
+		"with disabled API key fallback and no request API key": {
+			proxyAPIKey:           &apiKey,
+			disableAPIKeyFallback: true,
+			expectStatusCode:      http.StatusUnauthorized,
+			prompt:                "Hello",
+			expectedBody:          makeErrorMsg("no auth found: expected Authorization header with 'Bearer <auth>'"),
 		},
 		"without cache salt key": {
 			proxyAPIKey:      &apiKey,
@@ -153,6 +170,7 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 			defer stubAuthBackendServer.Close()
 
 			sut := newTestServer(tc.proxyAPIKey, secret, stubAuthBackendServer.Listener.Addr().String(), tc.proxyCacheSalt, tc.isApp)
+			sut.disableAPIKeyFallback = tc.disableAPIKeyFallback
 
 			// Act
 			req := prepareChatRequest(t.Context(), require, &tc.prompt, nil, tc.requestCacheSalt)

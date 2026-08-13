@@ -7,10 +7,15 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/edgelesssys/continuum/internal/oss/auth"
+	"github.com/edgelesssys/continuum/internal/oss/sse"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,6 +59,7 @@ func TestBuildAudioTranscriptionBodyAdditionalFields(t *testing.T) {
 				"timestamp_granularities[]": {"word", "segment"},
 			},
 		},
+		false,
 	)
 	require.NoError(t, err)
 
@@ -74,4 +80,57 @@ func TestBuildAudioTranscriptionBodyAdditionalFields(t *testing.T) {
 	gotAudio, err := io.ReadAll(file)
 	require.NoError(t, err)
 	require.Equal(t, []byte("audio"), gotAudio)
+}
+
+func TestBuildStreamingAudioTranscriptionBody(t *testing.T) {
+	file := AudioFile{Name: "sample.wav", Content: []byte("audio"), ContentType: "audio/wav"}
+	opts := AudioTranscriptionOptions{
+		Model:          "whisper-large-v3",
+		Language:       "en",
+		Prompt:         "Privatemode",
+		ResponseFormat: "verbose_json",
+	}
+
+	body, contentType, err := buildAudioTranscriptionBody(file, opts, true)
+	require.NoError(t, err)
+
+	_, params, err := mime.ParseMediaType(contentType)
+	require.NoError(t, err)
+	reader := multipart.NewReader(strings.NewReader(string(body)), params["boundary"])
+	form, err := reader.ReadForm(1 << 20)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, form.RemoveAll()) }()
+
+	assert.Equal(t, []string{"whisper-large-v3"}, form.Value["model"])
+	assert.Equal(t, []string{"en"}, form.Value["language"])
+	assert.Equal(t, []string{"Privatemode"}, form.Value["prompt"])
+	assert.Equal(t, []string{"verbose_json"}, form.Value["response_format"])
+	assert.Equal(t, []string{"true"}, form.Value["stream"])
+	require.Len(t, form.File["file"], 1)
+	assert.Equal(t, "sample.wav", form.File["file"][0].Filename)
+	assert.Equal(t, "audio/wav", form.File["file"][0].Header.Get("Content-Type"))
+}
+
+func TestAudioTranscriptionStream(t *testing.T) {
+	body := io.NopCloser(strings.NewReader("data: {\"delta\":\"hello\"}\n\ndata: [DONE]\n\n"))
+	stream := &AudioTranscriptionStream{reader: sse.NewReader(body, 1024), body: body}
+
+	event, err := stream.Next()
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"delta":"hello"}`, string(event))
+
+	_, err = stream.Next()
+	assert.ErrorIs(t, err, io.EOF)
+	_, err = stream.Next()
+	assert.ErrorIs(t, err, io.EOF)
+}
+
+func TestAudioTranscriptionStreamUnexpectedEOF(t *testing.T) {
+	body := io.NopCloser(strings.NewReader("data: {}\n\n"))
+	stream := &AudioTranscriptionStream{reader: sse.NewReader(body, 1024), body: body}
+
+	_, err := stream.Next()
+	require.NoError(t, err)
+	_, err = stream.Next()
+	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
 }

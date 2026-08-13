@@ -4,6 +4,7 @@
   import { Menu } from 'lucide-svelte';
   import { chatStore } from '$lib/chatStore';
   import { initTheme } from '$lib/themeStore';
+  import { initLocale, t } from '$lib/i18n';
   import { initializeClient } from '$lib/clientStore';
   import {
     initializeAuth,
@@ -23,6 +24,7 @@
     let disposed = false;
     let unsubscribeAuth: (() => void) | undefined;
     const themeCleanup = initTheme();
+    const localeCleanup = initLocale();
 
     // Serialize client (re-)initialization. If the auth identity changes while
     // an init is still in flight, queue a follow-up run instead of dropping it,
@@ -68,6 +70,7 @@
       disposed = true;
       unsubscribeAuth?.();
       if (typeof themeCleanup === 'function') themeCleanup();
+      localeCleanup();
     };
   });
 
@@ -96,7 +99,7 @@
   <title>Privatemode Chat</title>
   <meta
     name="description"
-    content="Privatemode Chat is your confidential AI chat app for sensitive conversations. Use leading AI models while keeping your data protected."
+    content={$t('layout.description')}
   />
 
   <link
@@ -123,7 +126,7 @@
   />
   <meta
     property="og:description"
-    content="Privatemode Chat is your confidential AI chat app for sensitive conversations. Use leading AI models while keeping your data protected."
+    content={$t('layout.description')}
   />
   <meta
     property="og:image"
@@ -149,7 +152,7 @@
   />
   <meta
     name="twitter:description"
-    content="Privatemode Chat is your confidential AI chat app for sensitive conversations. Use leading AI models while keeping your data protected."
+    content={$t('layout.description')}
   />
   <meta
     name="twitter:image"
@@ -160,7 +163,7 @@
 <div class="app">
   <a
     href="#main-content"
-    class="skip-link">Skip to main content</a
+    class="skip-link">{$t('layout.skipToContent')}</a
   >
   <Sidebar
     {currentChatId}
@@ -181,7 +184,7 @@
     <button
       class="sidebar-overlay"
       type="button"
-      aria-label="Close sidebar"
+      aria-label={$t('layout.closeSidebar')}
       onclick={() => (sidebarOpen = false)}
       tabindex="0"
     ></button>
@@ -194,7 +197,7 @@
       <button
         class="mobile-menu-btn"
         type="button"
-        aria-label="Open sidebar"
+        aria-label={$t('layout.openSidebar')}
         onclick={() => (sidebarOpen = true)}
       >
         <Menu size={24} />
@@ -205,30 +208,30 @@
         <button
           class="hamburger-btn"
           type="button"
-          aria-label="Open sidebar"
+          aria-label={$t('layout.openSidebar')}
           onclick={() => (sidebarOpen = true)}
         >
           <Menu size={24} />
         </button>
-        <span>You're using Privatemode in limited mode.</span>
+        <span>{$t('layout.limitedMode')}</span>
         {#if $isSignedIn}
           <span>
             <a
               class="sign-in-link"
               href="https://portal.privatemode.ai/api-keys"
               target="_blank"
-              rel="noopener noreferrer">Create a web app API key</a
+              rel="noopener noreferrer">{$t('layout.createApiKey')}</a
             >
-            in your organization for full access.
+            {$t('layout.organizationFullAccess')}
           </span>
         {:else}
           <span>
             <button
               class="sign-in-link"
               type="button"
-              onclick={signIn}>Sign in</button
+              onclick={signIn}>{$t('layout.signIn')}</button
             >
-            for full access.
+            {$t('layout.forFullAccess')}
           </span>
         {/if}
       </div>
@@ -240,7 +243,7 @@
     >
       {@render children?.()}
     </main>
-    <div class="ai-disclosure">You are interacting with an AI system</div>
+    <div class="ai-disclosure">{$t('layout.aiDisclosure')}</div>
   </div>
 </div>
 

@@ -272,12 +272,61 @@ func (w *privatemodeWasmWrapper) chatCompletions(this js.Value, args []js.Value)
 	return promiseConstructor.New(fn)
 }
 
+// embeddings returns a JS Promise that resolves with the decrypted
+// response from the /v1/embeddings endpoint.
+// Arguments:
+//   - args[0]: JSON request body (string)
+//   - args[1]: (optional) additional request headers.
+//   - args[2]: (optional) JS AbortSignal for cancellation.
+//
+// The returned Promise resolves with the decrypted response body and headers,
+// or rejects with a JS Error on failure. If the AbortSignal is triggered,
+// the request is cancelled and the Promise rejects with an AbortError.
+func (w *privatemodeWasmWrapper) embeddings(this js.Value, args []js.Value) any {
+	body := args[0].String()
+	opts := requestOptionsFromArg(args, 1)
+	abortSignal := abortSignalFromArg(args, 2)
+
+	promiseConstructor := js.Global().Get("Promise")
+	promiseFunc := func(_ js.Value, promiseArgs []js.Value) any {
+		resolve := promiseArgs[0]
+		reject := promiseArgs[1]
+
+		go func() {
+			ctx, release, aborted := contextWithAbortSignal(context.Background(), abortSignal)
+			defer release()
+			if aborted {
+				reject.Invoke(newDOMAbortError())
+				return
+			}
+			resp, err := w.client.EmbeddingsWithOptions(ctx, []byte(body), opts)
+			if err != nil {
+				if ctx.Err() != nil {
+					reject.Invoke(newDOMAbortError())
+					return
+				}
+				reject.Invoke(newJSError(err, "embeddings: %s", err))
+				return
+			}
+			resolve.Invoke(newJSResponse(resp))
+		}()
+
+		return nil
+	}
+
+	fn := js.FuncOf(promiseFunc)
+	defer fn.Release()
+	return promiseConstructor.New(fn)
+}
+
 // streamChatCompletions returns a JS Promise that resolves when
 // streaming is complete. It calls the provided JS callback for each
 // decrypted chunk.
 // Arguments:
 //   - args[0]: JSON request body (string). Should include "stream": true.
 //   - args[1]: JS callback function called with each decrypted chunk (string).
+//     If the callback returns a Promise, the next chunk is not read until the
+//     Promise settles, propagating consumer backpressure to the response body.
 //   - args[2]: (optional) JS AbortSignal for cancellation.
 //   - args[3]: (optional) JS callback called with the response headers.
 //   - args[4]: (optional) additional request headers.
@@ -332,7 +381,14 @@ func (w *privatemodeWasmWrapper) streamChatCompletions(this js.Value, args []js.
 					reject.Invoke(newJSError(err, "reading stream chunk: %s", err))
 					return
 				}
-				onChunk.Invoke(js.ValueOf(string(chunk)))
+				if err := awaitJSPromise(onChunk.Invoke(js.ValueOf(string(chunk)))); err != nil {
+					if ctx.Err() != nil {
+						reject.Invoke(newDOMAbortError())
+						return
+					}
+					reject.Invoke(js.Global().Get("Error").New(fmt.Sprintf("stream consumer rejected chunk: %s", err)))
+					return
+				}
 			}
 
 			resolve.Invoke(js.Undefined())
@@ -350,6 +406,46 @@ func (w *privatemodeWasmWrapper) streamChatCompletions(this js.Value, args []js.
 // matching what the browser's AbortController produces.
 func newDOMAbortError() js.Value {
 	return js.Global().Get("DOMException").New("The operation was aborted.", "AbortError")
+}
+
+// awaitJSPromise waits for a Promise returned by a JavaScript callback. Stream
+// callbacks use this acknowledgement to prevent Go from reading the next
+// response chunk before JavaScript has consumed the current one.
+func awaitJSPromise(promise js.Value) error {
+	if promise.Type() != js.TypeObject || promise.Get("then").Type() != js.TypeFunction {
+		return nil
+	}
+
+	result := make(chan error, 1)
+	onFulfilled := js.FuncOf(func(_ js.Value, _ []js.Value) any {
+		result <- nil
+		return nil
+	})
+	defer onFulfilled.Release()
+	onRejected := js.FuncOf(func(_ js.Value, args []js.Value) any {
+		message := "callback rejected"
+		if len(args) > 0 {
+			// The rejection reason can be any value, including null or
+			// undefined; only objects can be inspected for a message.
+			switch reason := args[0]; reason.Type() {
+			case js.TypeObject:
+				if value := reason.Get("message"); value.Type() == js.TypeString {
+					message = value.String()
+				} else {
+					message = reason.String()
+				}
+			case js.TypeNull, js.TypeUndefined:
+			default:
+				message = reason.String()
+			}
+		}
+		result <- fmt.Errorf("%s", message)
+		return nil
+	})
+	defer onRejected.Release()
+
+	promise.Call("then", onFulfilled, onRejected)
+	return <-result
 }
 
 // abortSignalFromArg returns the optional JS AbortSignal at index, or the
@@ -505,26 +601,12 @@ func (w *privatemodeWasmWrapper) unstructured(this js.Value, args []js.Value) an
 // or rejects with a JS Error on failure. If the AbortSignal is triggered,
 // the request is cancelled and the Promise rejects with an AbortError.
 func (w *privatemodeWasmWrapper) transcribeAudio(this js.Value, args []js.Value) any {
-	jsFile := args[0]
-	jsContent := jsFile.Get("content")
-	content := make([]byte, jsContent.Length())
-	js.CopyBytesToGo(content, jsContent)
-	file := privatemode.AudioFile{
-		Name:    jsFile.Get("name").String(),
-		Content: content,
-	}
-	ct := jsFile.Get("contentType")
-	if ct.Truthy() {
-		file.ContentType = ct.String()
-	}
-
-	opts := privatemode.AudioTranscriptionOptions{}
-	if optsJSON := args[1].String(); optsJSON != "" {
-		if err := json.Unmarshal([]byte(optsJSON), &opts); err != nil {
-			promiseConstructor := js.Global().Get("Promise")
-			return promiseConstructor.Call("reject",
-				js.Global().Get("Error").New(fmt.Sprintf("transcribe audio: parsing options: %s", err)))
-		}
+	file := audioFileFromJS(args[0])
+	opts, err := audioTranscriptionOptionsFromJSON(args[1].String())
+	if err != nil {
+		promiseConstructor := js.Global().Get("Promise")
+		return promiseConstructor.Call("reject",
+			js.Global().Get("Error").New(fmt.Sprintf("transcribe audio: %s", err)))
 	}
 	requestOpts := requestOptionsFromArg(args, 2)
 	abortSignal := abortSignalFromArg(args, 3)
@@ -561,6 +643,112 @@ func (w *privatemodeWasmWrapper) transcribeAudio(this js.Value, args []js.Value)
 	fn := js.FuncOf(promiseFunc)
 	defer fn.Release()
 	return promiseConstructor.New(fn)
+}
+
+// streamTranscribeAudio returns a JS Promise that resolves when streaming is complete.
+// It calls the provided JS callback for each decrypted transcription event.
+// Arguments:
+//   - args[0]: JS audio file object.
+//   - args[1]: JSON-encoded transcription options.
+//   - args[2]: JS callback invoked with each event as a JSON string. If the
+//     callback returns a Promise, the next event is not read until it settles.
+//   - args[3]: (optional) JS AbortSignal for cancellation.
+//   - args[4]: (optional) JS callback called with the response headers.
+//   - args[5]: (optional) additional request headers.
+func (w *privatemodeWasmWrapper) streamTranscribeAudio(this js.Value, args []js.Value) any {
+	file := audioFileFromJS(args[0])
+	opts, err := audioTranscriptionOptionsFromJSON(args[1].String())
+	if err != nil {
+		return js.Global().Get("Promise").Call("reject",
+			js.Global().Get("Error").New(fmt.Sprintf("stream transcribe audio: %s", err)))
+	}
+	onChunk := args[2]
+	var onHeaders js.Value
+	if len(args) > 4 && !args[4].IsUndefined() && !args[4].IsNull() {
+		onHeaders = args[4]
+	}
+	requestOpts := requestOptionsFromArg(args, 5)
+	abortSignal := abortSignalFromArg(args, 3)
+
+	promiseConstructor := js.Global().Get("Promise")
+	promiseFunc := func(_ js.Value, promiseArgs []js.Value) any {
+		resolve := promiseArgs[0]
+		reject := promiseArgs[1]
+
+		go func() {
+			ctx, release, aborted := contextWithAbortSignal(context.Background(), abortSignal)
+			defer release()
+			if aborted {
+				reject.Invoke(newDOMAbortError())
+				return
+			}
+
+			stream, err := w.client.StreamTranscribeAudioWithOptions(ctx, file, opts, requestOpts)
+			if err != nil {
+				if ctx.Err() != nil {
+					reject.Invoke(newDOMAbortError())
+					return
+				}
+				reject.Invoke(newJSError(err, "stream transcribe audio: %s", err))
+				return
+			}
+			defer stream.Close()
+			if onHeaders.Truthy() {
+				onHeaders.Invoke(js.ValueOf(headerToJS(stream.Header)))
+			}
+
+			for chunk, err := range stream.All() {
+				if err != nil {
+					if ctx.Err() != nil {
+						reject.Invoke(newDOMAbortError())
+						return
+					}
+					reject.Invoke(newJSError(err, "reading transcription event: %s", err))
+					return
+				}
+				if err := awaitJSPromise(onChunk.Invoke(js.ValueOf(string(chunk)))); err != nil {
+					if ctx.Err() != nil {
+						reject.Invoke(newDOMAbortError())
+						return
+					}
+					reject.Invoke(js.Global().Get("Error").New(fmt.Sprintf("stream consumer rejected transcription event: %s", err)))
+					return
+				}
+			}
+
+			resolve.Invoke(js.Undefined())
+		}()
+
+		return nil
+	}
+
+	fn := js.FuncOf(promiseFunc)
+	defer fn.Release()
+	return promiseConstructor.New(fn)
+}
+
+func audioFileFromJS(jsFile js.Value) privatemode.AudioFile {
+	jsContent := jsFile.Get("content")
+	content := make([]byte, jsContent.Length())
+	js.CopyBytesToGo(content, jsContent)
+	file := privatemode.AudioFile{
+		Name:    jsFile.Get("name").String(),
+		Content: content,
+	}
+	if ct := jsFile.Get("contentType"); ct.Truthy() {
+		file.ContentType = ct.String()
+	}
+	return file
+}
+
+func audioTranscriptionOptionsFromJSON(optsJSON string) (privatemode.AudioTranscriptionOptions, error) {
+	opts := privatemode.AudioTranscriptionOptions{}
+	if optsJSON != "" {
+		if err := json.Unmarshal([]byte(optsJSON), &opts); err != nil {
+			return opts, fmt.Errorf("parsing options: %w", err)
+		}
+	}
+	return opts, nil
 }
 
 // listModels returns a JS Promise that resolves with the JSON response
@@ -670,24 +858,50 @@ func (w *privatemodeWasmWrapper) importSecret(this js.Value, args []js.Value) an
 	return js.Undefined()
 }
 
-func main() {
+// newClient returns a JavaScript object whose methods are bound to an
+// independent Privatemode client. Keeping the wrapper in the method closures
+// ensures that authentication, endpoint, manifest, and secret state cannot be
+// overwritten by another JavaScript SDK client.
+func newClient(_ js.Value, _ []js.Value) any {
 	w := newWasmWrapper()
+	client := js.Global().Get("Object").New()
+	var funcs []js.Func
+	register := func(name string, fn func(js.Value, []js.Value) any) {
+		f := js.FuncOf(fn)
+		funcs = append(funcs, f)
+		client.Set(name, f)
+	}
+	register("initialize", w.initialize)
+	register("initializeOffline", w.initializeOffline)
+	register("setAuth", w.setAuth)
+	register("updateSecret", w.updateSecret)
+	register("fetchManifest", w.fetchManifest)
+	register("chatCompletions", w.chatCompletions)
+	register("embeddings", w.embeddings)
+	register("streamChatCompletions", w.streamChatCompletions)
+	register("unstructured", w.unstructured)
+	register("transcribeAudio", w.transcribeAudio)
+	register("streamTranscribeAudio", w.streamTranscribeAudio)
+	register("listModels", w.listModels)
+	register("exportSecret", w.exportSecret)
+	register("importSecret", w.importSecret)
+	// close releases the Go function references backing this client so that
+	// short-lived clients don't accumulate them. The client, including close
+	// itself, must not be called afterwards.
+	register("close", func(_ js.Value, _ []js.Value) any {
+		for _, f := range funcs {
+			f.Release()
+		}
+		return js.Undefined()
+	})
+	return client
+}
 
+func main() {
 	js.Global().Set("privatemodeVersion", constants.Version())
 	js.Global().Set("errManifestMismatch", attest.ErrManifestMismatch.Error())
 	js.Global().Set("errNoSecretForID", constants.ErrorNoSecretForID)
-	js.Global().Set("initialize", js.FuncOf(w.initialize))
-	js.Global().Set("initializeOffline", js.FuncOf(w.initializeOffline))
-	js.Global().Set("setAuth", js.FuncOf(w.setAuth))
-	js.Global().Set("updateSecret", js.FuncOf(w.updateSecret))
-	js.Global().Set("fetchManifest", js.FuncOf(w.fetchManifest))
-	js.Global().Set("chatCompletions", js.FuncOf(w.chatCompletions))
-	js.Global().Set("streamChatCompletions", js.FuncOf(w.streamChatCompletions))
-	js.Global().Set("unstructured", js.FuncOf(w.unstructured))
-	js.Global().Set("transcribeAudio", js.FuncOf(w.transcribeAudio))
-	js.Global().Set("listModels", js.FuncOf(w.listModels))
-	js.Global().Set("exportSecret", js.FuncOf(w.exportSecret))
-	js.Global().Set("importSecret", js.FuncOf(w.importSecret))
+	js.Global().Set("createPrivatemodeClient", js.FuncOf(newClient))
 
 	<-make(chan struct{})
 }

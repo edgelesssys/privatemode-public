@@ -9,6 +9,7 @@
   import logoDark from '$lib/assets/favicon-dark.svg';
   import logoLight from '$lib/assets/favicon-light.svg';
   import { isDark } from '$lib/themeStore';
+  import { t } from '$lib/i18n';
   import 'highlight.js/styles/github-dark.css';
 
   export let chatId: string | null;
@@ -114,13 +115,13 @@
 >
   {#if !chatId}
     <EmptyState
-      title="No chat selected"
-      subtitle="Start a new conversation to begin"
+      title={$t('chat.noChatTitle')}
+      subtitle={$t('chat.noChatSubtitle')}
     />
   {:else if messages.length === 0}
     <EmptyState
-      title="Start a conversation"
-      subtitle="Send a message to begin chatting"
+      title={$t('chat.emptyTitle')}
+      subtitle={$t('chat.emptySubtitle')}
     />
   {:else}
     <div class="messages">

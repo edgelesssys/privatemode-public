@@ -6,6 +6,7 @@
     userOrganizations,
     switchOrganization,
   } from '$lib/authStore';
+  import { t } from '$lib/i18n';
 
   let open = false;
   let containerRef: HTMLDivElement | null = null;
@@ -65,7 +66,7 @@
     bind:this={buttonRef}
     on:click={toggle}
   >
-    <span class="org-subtitle-name">{$orgName ?? 'Personal'}</span>
+    <span class="org-subtitle-name">{$orgName ?? $t('sidebar.personal')}</span>
     <span
       class="org-chevron"
       class:open

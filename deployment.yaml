@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: secret-service
-  namespace: continuum-70649b
+  namespace: continuum-49042b
   labels:
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/instance: '49042b'
 spec:
   replicas: 3
   serviceName: secret-service-headless
@@ -15,14 +15,14 @@ spec:
     metadata:
       labels:
         app: secret-service
-        app.kubernetes.io/instance: '70649b'
+        app.kubernetes.io/instance: '49042b'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
     spec:
       runtimeClassName: contrast-cc
       containers:
         - name: secret-service
-          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.51.0@sha256:d233520d213af4cd4a750b87255c8a7a1399e978f4c20d809664779bb5c81f7b'
+          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.52.0@sha256:dadbb0fce8433e157786439b7f87c6bf2aab0fee9ffb853b12a89f7dea175841'
           resources:
             requests:
               memory: 2Gi
@@ -32,7 +32,7 @@ spec:
           args:
             - |
               exec /bin/secret-service \
-                --k8s-namespace=continuum-70649b \
+                --k8s-namespace=continuum-49042b \
                 $([ "${HOSTNAME##*-}" = "0" ] && echo "--may-bootstrap") \
                 --etcd-server-cert=/contrast/tls-config/certChain.pem \
                 --etcd-server-key=/contrast/tls-config/key.pem \
@@ -56,10 +56,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-deepseek-ocr-2
-  namespace: continuum-70649b
+  namespace: continuum-49042b
   labels:
     app: workload-deepseek-ocr-2
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/instance: '49042b'
 spec:
   replicas: 1
   selector:
@@ -69,7 +69,7 @@ spec:
     metadata:
       labels:
         app: workload-deepseek-ocr-2
-        app.kubernetes.io/instance: '70649b'
+        app.kubernetes.io/instance: '49042b'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -90,7 +90,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.51.0@sha256:851dbb5b5d7f8702c8e2a5d62382e1eef80283a388afdd97cc91f378ff30ac94
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.52.0@sha256:5d2e158bebaf8d93a9019ac377a9482ccdee015fd8ab12ee0fdf6261098af763
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -106,7 +106,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-deepseek-ocr-2-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.51.0@sha256:85ac209b0d98f0ee99d347be60e55ca031ef8869d48a790b48e9f77ba2947eae
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.52.0@sha256:0ddd65f78b642d129be83cbabc377c368018b81b35217205fb3b6a902bb3eaf0
           args:
             - 'deepseek-ocr-2'
             - '0'
@@ -123,14 +123,28 @@ spec:
               devicePath: /dev/modelweights-deepseek-ocr-2-0
       containers:
         - name: workload-deepseek-ocr-2-0
-          image: docker.io/vllm/vllm-openai:v0.25.0@sha256:fc56161ee42a011aeee78b65d0a81b6683c7d04402fd40503d14d4d6c98f07cb
+          image: docker.io/vllm/vllm-openai:v0.27.1@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967
           readinessProbe:
             httpGet:
               path: /workload-readyz
               port: 8185
               scheme: HTTP
-            initialDelaySeconds: 60
             periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8185
+              scheme: HTTP
+            failureThreshold: 3
+            periodSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8185
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 1
+            failureThreshold: 3600
           env:
             - name: VLLM_HOST_IP
               value: '127.0.0.1'
@@ -146,6 +160,8 @@ spec:
               value: "2400"
             - name: VLLM_MEDIA_URL_ALLOW_REDIRECTS
               value: "0"
+            - name: VLLM_MM_HASHER_ALGORITHM
+              value: "sha256"
             - name: PYTHONPATH
               value: /vllm-workspace
             - name: OTEL_SERVICE_NAME
@@ -165,11 +181,11 @@ spec:
               if [ $(sha256sum /vllm-workspace/deepseek_logits_processor.py | cut -d ' ' -f 1) != '628ca252446e1fc3ce0a45a66047d105ef3044688d75a4db385054b2e39ea7a0' ]; then echo deepseek_logits_processor.py hash mismatch: $(sha256sum /vllm-workspace/deepseek_logits_processor.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing stop_token_ids_validation.patch"
               cp /untrusted-vllm-patch/stop_token_ids_validation.patch /vllm-workspace/stop_token_ids_validation.patch
-              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '0bc27ebf665286f44508a623548f6dbae35d9d109529a3ddaae4bd0ded4e0604' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '944159cc045f4a5722fbbccde2879d92b4e3e60320e2efecf9b1f3a05b9fe564' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/stop_token_ids_validation.patch
               echo "Installing skip_special_tokens.patch"
               cp /untrusted-vllm-patch/skip_special_tokens.patch /vllm-workspace/skip_special_tokens.patch
-              if [ $(sha256sum /vllm-workspace/skip_special_tokens.patch | cut -d ' ' -f 1) != 'f29cd565b8ff1671d5e196c5f5cc88e1dceaad62f0ec2b4bc51db35beee0d9de' ]; then echo skip_special_tokens.patch hash mismatch: $(sha256sum /vllm-workspace/skip_special_tokens.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/skip_special_tokens.patch | cut -d ' ' -f 1) != 'e4d9105d8c5f9c28ea7b4e71aeef2ac458af36e2719a5ec6e39aa5557dd27885' ]; then echo skip_special_tokens.patch hash mismatch: $(sha256sum /vllm-workspace/skip_special_tokens.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/skip_special_tokens.patch
               exec vllm serve "$@"
             - _
@@ -197,6 +213,9 @@ spec:
             - name: mount-dir
               mountPath: /mnt
               mountPropagation: HostToContainer
+            - name: vllm-pylock
+              mountPath: /untrusted-pylock
+              readOnly: true
             - name: vllm-patch
               mountPath: /untrusted-vllm-patch
               readOnly: true
@@ -209,7 +228,7 @@ spec:
               memory: 64Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-deepseek-ocr-2-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.51.0@sha256:2093301b31cd979eeff87f04724762fa35d52433a8b9e2e42b592cf91b32b8c7
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.52.0@sha256:d4f08a98e23fd7dce65933ce1dbf98f6ed1615bd6e9c0af6ce083d701f23f72b
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -219,9 +238,10 @@ spec:
             - '--listen-port=8085'
             - '--metrics-port=8185'
             - '--workload-port=8000'
+            - '--workload-model=deepseek-ocr-2'
             - '--workload-ready=http://127.0.0.1:8000/v1/models'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-70649b.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-49042b.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -229,8 +249,20 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,vision'
-            - '--usage-collector-endpoint=usage-collector.continuum-70649b.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-49042b.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8185
+              scheme: HTTP
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8185
+              scheme: HTTP
+            periodSeconds: 5
           volumeMounts:
             - name: inference-proxy-deepseek-ocr-2-0-identity
               mountPath: /var/run/secrets/identity
@@ -261,6 +293,9 @@ spec:
         - emptyDir:
             medium: Memory
           name: continuum-run
+        - name: vllm-pylock
+          configMap:
+            name: vllm-pylock
         - name: vllm-patch
           configMap:
             name: vllm-patch
@@ -275,10 +310,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-gpt-oss-120b
-  namespace: continuum-70649b
+  namespace: continuum-49042b
   labels:
     app: workload-gpt-oss-120b
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/instance: '49042b'
 spec:
   replicas: 1
   selector:
@@ -288,7 +323,7 @@ spec:
     metadata:
       labels:
         app: workload-gpt-oss-120b
-        app.kubernetes.io/instance: '70649b'
+        app.kubernetes.io/instance: '49042b'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -309,7 +344,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.51.0@sha256:851dbb5b5d7f8702c8e2a5d62382e1eef80283a388afdd97cc91f378ff30ac94
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.52.0@sha256:5d2e158bebaf8d93a9019ac377a9482ccdee015fd8ab12ee0fdf6261098af763
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -325,7 +360,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-gpt-oss-120b-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.51.0@sha256:85ac209b0d98f0ee99d347be60e55ca031ef8869d48a790b48e9f77ba2947eae
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.52.0@sha256:0ddd65f78b642d129be83cbabc377c368018b81b35217205fb3b6a902bb3eaf0
           args:
             - 'gpt-oss-120b'
             - '0'
@@ -342,14 +377,28 @@ spec:
               devicePath: /dev/modelweights-gpt-oss-120b-0
       containers:
         - name: workload-gpt-oss-120b-0
-          image: docker.io/vllm/vllm-openai:v0.25.0@sha256:fc56161ee42a011aeee78b65d0a81b6683c7d04402fd40503d14d4d6c98f07cb
+          image: docker.io/vllm/vllm-openai:v0.27.1@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967
           readinessProbe:
             httpGet:
               path: /workload-readyz
               port: 8185
               scheme: HTTP
-            initialDelaySeconds: 60
             periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8185
+              scheme: HTTP
+            failureThreshold: 3
+            periodSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8185
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 1
+            failureThreshold: 3600
           env:
             - name: VLLM_HOST_IP
               value: '127.0.0.1'
@@ -365,6 +414,8 @@ spec:
               value: "2400"
             - name: VLLM_MEDIA_URL_ALLOW_REDIRECTS
               value: "0"
+            - name: VLLM_MM_HASHER_ALGORITHM
+              value: "sha256"
             - name: PYTHONPATH
               value: /vllm-workspace
             - name: OTEL_SERVICE_NAME
@@ -379,22 +430,14 @@ spec:
             - /bin/bash
             - -ec
             - |
-              echo "Installing anthropic.patch"
-              cp /untrusted-vllm-patch/anthropic.patch /vllm-workspace/anthropic.patch
-              if [ $(sha256sum /vllm-workspace/anthropic.patch | cut -d ' ' -f 1) != '6880f0c53d37e426eac7984c6f1bb700adb58c87cfebbd1d0565d4b3c9f2676f' ]; then echo anthropic.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic.patch
               echo "Installing stop_token_ids_validation.patch"
               cp /untrusted-vllm-patch/stop_token_ids_validation.patch /vllm-workspace/stop_token_ids_validation.patch
-              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '0bc27ebf665286f44508a623548f6dbae35d9d109529a3ddaae4bd0ded4e0604' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '944159cc045f4a5722fbbccde2879d92b4e3e60320e2efecf9b1f3a05b9fe564' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/stop_token_ids_validation.patch
               echo "Installing repetition_detection_cap.patch"
               cp /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
-              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '2868fa3bfc52b1b5c01649e4901f1037f13f502cedb5b95a590cb5bf34c3fb0f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '5dd3a4dd4e1e6c92bc871107c92abf87de94234b88ec82491e5d744d5e8ca673' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
-              echo "Installing lm_format_enforcer_regex_timeout.patch"
-              cp /untrusted-vllm-patch/lm_format_enforcer_regex_timeout.patch /vllm-workspace/lm_format_enforcer_regex_timeout.patch
-              if [ $(sha256sum /vllm-workspace/lm_format_enforcer_regex_timeout.patch | cut -d ' ' -f 1) != '34f65df7d2d8ac2d2346017f63193dd4c45852677da5003f7398e944e8a20670' ]; then echo lm_format_enforcer_regex_timeout.patch hash mismatch: $(sha256sum /vllm-workspace/lm_format_enforcer_regex_timeout.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/lm_format_enforcer_regex_timeout.patch
               exec vllm serve "$@"
             - _
           args:
@@ -424,6 +467,9 @@ spec:
             - name: mount-dir
               mountPath: /mnt
               mountPropagation: HostToContainer
+            - name: vllm-pylock
+              mountPath: /untrusted-pylock
+              readOnly: true
             - name: vllm-patch
               mountPath: /untrusted-vllm-patch
               readOnly: true
@@ -436,7 +482,7 @@ spec:
               memory: 64Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-gpt-oss-120b-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.51.0@sha256:2093301b31cd979eeff87f04724762fa35d52433a8b9e2e42b592cf91b32b8c7
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.52.0@sha256:d4f08a98e23fd7dce65933ce1dbf98f6ed1615bd6e9c0af6ce083d701f23f72b
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -446,9 +492,10 @@ spec:
             - '--listen-port=8085'
             - '--metrics-port=8185'
             - '--workload-port=8000'
+            - '--workload-model=openai/gpt-oss-120b'
             - '--workload-ready=http://127.0.0.1:8000/v1/models'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-70649b.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-49042b.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -456,8 +503,20 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling'
-            - '--usage-collector-endpoint=usage-collector.continuum-70649b.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-49042b.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8185
+              scheme: HTTP
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8185
+              scheme: HTTP
+            periodSeconds: 5
           volumeMounts:
             - name: inference-proxy-gpt-oss-120b-0-identity
               mountPath: /var/run/secrets/identity
@@ -488,6 +547,9 @@ spec:
         - emptyDir:
             medium: Memory
           name: continuum-run
+        - name: vllm-pylock
+          configMap:
+            name: vllm-pylock
         - name: vllm-patch
           configMap:
             name: vllm-patch
@@ -502,10 +564,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-kimi-k2-6
-  namespace: continuum-70649b
+  namespace: continuum-49042b
   labels:
     app: workload-kimi-k2-6
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/instance: '49042b'
 spec:
   replicas: 1
   selector:
@@ -515,7 +577,7 @@ spec:
     metadata:
       labels:
         app: workload-kimi-k2-6
-        app.kubernetes.io/instance: '70649b'
+        app.kubernetes.io/instance: '49042b'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -536,7 +598,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.51.0@sha256:851dbb5b5d7f8702c8e2a5d62382e1eef80283a388afdd97cc91f378ff30ac94
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.52.0@sha256:5d2e158bebaf8d93a9019ac377a9482ccdee015fd8ab12ee0fdf6261098af763
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -552,7 +614,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-kimi-k2-6-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.51.0@sha256:85ac209b0d98f0ee99d347be60e55ca031ef8869d48a790b48e9f77ba2947eae
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.52.0@sha256:0ddd65f78b642d129be83cbabc377c368018b81b35217205fb3b6a902bb3eaf0
           command:
             - /bin/sh
             - -ec
@@ -576,14 +638,28 @@ spec:
               devicePath: /dev/modelweights-kimi-k2.6-0
       containers:
         - name: workload-kimi-k2-6-0
-          image: docker.io/vllm/vllm-openai:v0.25.0@sha256:fc56161ee42a011aeee78b65d0a81b6683c7d04402fd40503d14d4d6c98f07cb
+          image: docker.io/vllm/vllm-openai:v0.27.1@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967
           readinessProbe:
             httpGet:
               path: /workload-readyz
               port: 8185
               scheme: HTTP
-            initialDelaySeconds: 60
             periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8185
+              scheme: HTTP
+            failureThreshold: 3
+            periodSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8185
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 1
+            failureThreshold: 3600
           env:
             - name: VLLM_HOST_IP
               value: '127.0.0.1'
@@ -599,6 +675,8 @@ spec:
               value: "2400"
             - name: VLLM_MEDIA_URL_ALLOW_REDIRECTS
               value: "0"
+            - name: VLLM_MM_HASHER_ALGORITHM
+              value: "sha256"
             - name: PYTHONPATH
               value: /vllm-workspace
             - name: VLLM_MEM_POLL_SECONDS
@@ -626,24 +704,16 @@ spec:
               if [ $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1) != '722f04c60de4101d72b71445a440b0552d1dbc5e4dc81af63664066f54a0d0a1' ]; then echo sitecustomize.py hash mismatch: $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing reasoning_marker_detokenize.patch"
               cp /untrusted-vllm-patch/reasoning_marker_detokenize.patch /vllm-workspace/reasoning_marker_detokenize.patch
-              if [ $(sha256sum /vllm-workspace/reasoning_marker_detokenize.patch | cut -d ' ' -f 1) != '7082a6e792c073308ecc3fff7a7d2312a0dd4ce0e14aade6b8861d74123dd793' ]; then echo reasoning_marker_detokenize.patch hash mismatch: $(sha256sum /vllm-workspace/reasoning_marker_detokenize.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/reasoning_marker_detokenize.patch | cut -d ' ' -f 1) != '0f794067f1e6a5daa9a5895291b1ee825f629d0af813a7019b5833630e62e0e3' ]; then echo reasoning_marker_detokenize.patch hash mismatch: $(sha256sum /vllm-workspace/reasoning_marker_detokenize.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/reasoning_marker_detokenize.patch
-              echo "Installing anthropic.patch"
-              cp /untrusted-vllm-patch/anthropic.patch /vllm-workspace/anthropic.patch
-              if [ $(sha256sum /vllm-workspace/anthropic.patch | cut -d ' ' -f 1) != '6880f0c53d37e426eac7984c6f1bb700adb58c87cfebbd1d0565d4b3c9f2676f' ]; then echo anthropic.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic.patch
               echo "Installing stop_token_ids_validation.patch"
               cp /untrusted-vllm-patch/stop_token_ids_validation.patch /vllm-workspace/stop_token_ids_validation.patch
-              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '0bc27ebf665286f44508a623548f6dbae35d9d109529a3ddaae4bd0ded4e0604' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '944159cc045f4a5722fbbccde2879d92b4e3e60320e2efecf9b1f3a05b9fe564' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/stop_token_ids_validation.patch
               echo "Installing repetition_detection_cap.patch"
               cp /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
-              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '2868fa3bfc52b1b5c01649e4901f1037f13f502cedb5b95a590cb5bf34c3fb0f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '5dd3a4dd4e1e6c92bc871107c92abf87de94234b88ec82491e5d744d5e8ca673' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
-              echo "Installing lm_format_enforcer_regex_timeout.patch"
-              cp /untrusted-vllm-patch/lm_format_enforcer_regex_timeout.patch /vllm-workspace/lm_format_enforcer_regex_timeout.patch
-              if [ $(sha256sum /vllm-workspace/lm_format_enforcer_regex_timeout.patch | cut -d ' ' -f 1) != '34f65df7d2d8ac2d2346017f63193dd4c45852677da5003f7398e944e8a20670' ]; then echo lm_format_enforcer_regex_timeout.patch hash mismatch: $(sha256sum /vllm-workspace/lm_format_enforcer_regex_timeout.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/lm_format_enforcer_regex_timeout.patch
               exec vllm serve "$@"
             - _
           args:
@@ -689,6 +759,9 @@ spec:
             - name: mount-dir
               mountPath: /mnt
               mountPropagation: HostToContainer
+            - name: vllm-pylock
+              mountPath: /untrusted-pylock
+              readOnly: true
             - name: vllm-patch
               mountPath: /untrusted-vllm-patch
               readOnly: true
@@ -701,7 +774,7 @@ spec:
               memory: 120Gi
               "nvidia.com/GB100_B200": 4
         - name: inference-proxy-kimi-k2-6-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.51.0@sha256:2093301b31cd979eeff87f04724762fa35d52433a8b9e2e42b592cf91b32b8c7
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.52.0@sha256:d4f08a98e23fd7dce65933ce1dbf98f6ed1615bd6e9c0af6ce083d701f23f72b
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -711,9 +784,10 @@ spec:
             - '--listen-port=8085'
             - '--metrics-port=8185'
             - '--workload-port=8000'
+            - '--workload-model=kimi-k2.6'
             - '--workload-ready=http://127.0.0.1:8000/v1/models'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-70649b.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-49042b.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -721,8 +795,20 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling,vision'
-            - '--usage-collector-endpoint=usage-collector.continuum-70649b.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-49042b.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8185
+              scheme: HTTP
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8185
+              scheme: HTTP
+            periodSeconds: 5
           volumeMounts:
             - name: inference-proxy-kimi-k2-6-0-identity
               mountPath: /var/run/secrets/identity
@@ -753,6 +839,9 @@ spec:
         - emptyDir:
             medium: Memory
           name: continuum-run
+        - name: vllm-pylock
+          configMap:
+            name: vllm-pylock
         - name: vllm-patch
           configMap:
             name: vllm-patch
@@ -767,10 +856,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-whisper-qwen3-voxtral
-  namespace: continuum-70649b
+  namespace: continuum-49042b
   labels:
     app: workload-whisper-qwen3-voxtral
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/instance: '49042b'
 spec:
   replicas: 1
   selector:
@@ -780,7 +869,7 @@ spec:
     metadata:
       labels:
         app: workload-whisper-qwen3-voxtral
-        app.kubernetes.io/instance: '70649b'
+        app.kubernetes.io/instance: '49042b'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -801,7 +890,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.51.0@sha256:851dbb5b5d7f8702c8e2a5d62382e1eef80283a388afdd97cc91f378ff30ac94
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.52.0@sha256:5d2e158bebaf8d93a9019ac377a9482ccdee015fd8ab12ee0fdf6261098af763
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -817,7 +906,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-whisper-large-v3-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.51.0@sha256:85ac209b0d98f0ee99d347be60e55ca031ef8869d48a790b48e9f77ba2947eae
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.52.0@sha256:0ddd65f78b642d129be83cbabc377c368018b81b35217205fb3b6a902bb3eaf0
           args:
             - 'whisper-large-v3'
             - '0'
@@ -833,7 +922,7 @@ spec:
             - name: modelweights-whisper-large-v3-0
               devicePath: /dev/modelweights-whisper-large-v3-0
         - name: disk-mounter-qwen3-embedding-4b-1
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.51.0@sha256:85ac209b0d98f0ee99d347be60e55ca031ef8869d48a790b48e9f77ba2947eae
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.52.0@sha256:0ddd65f78b642d129be83cbabc377c368018b81b35217205fb3b6a902bb3eaf0
           args:
             - 'qwen3-embedding-4b'
             - '1'
@@ -849,7 +938,7 @@ spec:
             - name: modelweights-qwen3-embedding-4b-1
               devicePath: /dev/modelweights-qwen3-embedding-4b-1
         - name: disk-mounter-voxtral-mini-3b-2
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.51.0@sha256:85ac209b0d98f0ee99d347be60e55ca031ef8869d48a790b48e9f77ba2947eae
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.52.0@sha256:0ddd65f78b642d129be83cbabc377c368018b81b35217205fb3b6a902bb3eaf0
           args:
             - 'voxtral-mini-3b'
             - '2'
@@ -872,8 +961,22 @@ spec:
               path: /workload-readyz
               port: 8185
               scheme: HTTP
-            initialDelaySeconds: 60
             periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8185
+              scheme: HTTP
+            failureThreshold: 3
+            periodSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8185
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 1
+            failureThreshold: 3600
           env:
             - name: VLLM_HOST_IP
               value: '127.0.0.1'
@@ -889,6 +992,8 @@ spec:
               value: "2400"
             - name: VLLM_MEDIA_URL_ALLOW_REDIRECTS
               value: "0"
+            - name: VLLM_MM_HASHER_ALGORITHM
+              value: "sha256"
             - name: PYTHONPATH
               value: /vllm-workspace
             - name: OTEL_SERVICE_NAME
@@ -903,9 +1008,9 @@ spec:
             - /bin/bash
             - -ec
             - |
-              cp /untrusted-pylock/pylock.toml /vllm-workspace/pylock.toml
-              if [ $(sha256sum /vllm-workspace/pylock.toml | cut -d ' ' -f 1) != 'cd99accc9e94de9b5db264d5661b2e1774aa36db2951f52628cbf87b79dab3de' ]; then echo pylock.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.toml | cut -d ' ' -f 1); exit 1; fi
-              uv pip install -r /vllm-workspace/pylock.toml --system
+              cp /untrusted-pylock/pylock.audio.toml /vllm-workspace/pylock.audio.toml
+              if [ $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1) != 'd0be201193c8715a834418d46e7870ddd8c92488c348a93ed9b4e26a92637703' ]; then echo pylock.audio.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1); exit 1; fi
+              uv pip install -r /vllm-workspace/pylock.audio.toml --system
               echo "Installing transcriptions_0.24.0.patch"
               cp /untrusted-vllm-patch/transcriptions_0.24.0.patch /vllm-workspace/transcriptions_0.24.0.patch
               if [ $(sha256sum /vllm-workspace/transcriptions_0.24.0.patch | cut -d ' ' -f 1) != '734aa3ea95796cc8cbd39b93c1423212440aed86ee9f5f148aa8f0fd225b9a89' ]; then echo transcriptions_0.24.0.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_0.24.0.patch | cut -d ' ' -f 1); exit 1; fi
@@ -941,7 +1046,7 @@ spec:
             - name: mount-dir
               mountPath: /mnt
               mountPropagation: HostToContainer
-            - name: vllm-audio-pylock
+            - name: vllm-pylock
               mountPath: /untrusted-pylock
               readOnly: true
             - name: vllm-patch
@@ -956,7 +1061,7 @@ spec:
               memory: 70Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-whisper-large-v3-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.51.0@sha256:2093301b31cd979eeff87f04724762fa35d52433a8b9e2e42b592cf91b32b8c7
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.52.0@sha256:d4f08a98e23fd7dce65933ce1dbf98f6ed1615bd6e9c0af6ce083d701f23f72b
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -966,9 +1071,10 @@ spec:
             - '--listen-port=8085'
             - '--metrics-port=8185'
             - '--workload-port=8000'
+            - '--workload-model=openai/whisper-large-v3'
             - '--workload-ready=http://127.0.0.1:8000/v1/models'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-70649b.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-49042b.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -976,8 +1082,20 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=transcribe'
-            - '--usage-collector-endpoint=usage-collector.continuum-70649b.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-49042b.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8185
+              scheme: HTTP
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8185
+              scheme: HTTP
+            periodSeconds: 5
           volumeMounts:
             - name: inference-proxy-whisper-large-v3-0-identity
               mountPath: /var/run/secrets/identity
@@ -985,14 +1103,28 @@ spec:
             - name: continuum-run
               mountPath: /var/run/continuum
         - name: workload-qwen3-embedding-4b-1
-          image: docker.io/vllm/vllm-openai:v0.25.0@sha256:fc56161ee42a011aeee78b65d0a81b6683c7d04402fd40503d14d4d6c98f07cb
+          image: docker.io/vllm/vllm-openai:v0.27.1@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967
           readinessProbe:
             httpGet:
               path: /workload-readyz
               port: 8186
               scheme: HTTP
-            initialDelaySeconds: 60
             periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8186
+              scheme: HTTP
+            failureThreshold: 3
+            periodSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8186
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 1
+            failureThreshold: 3600
           env:
             - name: VLLM_HOST_IP
               value: '127.0.0.1'
@@ -1008,6 +1140,8 @@ spec:
               value: "2400"
             - name: VLLM_MEDIA_URL_ALLOW_REDIRECTS
               value: "0"
+            - name: VLLM_MM_HASHER_ALGORITHM
+              value: "sha256"
             - name: PYTHONPATH
               value: /vllm-workspace
             - name: OTEL_SERVICE_NAME
@@ -1024,11 +1158,11 @@ spec:
             - |
               echo "Installing stop_token_ids_validation.patch"
               cp /untrusted-vllm-patch/stop_token_ids_validation.patch /vllm-workspace/stop_token_ids_validation.patch
-              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '0bc27ebf665286f44508a623548f6dbae35d9d109529a3ddaae4bd0ded4e0604' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '944159cc045f4a5722fbbccde2879d92b4e3e60320e2efecf9b1f3a05b9fe564' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/stop_token_ids_validation.patch
               echo "Installing repetition_detection_cap.patch"
               cp /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
-              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '2868fa3bfc52b1b5c01649e4901f1037f13f502cedb5b95a590cb5bf34c3fb0f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '5dd3a4dd4e1e6c92bc871107c92abf87de94234b88ec82491e5d744d5e8ca673' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
               exec vllm serve "$@"
             - _
@@ -1051,6 +1185,9 @@ spec:
             - name: mount-dir
               mountPath: /mnt
               mountPropagation: HostToContainer
+            - name: vllm-pylock
+              mountPath: /untrusted-pylock
+              readOnly: true
             - name: vllm-patch
               mountPath: /untrusted-vllm-patch
               readOnly: true
@@ -1062,7 +1199,7 @@ spec:
               cpu: "4"
               memory: 24Gi
         - name: inference-proxy-qwen3-embedding-4b-1
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.51.0@sha256:2093301b31cd979eeff87f04724762fa35d52433a8b9e2e42b592cf91b32b8c7
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.52.0@sha256:d4f08a98e23fd7dce65933ce1dbf98f6ed1615bd6e9c0af6ce083d701f23f72b
           ports:
             - containerPort: 8086
             - containerPort: 8186
@@ -1072,9 +1209,10 @@ spec:
             - '--listen-port=8086'
             - '--metrics-port=8186'
             - '--workload-port=8001'
+            - '--workload-model=qwen3-embedding-4b'
             - '--workload-ready=http://127.0.0.1:8001/v1/models'
             - '--workload-metrics=http://127.0.0.1:8001/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-70649b.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-49042b.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1082,8 +1220,20 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=embed'
-            - '--usage-collector-endpoint=usage-collector.continuum-70649b.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-49042b.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8186
+              scheme: HTTP
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8186
+              scheme: HTTP
+            periodSeconds: 5
           volumeMounts:
             - name: inference-proxy-qwen3-embedding-4b-1-identity
               mountPath: /var/run/secrets/identity
@@ -1097,8 +1247,22 @@ spec:
               path: /workload-readyz
               port: 8187
               scheme: HTTP
-            initialDelaySeconds: 60
             periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8187
+              scheme: HTTP
+            failureThreshold: 3
+            periodSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8187
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 1
+            failureThreshold: 3600
           env:
             - name: VLLM_HOST_IP
               value: '127.0.0.1'
@@ -1114,6 +1278,8 @@ spec:
               value: "2400"
             - name: VLLM_MEDIA_URL_ALLOW_REDIRECTS
               value: "0"
+            - name: VLLM_MM_HASHER_ALGORITHM
+              value: "sha256"
             - name: PYTHONPATH
               value: /vllm-workspace
             - name: OTEL_SERVICE_NAME
@@ -1128,9 +1294,9 @@ spec:
             - /bin/bash
             - -ec
             - |
-              cp /untrusted-pylock/pylock.toml /vllm-workspace/pylock.toml
-              if [ $(sha256sum /vllm-workspace/pylock.toml | cut -d ' ' -f 1) != 'cd99accc9e94de9b5db264d5661b2e1774aa36db2951f52628cbf87b79dab3de' ]; then echo pylock.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.toml | cut -d ' ' -f 1); exit 1; fi
-              uv pip install -r /vllm-workspace/pylock.toml --system
+              cp /untrusted-pylock/pylock.audio.toml /vllm-workspace/pylock.audio.toml
+              if [ $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1) != 'd0be201193c8715a834418d46e7870ddd8c92488c348a93ed9b4e26a92637703' ]; then echo pylock.audio.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1); exit 1; fi
+              uv pip install -r /vllm-workspace/pylock.audio.toml --system
               echo "Installing generation_config_voxtral.json"
               cp /untrusted-vllm-patch/generation_config_voxtral.json /vllm-workspace/generation_config.json
               if [ $(sha256sum /vllm-workspace/generation_config.json | cut -d ' ' -f 1) != 'c8297823ed0e642d9932ca2ef1cdc0fa174563a3396c687852c1c377b60a18fd' ]; then echo generation_config_voxtral.json hash mismatch: $(sha256sum /vllm-workspace/generation_config.json | cut -d ' ' -f 1); exit 1; fi
@@ -1178,7 +1344,7 @@ spec:
             - name: mount-dir
               mountPath: /mnt
               mountPropagation: HostToContainer
-            - name: vllm-audio-pylock
+            - name: vllm-pylock
               mountPath: /untrusted-pylock
               readOnly: true
             - name: vllm-patch
@@ -1192,7 +1358,7 @@ spec:
               cpu: "4"
               memory: 30Gi
         - name: inference-proxy-voxtral-mini-3b-2
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.51.0@sha256:2093301b31cd979eeff87f04724762fa35d52433a8b9e2e42b592cf91b32b8c7
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.52.0@sha256:d4f08a98e23fd7dce65933ce1dbf98f6ed1615bd6e9c0af6ce083d701f23f72b
           ports:
             - containerPort: 8087
             - containerPort: 8187
@@ -1202,9 +1368,10 @@ spec:
             - '--listen-port=8087'
             - '--metrics-port=8187'
             - '--workload-port=8002'
+            - '--workload-model=voxtral-mini-3b'
             - '--workload-ready=http://127.0.0.1:8002/v1/models'
             - '--workload-metrics=http://127.0.0.1:8002/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-70649b.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-49042b.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1212,8 +1379,20 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=transcribe'
-            - '--usage-collector-endpoint=usage-collector.continuum-70649b.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-49042b.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8187
+              scheme: HTTP
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 8187
+              scheme: HTTP
+            periodSeconds: 5
           volumeMounts:
             - name: inference-proxy-voxtral-mini-3b-2-identity
               mountPath: /var/run/secrets/identity
@@ -1244,9 +1423,9 @@ spec:
         - emptyDir:
             medium: Memory
           name: continuum-run
-        - name: vllm-audio-pylock
+        - name: vllm-pylock
           configMap:
-            name: vllm-audio-pylock
+            name: vllm-pylock
         - name: vllm-patch
           configMap:
             name: vllm-patch
@@ -1273,7 +1452,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: unstructured-api
-  namespace: continuum-70649b
+  namespace: continuum-49042b
   labels:
     app: unstructured-api
 spec:
@@ -1285,7 +1464,7 @@ spec:
     metadata:
       labels:
         app: unstructured-api
-        app.kubernetes.io/instance: '70649b'
+        app.kubernetes.io/instance: '49042b'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -1321,51 +1500,61 @@ spec:
             - name: unstructured-api-logging-config
               mountPath: /untrusted
               readOnly: true
+          startupProbe:
+            httpGet:
+              path: /workload-livez
+              port: 8185
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 1
+            failureThreshold: 600
           livenessProbe:
             httpGet:
               path: /workload-livez
               port: 8185
               scheme: HTTP
-            initialDelaySeconds: 30
-            periodSeconds: 1
-            failureThreshold: 2
+            periodSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /workload-readyz
               port: 8185
               scheme: HTTP
-            initialDelaySeconds: 30
             periodSeconds: 5
         - name: inference-proxy-unstructured-api
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.51.0@sha256:2093301b31cd979eeff87f04724762fa35d52433a8b9e2e42b592cf91b32b8c7
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.52.0@sha256:d4f08a98e23fd7dce65933ce1dbf98f6ed1615bd6e9c0af6ce083d701f23f72b
           ports:
             - containerPort: 8085
           args:
             - --adapter-type=unstructured
             - --workload-address=127.0.0.1
             - --workload-port=8000
-            - --workload-live=http://127.0.0.1:8000/healthcheck
             - --workload-ready=http://127.0.0.1:8000/healthcheck
-            - --secret-svc-address=secret-service-internal.continuum-70649b.svc.cluster.local
+            - --workload-tasks=unstructured
+            - --secret-svc-address=secret-service-internal.continuum-49042b.svc.cluster.local
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
             - '--identity-cert-path=/var/run/secrets/identity/tls.crt'
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
-            - '--usage-collector-endpoint=usage-collector.continuum-70649b.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-49042b.svc.cluster.local:3000'
           volumeMounts:
             - name: unstructured-api-identity
               mountPath: /var/run/secrets/identity
               readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8185
+              scheme: HTTP
+            periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /livez
               port: 8185
               scheme: HTTP
-            initialDelaySeconds: 10
-            periodSeconds: 1
-            failureThreshold: 2
+            periodSeconds: 5
       volumes:
         - name: unstructured-api-identity
           secret:
@@ -1378,17 +1567,17 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: coordinator
-  namespace: 'continuum-70649b'
+  namespace: 'continuum-49042b'
   labels:
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/instance: '49042b'
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: coordinator
-  namespace: 'continuum-70649b'
+  namespace: 'continuum-49042b'
   labels:
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/instance: '49042b'
 rules:
   - apiGroups:
       - ""
@@ -1411,9 +1600,9 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: coordinator
-  namespace: 'continuum-70649b'
+  namespace: 'continuum-49042b'
   labels:
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/instance: '49042b'
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -1421,15 +1610,15 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: coordinator
-    namespace: "continuum-70649b"
+    namespace: "continuum-49042b"
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator
-  namespace: 'continuum-70649b'
+  namespace: 'continuum-49042b'
   labels:
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/instance: '49042b'
 spec:
   ports:
     - name: userapi
@@ -1449,17 +1638,20 @@ spec:
       targetPort: 1313
   publishNotReadyAddresses: true
   selector:
+    app.kubernetes.io/component: coordinator
     app.kubernetes.io/name: coordinator
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/part-of: contrast
+    contrast.edgeless.systems/pod-role: coordinator
+    app.kubernetes.io/instance: '49042b'
   type: ClusterIP
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator-ready
-  namespace: 'continuum-70649b'
+  namespace: 'continuum-49042b'
   labels:
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/instance: '49042b'
 spec:
   ports:
     - name: userapi
@@ -1478,17 +1670,24 @@ spec:
       port: 443
       targetPort: 1313
   selector:
+    app.kubernetes.io/component: coordinator
     app.kubernetes.io/name: coordinator
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/part-of: contrast
+    contrast.edgeless.systems/pod-role: coordinator
+    app.kubernetes.io/instance: '49042b'
   type: ClusterIP
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: coordinator
-  namespace: 'continuum-70649b'
   labels:
-    app.kubernetes.io/instance: '70649b'
+    app.kubernetes.io/component: coordinator
+    app.kubernetes.io/name: coordinator
+    app.kubernetes.io/part-of: contrast
+    app.kubernetes.io/version: 1.23.0
+    app.kubernetes.io/instance: '49042b'
+  name: coordinator
+  namespace: 'continuum-49042b'
 spec:
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Delete
@@ -1496,15 +1695,19 @@ spec:
   replicas: 3
   selector:
     matchLabels:
+      app.kubernetes.io/component: coordinator
       app.kubernetes.io/name: coordinator
+      app.kubernetes.io/part-of: contrast
+      contrast.edgeless.systems/pod-role: coordinator
   serviceName: coordinator
   template:
     metadata:
-      annotations:
-        contrast.edgeless.systems/pod-role: coordinator
       labels:
+        app.kubernetes.io/component: coordinator
         app.kubernetes.io/name: coordinator
-        app.kubernetes.io/instance: '70649b'
+        app.kubernetes.io/part-of: contrast
+        contrast.edgeless.systems/pod-role: coordinator
+        app.kubernetes.io/instance: '49042b'
         privatemode.edgeless.systems/environment: 'production'
     spec:
       affinity:
@@ -1517,7 +1720,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
               weight: 100
       containers:
-        - image: ghcr.io/edgelesssys/contrast/coordinator:v1.22.0@sha256:b7468ad7b0d2670d1921174362d23038b89056197f16ec3081db8d93c6a5eb9e
+        - image: ghcr.io/edgelesssys/contrast/coordinator:v1.23.0@sha256:1c76e4a83334e5d8d818a5339f447b161fb6c7bad230edada8c0da82fa616cb3
           livenessProbe:
             failureThreshold: 3
             httpGet:
@@ -1541,9 +1744,9 @@ spec:
             periodSeconds: 5
           resources:
             limits:
-              memory: 400Mi
+              memory: 300Mi
             requests:
-              memory: 400Mi
+              memory: 300Mi
           securityContext:
             capabilities:
               add:

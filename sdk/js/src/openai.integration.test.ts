@@ -95,6 +95,21 @@ describe.skipIf(!runIntegrationTests)('OpenAI-compatible client', () => {
     expect(model.id).toBe('gpt-oss-120b');
   }, 120_000);
 
+  it('creates embeddings through the public OpenAI-compatible client', async () => {
+    const client = createClient();
+
+    const response = await client.embeddings.create({
+      dimensions: 1024,
+      input: ['Represent this document', 'Represent this query'],
+      model: 'qwen3-embedding-4b',
+    });
+
+    expect(response.object).toBe('list');
+    expect(response.data).toHaveLength(2);
+    expect(response.data[0]?.embedding).toHaveLength(1024);
+    expect(response.data[1]?.embedding).toHaveLength(1024);
+  }, 120_000);
+
   it('transcribes audio through the public OpenAI-compatible client', async () => {
     const client = createClient();
     const file = await toFile(await testAudio(), 'test.mp3', {

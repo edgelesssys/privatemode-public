@@ -8,6 +8,7 @@
   import ChatList from './ChatList.svelte';
   import InfoSection from './InfoSection.svelte';
   import AuthSection from './AuthSection.svelte';
+  import { t } from '$lib/i18n';
 
   export let onNewChat: () => void = () => {};
   export let onSelectChat: (chatId: string) => void = () => {};
@@ -42,13 +43,15 @@
   class="sidebar"
   class:collapsed={effectiveCollapsed}
   class:mobile-open={mobileOpen}
-  aria-label="Sidebar"
+  aria-label={$t('sidebar.label')}
 >
   <button
     class="collapse-btn"
     type="button"
     onclick={onToggleCollapse}
-    aria-label={effectiveCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+    aria-label={effectiveCollapsed
+      ? $t('sidebar.expand')
+      : $t('sidebar.collapse')}
   >
     {#if effectiveCollapsed}
       <ChevronRight size={14} />
@@ -62,12 +65,12 @@
       class="new-chat-btn"
       type="button"
       onclick={handleNewChat}
-      title={effectiveCollapsed ? 'New Chat' : ''}
+      title={effectiveCollapsed ? $t('sidebar.newChat') : ''}
     >
       <MessageCirclePlus size={18} />
       <span
         class="collapsible-text"
-        class:hidden={effectiveCollapsed}>New Chat</span
+        class:hidden={effectiveCollapsed}>{$t('sidebar.newChat')}</span
       >
     </button>
 

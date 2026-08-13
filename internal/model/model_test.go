@@ -19,6 +19,10 @@ func TestResolve(t *testing.T) {
 			input:    "kimi-latest",
 			expected: "kimi-k2.6",
 		},
+		"glm latest to current": {
+			input:    "glm-latest",
+			expected: "glm-5.2",
+		},
 		"whisper short to full": {
 			input:    "whisper-large-v3",
 			expected: "openai/whisper-large-v3",

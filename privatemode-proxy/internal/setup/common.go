@@ -22,6 +22,7 @@ type Flags struct {
 	InsecureAPIConnection        bool
 	APIEndpoint                  string
 	APIKey                       *string
+	DisableAPIKeyFallback        bool
 	PromptCacheSalt              string
 	NvidiaOCSPAllowUnknown       bool
 	NvidiaOCSPRevokedGracePeriod time.Duration
@@ -43,6 +44,7 @@ func NewServer(flags Flags, isApp bool, manager *secretmanager.SecretManager, lo
 	opts := server.Opts{
 		APIEndpoint:                  flags.APIEndpoint,
 		APIKey:                       flags.APIKey,
+		DisableAPIKeyFallback:        flags.DisableAPIKeyFallback,
 		ProtocolScheme:               forwarder.SchemeHTTPS,
 		PromptCacheSalt:              flags.PromptCacheSalt,
 		IsApp:                        isApp,

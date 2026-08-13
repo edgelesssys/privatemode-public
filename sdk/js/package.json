@@ -28,7 +28,7 @@
     "openai": "<8"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && cp src/wasm_exec.js dist/wasm_exec.js",
+    "build": "tsc -p tsconfig.build.json && cp src/wasm_exec.js dist/wasm_exec.js && node scripts/copy-wasm.mjs",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "lint": "eslint .",

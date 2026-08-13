@@ -8,6 +8,7 @@
     clientVerifying,
     clientError,
   } from '$lib/clientStore';
+  import { t } from '$lib/i18n';
 
   let currentChatId: string | null = $state(null);
   let slowConnection = $state(false);
@@ -52,16 +53,16 @@
       class="status-message"
       role="status"
     >
-      <p>Verifying secure connection...</p>
+      <p>{$t('connection.verifying')}</p>
       {#if slowConnection}
         <p class="slow-hint">
-          This is taking longer than usual - your connection may be slow.
+          {$t('connection.slow')}
         </p>
       {/if}
     </div>
   {:else if $clientError}
     <div class="status-message error">
-      <p>Failed to establish secure connection: {$clientError}</p>
+      <p>{$t('connection.failed', { error: $clientError })}</p>
     </div>
   {:else}
     <ChatPanel

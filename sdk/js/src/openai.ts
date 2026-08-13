@@ -56,7 +56,11 @@ type PrivatemodeAIInternalOptions = PrivatemodeAIOptions & {
 /** The Privatemode operations used by the OpenAI transport adapter. */
 export type PrivatemodeTransportClient = Pick<
   PrivatemodeCore,
-  'chatCompletions' | 'listModels' | 'streamChatCompletions' | 'transcribeAudio'
+  | 'chatCompletions'
+  | 'embeddings'
+  | 'listModels'
+  | 'streamChatCompletions'
+  | 'transcribeAudio'
 >;
 
 /** OpenAI client options whose values are not controlled by Privatemode. */
@@ -179,6 +183,15 @@ export class PrivatemodeAI extends OpenAI {
     this.privatemode.importSecret(secret);
   }
 
+  /**
+   * Release the Wasm resources backing this client, including clients
+   * created from it with {@link withOptions}. See
+   * {@link PrivatemodeCore.close}.
+   */
+  public close(): void {
+    this.privatemode.close();
+  }
+
   /** The current manifest. See {@link PrivatemodeCore.manifest}. */
   public get manifest(): Manifest | null {
     return this.privatemode.manifest;
@@ -260,6 +273,10 @@ export class PrivatemodeOpenAITransport {
         await this.ensureReadyFor(request);
         return await this.chatCompletions(request);
       }
+      if (method === 'POST' && path === '/v1/embeddings') {
+        await this.ensureReadyFor(request);
+        return await this.embeddings(request);
+      }
       if (method === 'POST' && path === '/v1/audio/transcriptions') {
         await this.ensureReadyFor(request);
         return await this.transcribeAudio(request);
@@ -333,6 +350,15 @@ export class PrivatemodeOpenAITransport {
       request.signal,
     );
     return jsonResponse(completion.body, { headers: completion.headers });
+  }
+
+  private async embeddings(request: Request): Promise<Response> {
+    const body = await readJSONObject(request);
+    const embeddings = await withAbort(
+      this.privatemode.embeddings(body, requestOptions(request)),
+      request.signal,
+    );
+    return jsonResponse(embeddings.body, { headers: embeddings.headers });
   }
 
   private async streamingResponse(

@@ -2,6 +2,7 @@
   import { X } from 'lucide-svelte';
   import { modalFocus } from '$lib/modalFocus';
   import type { AttachedImage } from '$lib/chatStore';
+  import { t } from '$lib/i18n';
 
   export let image: AttachedImage;
   export let onClose: () => void;
@@ -27,7 +28,7 @@
   <button
     class="image-preview-close"
     type="button"
-    aria-label="Close preview"
+    aria-label={$t('common.closePreview')}
     onclick={onClose}
   >
     <X size={24} />

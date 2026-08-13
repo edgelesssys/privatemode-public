@@ -2,6 +2,7 @@
   import { X } from 'lucide-svelte';
   import type { AttachedImage } from '$lib/chatStore';
   import Tooltip from '../common/Tooltip.svelte';
+  import { t } from '$lib/i18n';
 
   export let image: AttachedImage;
   export let onPreview: ((image: AttachedImage) => void) | undefined =
@@ -14,7 +15,7 @@
     <button
       class="image-thumbnail-button"
       type="button"
-      aria-label={`Preview ${image.name}`}
+      aria-label={$t('chat.previewImage', { name: image.name })}
       on:click={() => onPreview?.(image)}
     >
       <img
@@ -34,12 +35,12 @@
   {/if}
   <span class="file-name">{image.name}</span>
   {#if onRemove}
-    <Tooltip text="Remove image">
+    <Tooltip text={$t('chat.removeImage')}>
       <button
         class="remove-file"
         on:click={onRemove}
         type="button"
-        aria-label={`Remove ${image.name}`}
+        aria-label={$t('chat.removeNamed', { name: image.name })}
       >
         <X size={16} />
       </button>

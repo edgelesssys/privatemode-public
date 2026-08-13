@@ -6,16 +6,20 @@ package privatemode
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/edgelesssys/continuum/internal/oss/sse"
 )
 
 // AudioFile represents an audio file to transcribe.
@@ -50,6 +54,17 @@ type AudioTranscriptionOptions struct {
 	AdditionalFields map[string][]string `json:"additional_fields,omitempty"`
 }
 
+// AudioTranscriptionStream is a stream of decrypted audio transcription events.
+//
+// Use [Client.StreamTranscribeAudio] to create one. The stream must be closed after use.
+type AudioTranscriptionStream struct {
+	reader *sse.Reader
+	body   io.ReadCloser
+	done   bool
+	// Header contains the decrypted response headers.
+	Header http.Header
+}
+
 // TranscribeAudio sends an encrypted request to the OpenAI-compatible
 // audio transcriptions endpoint and returns the decrypted response.
 func (c *Client) TranscribeAudio(ctx context.Context, file AudioFile, opts AudioTranscriptionOptions) ([]byte, error) {
@@ -68,32 +83,10 @@ func (c *Client) TranscribeAudioWithOptions(
 	opts AudioTranscriptionOptions,
 	requestOpts RequestOptions,
 ) (*Response, error) {
-	if len(file.Content) == 0 {
-		return nil, fmt.Errorf("audio file content must not be empty")
-	}
-	if file.Name == "" {
-		return nil, fmt.Errorf("audio file name must not be empty")
-	}
-	if opts.Model == "" {
-		return nil, fmt.Errorf("model must not be empty")
-	}
-	if opts.ResponseFormat != "" && opts.ResponseFormat != "json" && opts.ResponseFormat != "verbose_json" {
-		return nil, fmt.Errorf("unsupported response format %q: only JSON transcription responses are supported", opts.ResponseFormat)
-	}
-
-	body, contentType, err := buildAudioTranscriptionBody(file, opts)
+	req, err := c.prepareAudioTranscriptionRequest(ctx, file, opts, false, requestOpts)
 	if err != nil {
-		return nil, fmt.Errorf("building request body: %w", err)
+		return nil, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+openai.TranscriptionsEndpoint, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	req.Header = cloneRequestHeader(requestOpts.Header)
-	req.Header.Set("Content-Type", contentType)
-	req.Header.Set(constants.PrivatemodeTargetModel, opts.Model)
-
 	resp, err := c.doEncryptedAPIRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("sending request: %w", err)
@@ -108,7 +101,78 @@ func (c *Client) TranscribeAudioWithOptions(
 	return &Response{Header: resp.Header.Clone(), Body: decrypted}, nil
 }
 
-func buildAudioTranscriptionBody(file AudioFile, opts AudioTranscriptionOptions) ([]byte, string, error) {
+// StreamTranscribeAudio sends an encrypted streaming request to the OpenAI-compatible
+// audio transcriptions endpoint and returns decrypted transcription events.
+func (c *Client) StreamTranscribeAudio(ctx context.Context, file AudioFile, opts AudioTranscriptionOptions) (*AudioTranscriptionStream, error) {
+	return c.StreamTranscribeAudioWithOptions(ctx, file, opts, RequestOptions{})
+}
+
+// StreamTranscribeAudioWithOptions sends an encrypted streaming request to the
+// OpenAI-compatible audio transcriptions endpoint and preserves response headers.
+func (c *Client) StreamTranscribeAudioWithOptions(
+	ctx context.Context,
+	file AudioFile,
+	opts AudioTranscriptionOptions,
+	requestOpts RequestOptions,
+) (*AudioTranscriptionStream, error) {
+	req, err := c.prepareAudioTranscriptionRequest(ctx, file, opts, true, requestOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.doEncryptedAPIRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("sending request: %w", err)
+	}
+
+	if !strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
+		resp.Body.Close()
+		return nil, fmt.Errorf("expected streaming response (text/event-stream), got %q", resp.Header.Get("Content-Type"))
+	}
+
+	return &AudioTranscriptionStream{
+		reader: sse.NewReader(resp.Body, constants.MaxSSELineBytes),
+		body:   resp.Body,
+		Header: resp.Header.Clone(),
+	}, nil
+}
+
+func (c *Client) prepareAudioTranscriptionRequest(
+	ctx context.Context,
+	file AudioFile,
+	opts AudioTranscriptionOptions,
+	stream bool,
+	requestOpts RequestOptions,
+) (*http.Request, error) {
+	if len(file.Content) == 0 {
+		return nil, fmt.Errorf("audio file content must not be empty")
+	}
+	if file.Name == "" {
+		return nil, fmt.Errorf("audio file name must not be empty")
+	}
+	if opts.Model == "" {
+		return nil, fmt.Errorf("model must not be empty")
+	}
+	if opts.ResponseFormat != "" && opts.ResponseFormat != "json" && opts.ResponseFormat != "verbose_json" {
+		return nil, fmt.Errorf("unsupported response format %q: only JSON transcription responses are supported", opts.ResponseFormat)
+	}
+
+	body, contentType, err := buildAudioTranscriptionBody(file, opts, stream)
+	if err != nil {
+		return nil, fmt.Errorf("building request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+openai.TranscriptionsEndpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	req.Header = cloneRequestHeader(requestOpts.Header)
+	req.Header.Set("Content-Type", contentType)
+	req.Header.Set(constants.PrivatemodeTargetModel, opts.Model)
+	return req, nil
+}
+
+func buildAudioTranscriptionBody(file AudioFile, opts AudioTranscriptionOptions, stream bool) ([]byte, string, error) {
 	buf := &bytes.Buffer{}
 	writer := multipart.NewWriter(buf)
 
@@ -147,6 +211,11 @@ func buildAudioTranscriptionBody(file AudioFile, opts AudioTranscriptionOptions)
 			}
 		}
 	}
+	if stream {
+		if err := writer.WriteField("stream", "true"); err != nil {
+			return nil, "", fmt.Errorf("writing stream field: %w", err)
+		}
+	}
 
 	partHeader := make(textproto.MIMEHeader)
 	partHeader.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename=%q`, file.Name))
@@ -166,4 +235,60 @@ func buildAudioTranscriptionBody(file AudioFile, opts AudioTranscriptionOptions)
 	}
 
 	return buf.Bytes(), writer.FormDataContentType(), nil
+}
+
+// Next returns the next decrypted transcription event.
+// It returns [io.EOF] when the stream is complete.
+func (s *AudioTranscriptionStream) Next() ([]byte, error) {
+	if s.done {
+		return nil, io.EOF
+	}
+
+	for {
+		line, err := s.reader.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil, io.ErrUnexpectedEOF
+			}
+			return nil, err
+		}
+
+		switch line.Type {
+		case sse.LineEnd, sse.LineComment:
+			continue
+		case sse.LineField:
+			if !line.IsField(sse.FieldData) {
+				return nil, fmt.Errorf("unexpected SSE field %q", line.Name)
+			}
+			if openai.IsStreamDone(line.Value) {
+				s.done = true
+				return nil, io.EOF
+			}
+			return line.Value, nil
+		}
+	}
+}
+
+// All returns an iterator over all decrypted transcription events.
+// The caller must still close the stream when done.
+func (s *AudioTranscriptionStream) All() iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		for {
+			chunk, err := s.Next()
+			if errors.Is(err, io.EOF) {
+				return
+			}
+			if !yield(chunk, err) {
+				return
+			}
+			if err != nil {
+				return
+			}
+		}
+	}
+}
+
+// Close closes the stream and its underlying connection.
+func (s *AudioTranscriptionStream) Close() error {
+	return s.body.Close()
 }

@@ -18,6 +18,7 @@
     signOut,
     clerkLoaded,
   } from '$lib/authStore';
+  import { t } from '$lib/i18n';
 
   export let collapsed: boolean;
 
@@ -84,7 +85,7 @@
         {#if $userImageUrl}
           <img
             src={$userImageUrl}
-            alt="Profile"
+            alt={$t('sidebar.profile')}
             class="auth-avatar"
             title={collapsed ? ($userDisplayName ?? '') : ''}
           />
@@ -110,13 +111,13 @@
           class:hidden={collapsed}
           bind:this={menuContainerRef}
         >
-          <Tooltip text={menuOpen ? '' : 'Account menu'}>
+          <Tooltip text={menuOpen ? '' : $t('sidebar.accountMenu')}>
             <button
               class="auth-menu-btn"
               type="button"
               bind:this={menuButtonRef}
               on:click={toggleMenu}
-              aria-label="Account menu"
+              aria-label={$t('sidebar.accountMenu')}
               aria-haspopup="true"
               aria-expanded={menuOpen}
             >
@@ -138,7 +139,7 @@
                 on:click={() => (menuOpen = false)}
               >
                 <ChartColumn size={14} />
-                <span>Usage</span>
+                <span>{$t('sidebar.usage')}</span>
               </a>
               <a
                 class="auth-menu-item"
@@ -149,7 +150,7 @@
                 on:click={() => (menuOpen = false)}
               >
                 <CreditCard size={14} />
-                <span>Billing</span>
+                <span>{$t('sidebar.billing')}</span>
               </a>
               <button
                 class="auth-menu-item"
@@ -158,7 +159,7 @@
                 on:click={handleSignOut}
               >
                 <LogOut size={14} />
-                <span>Sign out</span>
+                <span>{$t('sidebar.signOut')}</span>
               </button>
             </div>
           {/if}
@@ -169,12 +170,12 @@
         class="info-item auth-btn sign-in"
         type="button"
         on:click={signIn}
-        title={collapsed ? 'Sign in' : ''}
+        title={collapsed ? $t('layout.signIn') : ''}
       >
         <LogIn size={18} />
         <span
           class="collapsible-text"
-          class:hidden={collapsed}>Sign in</span
+          class:hidden={collapsed}>{$t('layout.signIn')}</span
         >
       </button>
     {/if}

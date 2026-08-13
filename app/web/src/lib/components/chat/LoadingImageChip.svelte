@@ -1,3 +1,7 @@
+<script lang="ts">
+  import { t } from '$lib/i18n';
+</script>
+
 <div
   class="image-chip loading-image-chip"
   role="status"
@@ -5,7 +9,7 @@
   <div class="image-thumbnail-placeholder">
     <div class="loading-spinner"></div>
   </div>
-  <span class="file-name">Loading...</span>
+  <span class="file-name">{$t('chat.loadingImage')}</span>
 </div>
 
 <style>

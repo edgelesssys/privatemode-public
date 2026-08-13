@@ -2,6 +2,7 @@
   import { File, Mic, X } from 'lucide-svelte';
   import type { AttachedFile } from '$lib/chatStore';
   import Tooltip from '../common/Tooltip.svelte';
+  import { t } from '$lib/i18n';
 
   export let file: AttachedFile;
   export let onPreview: ((file: AttachedFile) => void) | undefined = undefined;
@@ -13,7 +14,7 @@
     <button
       class="file-preview-button"
       type="button"
-      aria-label={`Preview transcription for ${file.name}`}
+      aria-label={$t('chat.previewTranscription', { name: file.name })}
       on:click={() => onPreview?.(file)}
     >
       <Mic size={16} />
@@ -27,12 +28,12 @@
     <span class="file-name">{file.name}</span>
   {/if}
   {#if onRemove}
-    <Tooltip text="Remove file">
+    <Tooltip text={$t('chat.removeFile')}>
       <button
         class="remove-file"
         on:click={onRemove}
         type="button"
-        aria-label={`Remove ${file.name}`}
+        aria-label={$t('chat.removeNamed', { name: file.name })}
       >
         <X size={16} />
       </button>

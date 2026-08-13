@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	dto "github.com/prometheus/client_model/go"
@@ -15,8 +16,9 @@ import (
 func TestServer(t *testing.T) {
 	testCases := map[string]struct {
 		workloadMetricsURL string
-		workloadLiveURL    string
 		workloadReadyURL   string
+		prober             prober
+		serverReady        *atomic.Bool
 		httpClient         httpClient
 		metrics            []*dto.MetricFamily
 		endpoint           string
@@ -28,8 +30,14 @@ func TestServer(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		"readyz": {
-			endpoint:   "/readyz",
-			wantStatus: http.StatusOK,
+			serverReady: func() *atomic.Bool { b := &atomic.Bool{}; b.Store(true); return b }(),
+			endpoint:    "/readyz",
+			wantStatus:  http.StatusOK,
+		},
+		"server not ready": {
+			serverReady: &atomic.Bool{},
+			endpoint:    "/readyz",
+			wantStatus:  http.StatusServiceUnavailable,
 		},
 		"root endpoint": {
 			endpoint:   "/",
@@ -80,23 +88,21 @@ func TestServer(t *testing.T) {
 			endpoint:   "/workload-readyz",
 			wantStatus: http.StatusNotFound,
 		},
-		"workload livez forwards status": {
-			workloadLiveURL: "http://foo",
-			httpClient:      fakeHTTPClient{status: http.StatusCreated},
-			endpoint:        "/workload-livez",
-			wantStatus:      http.StatusCreated,
+		"workload livez healthy": {
+			prober:     fakeProber{},
+			endpoint:   "/workload-livez",
+			wantStatus: http.StatusOK,
+		},
+		"workload livez unhealthy": {
+			prober:     fakeProber{err: assert.AnError},
+			endpoint:   "/workload-livez",
+			wantStatus: http.StatusServiceUnavailable,
 		},
 		"workload readyz forwards status": {
 			workloadReadyURL: "http://foo",
 			httpClient:       fakeHTTPClient{status: http.StatusCreated},
 			endpoint:         "/workload-readyz",
 			wantStatus:       http.StatusCreated,
-		},
-		"workload livez with request error": {
-			workloadLiveURL: "http://foo",
-			httpClient:      fakeHTTPClient{err: assert.AnError},
-			endpoint:        "/workload-livez",
-			wantStatus:      http.StatusInternalServerError,
 		},
 		"workload readyz with request error": {
 			workloadReadyURL: "http:/foo",
@@ -111,7 +117,7 @@ func TestServer(t *testing.T) {
 			assert := assert.New(t)
 			require := require.New(t)
 
-			server := NewServer(tc.workloadMetricsURL, tc.workloadLiveURL, tc.workloadReadyURL, nil)
+			server := NewServer(tc.workloadMetricsURL, tc.workloadReadyURL, tc.prober, tc.serverReady, nil)
 			server.httpClient = tc.httpClient
 			server.metricsGatherer = stubGatherer{metrics: tc.metrics}
 
@@ -128,6 +134,10 @@ func TestServer(t *testing.T) {
 		})
 	}
 }
+
+type fakeProber struct{ err error }
+
+func (p fakeProber) Err() error { return p.err }
 
 type fakeHTTPClient struct {
 	status int

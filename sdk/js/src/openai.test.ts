@@ -35,6 +35,9 @@ function createTransportClient(
         object: 'chat.completion',
       }),
     ),
+    embeddings: vi.fn(async () =>
+      apiResponse({ data: [], model: 'test-model', object: 'list', usage: {} }),
+    ),
     streamChatCompletions: async function* () {},
     transcribeAudio: vi.fn(async () => apiResponse({ text: '' })),
     listModels: vi.fn(async () => apiResponse({ data: [], object: 'list' })),
@@ -221,6 +224,40 @@ describe('OpenAI transport', () => {
     expect(chatCompletions).toHaveBeenCalledWith(
       {
         messages: [{ content: 'Hi', role: 'user' }],
+        model: 'test-model',
+      },
+      { headers: expect.any(Headers), signal: expect.any(AbortSignal) },
+    );
+  });
+
+  it('routes embeddings through Privatemode', async () => {
+    const embeddings = vi.fn(async () =>
+      apiResponse(
+        {
+          data: [{ embedding: [0.1, 0.2], index: 0, object: 'embedding' }],
+          model: 'test-model',
+          object: 'list',
+          usage: { prompt_tokens: 1, total_tokens: 1 },
+        },
+        { 'x-request-id': 'req_embeddings' },
+      ),
+    );
+    const client = createClient(createTransportClient({ embeddings }));
+
+    const { data: responseBody, response } = await client.embeddings
+      .create({
+        encoding_format: 'float',
+        input: 'hello',
+        model: 'test-model',
+      })
+      .withResponse();
+
+    expect(responseBody.data[0]?.embedding).toEqual([0.1, 0.2]);
+    expect(response.headers.get('x-request-id')).toBe('req_embeddings');
+    expect(embeddings).toHaveBeenCalledWith(
+      {
+        encoding_format: 'float',
+        input: 'hello',
         model: 'test-model',
       },
       { headers: expect.any(Headers), signal: expect.any(AbortSignal) },
@@ -589,7 +626,7 @@ describe('OpenAI transport', () => {
     const client = createClient(createTransportClient());
 
     await expect(
-      client.embeddings.create({ input: 'hello', model: 'test-model' }),
+      client.images.generate({ prompt: 'hello', model: 'test-model' }),
     ).rejects.toMatchObject({
       code: 'unsupported_endpoint',
       status: 501,

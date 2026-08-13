@@ -68,6 +68,7 @@ status can no longer represent them.
 | OpenAI SDK method                       | Privatemode endpoint        |
 | --------------------------------------- | --------------------------- |
 | `client.chat.completions.create()`      | `/v1/chat/completions`      |
+| `client.embeddings.create()`            | `/v1/embeddings`            |
 | `client.audio.transcriptions.create()`  | `/v1/audio/transcriptions`  |
 | `client.models.list()`                  | `/v1/models`                |
 | `client.models.retrieve()`              | `/v1/models` (from the list) |

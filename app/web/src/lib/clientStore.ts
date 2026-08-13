@@ -2,6 +2,7 @@ import { writable, get } from 'svelte/store';
 import { PrivatemodeAI } from 'privatemode-ai';
 import type { ExportedSecret, PrivatemodeAIOptions } from 'privatemode-ai';
 import { getAuthCredential, authIdentity } from './authStore';
+import { translate } from './i18n';
 
 export interface Model {
   id: string;
@@ -183,7 +184,8 @@ export async function loadModels(
   try {
     return await modelsRequest;
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Failed to load models';
+    const message =
+      e instanceof Error ? e.message : translate('model.loadFailed');
     modelsError.set(message);
     modelsLoaded.set(false);
     throw e;
@@ -266,7 +268,11 @@ export async function initializeClient(): Promise<void> {
     });
   } catch (e) {
     setClient(null);
-    clientError.set(e instanceof Error ? e.message : 'Verification failed');
+    clientError.set(
+      e instanceof Error
+        ? e.message
+        : translate('connection.verificationFailed'),
+    );
     console.error('Failed to verify Privatemode deployment:', e);
   } finally {
     clientVerifying.set(false);

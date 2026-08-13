@@ -8,6 +8,7 @@
     loadModels as loadModelsFromClient,
     models as modelsStore,
   } from '$lib/clientStore';
+  import { t } from '$lib/i18n';
 
   export let privatemodeAIClient: PrivatemodeClient | null = null;
   export let selectedModel: string = '';
@@ -89,7 +90,7 @@
         localStorage.setItem(SELECTED_MODEL_KEY, selectedModel);
       }
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to load models';
+      error = e instanceof Error ? e.message : $t('model.loadFailed');
       console.error('Error loading models:', e);
     } finally {
       loading = false;
@@ -122,6 +123,8 @@
   }
 
   function getModelSubtitle(modelId: string): string | undefined {
+    if (modelId === 'openai/gpt-oss-120b') return $t('model.gptOssSubtitle');
+    if (modelId === 'kimi-k2.6') return $t('model.kimiSubtitle');
     return modelConfig[modelId]?.subtitle;
   }
 
@@ -135,9 +138,7 @@
   bind:this={pickerElement}
 >
   {#if disabled}
-    <Tooltip
-      text="Model can only be changed before the first message in a chat. Start a new chat to select a different model."
-    >
+    <Tooltip text={$t('model.locked')}>
       <button
         class="model-button disabled"
         type="button"
@@ -159,7 +160,7 @@
       <span class="model-name"
         >{selectedModel
           ? getModelDisplayName(selectedModel)
-          : 'Select model'}</span
+          : $t('model.select')}</span
       >
       {#if isOpen}
         <ChevronUp size={16} />
@@ -179,12 +180,12 @@
           class="loading"
           role="status"
         >
-          Loading models...
+          {$t('model.loading')}
         </div>
       {:else if error}
         <div class="error">{error}</div>
       {:else if filteredModels.length === 0}
-        <div class="empty">No models available</div>
+        <div class="empty">{$t('model.none')}</div>
       {:else}
         {#each filteredModels as model (model.id)}
           <button

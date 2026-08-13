@@ -1,6 +1,7 @@
 <script lang="ts">
   import { toasts } from '$lib/toastStore';
   import { X } from 'lucide-svelte';
+  import { t } from '$lib/i18n';
 
   function dismiss(id: number) {
     toasts.update((t) => t.filter((toast) => toast.id !== id));
@@ -25,7 +26,7 @@
         <button
           class="toast-close"
           type="button"
-          aria-label="Dismiss"
+          aria-label={$t('common.dismiss')}
           onclick={() => dismiss(toast.id)}
         >
           <X size={14} />

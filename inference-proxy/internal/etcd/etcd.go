@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
@@ -28,6 +29,7 @@ const (
 type Etcd struct {
 	client etcdClient
 
+	Ready   *atomic.Bool
 	secrets *secrets.Secrets
 	log     *slog.Logger
 }
@@ -65,6 +67,7 @@ func New(hosts []string, etcdMemberCert, etcdMemberKey, etcdCA string, fs afero.
 
 	e := &Etcd{
 		client: client,
+		Ready:  &atomic.Bool{},
 		log:    log,
 	}
 	e.secrets = secrets.New(e)
@@ -91,6 +94,7 @@ func (e *Etcd) WatchSecrets(ctx context.Context) error {
 		return fmt.Errorf("starting watch: %w", err)
 	}
 	defer cancel()
+	e.Ready.Store(true)
 
 	for {
 		select {

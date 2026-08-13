@@ -35,6 +35,7 @@
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import { showToast } from '$lib/toastStore';
+  import { locale, t } from '$lib/i18n';
 
   export let privatemodeAIClient: PrivatemodeClient | null;
   export let currentChatId: string | null;
@@ -184,28 +185,28 @@
     availableTranscriptionModels[0]?.id ??
     null;
   $: attachButtonTitle = isUploadingDocuments
-    ? 'Uploading documents...'
+    ? $t('chat.uploadingDocuments')
     : isGenerating
-      ? 'Cannot attach documents while generating'
+      ? $t('chat.cannotAttachDocumentsGenerating')
       : !supportsFileUploads
-        ? 'Selected model does not support document uploads'
-        : 'Attach documents';
+        ? $t('chat.noDocumentUploadSupport')
+        : $t('chat.attachDocuments');
   $: imageButtonTitle = isGenerating
-    ? 'Cannot attach images while generating'
+    ? $t('chat.cannotAttachImagesGenerating')
     : !supportsVision
-      ? 'Selected model does not support images'
-      : 'Attach images';
+      ? $t('chat.noImageSupport')
+      : $t('chat.attachImages');
   $: audioButtonTitle = isUploadingAudio
-    ? 'Uploading audio...'
+    ? $t('chat.uploadingAudio')
     : isGenerating
-      ? 'Cannot attach audio while generating'
+      ? $t('chat.cannotAttachAudioGenerating')
       : !supportsFileUploads
-        ? 'Selected model does not support audio uploads'
+        ? $t('chat.noAudioUploadSupport')
         : !selectedTranscriptionModel
           ? $modelsLoaded
-            ? 'No transcription model is available'
-            : 'Transcription models are still loading'
-          : 'Attach audio';
+            ? $t('chat.noTranscriptionModel')
+            : $t('chat.transcriptionModelsLoading')
+          : $t('chat.attachAudio');
 
   function autoResize() {
     if (textarea) {
@@ -253,7 +254,7 @@
         userMessage,
         attachedFiles: filesToSend.length > 0 ? filesToSend : undefined,
         attachedImages: imagesToSend.length > 0 ? imagesToSend : undefined,
-        systemPrompt: activeModelConfig?.systemPrompt,
+        systemPrompt: activeModelConfig?.systemPrompt[$locale],
         reasoningEffort: supportsExtendedThinking
           ? extendedThinking
             ? 'high'
@@ -297,17 +298,12 @@
   function showErrorToast(message: string, error?: unknown) {
     const isAuthError =
       error instanceof Error && (error as { status?: number }).status === 401;
-    showToast(
-      isAuthError
-        ? `${message} Your API key may be invalid or expired.`
-        : message,
-      {
-        type: 'error',
-        link: isAuthError
-          ? { href: resolve('/settings'), label: 'Update your API key' }
-          : undefined,
-      },
-    );
+    showToast(isAuthError ? `${message} ${$t('error.authSuffix')}` : message, {
+      type: 'error',
+      link: isAuthError
+        ? { href: resolve('/settings'), label: $t('error.updateApiKey') }
+        : undefined,
+    });
   }
 
   function readImageFile(file: globalThis.File, fallbackName?: string) {
@@ -318,7 +314,11 @@
       })
       .catch(() => {
         console.error('Failed to read image:', file.name);
-        showErrorToast(`Failed to read image: ${file.name || 'pasted image'}.`);
+        showErrorToast(
+          $t('error.readImage', {
+            name: file.name || $t('error.pastedImage'),
+          }),
+        );
       })
       .finally(() => {
         loadingImageCount--;
@@ -329,15 +329,15 @@
     if (files.length === 0) return;
     const client = privatemodeAIClient;
     if (!client) {
-      showErrorToast('Privatemode is still connecting. Please try again.');
+      showErrorToast($t('error.connecting'));
       return;
     }
     const model = selectedTranscriptionModel;
     if (!model) {
       showErrorToast(
         $modelsLoading
-          ? 'Transcription models are still loading. Please try again in a moment.'
-          : 'No transcription model is available.',
+          ? $t('error.transcriptionLoading')
+          : $t('error.noTranscriptionModel'),
       );
       return;
     }
@@ -350,7 +350,9 @@
     } catch (error) {
       console.error('Error uploading audio:', error);
       showErrorToast(
-        `Failed to upload audio: ${error instanceof Error ? error.message : 'Unknown error'}.`,
+        $t('error.uploadAudio', {
+          error: error instanceof Error ? error.message : $t('error.unknown'),
+        }),
         error,
       );
     } finally {
@@ -362,7 +364,7 @@
     if (files.length === 0) return;
     const client = privatemodeAIClient;
     if (!client) {
-      showErrorToast('Privatemode is still connecting. Please try again.');
+      showErrorToast($t('error.connecting'));
       return;
     }
     isUploadingDocuments = true;
@@ -374,7 +376,9 @@
     } catch (error) {
       console.error('Error uploading file:', error);
       showErrorToast(
-        `Failed to upload file: ${error instanceof Error ? error.message : 'Unknown error'}.`,
+        $t('error.uploadFile', {
+          error: error instanceof Error ? error.message : $t('error.unknown'),
+        }),
         error,
       );
     } finally {
@@ -401,9 +405,7 @@
     );
 
     if (unsupportedImages.length > 0) {
-      showErrorToast(
-        'The selected model does not support image inputs. Please select a vision-enabled model to attach images.',
-      );
+      showErrorToast($t('error.unsupportedImages'));
     }
     for (const f of images) readImageFile(f);
     if (supportsFileUploads) {
@@ -487,9 +489,7 @@
     );
 
     if (unsupportedImages.length > 0) {
-      showErrorToast(
-        'The selected model does not support image inputs. Please select a vision-enabled model to attach images.',
-      );
+      showErrorToast($t('error.unsupportedImages'));
     }
 
     for (const f of images) readImageFile(f);
@@ -512,7 +512,7 @@
   <div
     class="chat-input-wrapper"
     role="region"
-    aria-label="Message input"
+    aria-label={$t('chat.messageInput')}
   >
     <ChatErrorBanner
       {chatModelUnavailable}
@@ -527,7 +527,7 @@
   <div
     class="chat-input-wrapper"
     role="region"
-    aria-label="Message input"
+    aria-label={$t('chat.messageInput')}
   >
     {#if attachedFiles.length > 0 || attachedImages.length > 0 || loadingImageCount > 0}
       <div class="attached-files">
@@ -556,8 +556,8 @@
       oninput={autoResize}
       onkeydown={handleKeyDown}
       onpaste={handlePaste}
-      placeholder="Type a message..."
-      aria-label="Type a message"
+      placeholder={$t('chat.typeMessage')}
+      aria-label={$t('chat.typeMessageLabel')}
       class="chat-input"
       rows="1"
       disabled={isGenerating}
@@ -605,8 +605,8 @@
             <Paperclip size={18} />
             <span class="attach-label"
               >{isUploadingDocuments
-                ? 'Uploading...'
-                : 'Attach documents'}</span
+                ? $t('chat.uploading')
+                : $t('chat.attachDocuments')}</span
             >
           </button>
         </Tooltip>
@@ -622,7 +622,9 @@
           >
             <Mic size={18} />
             <span class="attach-label"
-              >{isUploadingAudio ? 'Uploading...' : 'Attach audio'}</span
+              >{isUploadingAudio
+                ? $t('chat.uploading')
+                : $t('chat.attachAudio')}</span
             >
           </button>
         </Tooltip>
@@ -635,7 +637,7 @@
               onclick={() => imageInput?.click()}
             >
               <Image size={18} />
-              <span class="attach-label">Attach images</span>
+              <span class="attach-label">{$t('chat.attachImages')}</span>
             </button>
           </Tooltip>
         {/if}
@@ -661,11 +663,11 @@
           />
         </div>
         {#if isGenerating}
-          <Tooltip text="Stop generating">
+          <Tooltip text={$t('chat.stopGenerating')}>
             <button
               class="send-button stop"
               type="button"
-              aria-label="Stop generating"
+              aria-label={$t('chat.stopGenerating')}
               onclick={stopGeneration}
             >
               <Square size={20} />
@@ -674,13 +676,13 @@
         {:else}
           <Tooltip
             text={wouldExceedLimit
-              ? 'Message would exceed token limit'
-              : 'Send message'}
+              ? $t('chat.tokenLimit')
+              : $t('chat.sendMessage')}
           >
             <button
               class="send-button"
               type="button"
-              aria-label="Send message"
+              aria-label={$t('chat.sendMessage')}
               onclick={sendMessage}
               disabled={!canSend}
             >

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { FileUp } from 'lucide-svelte';
   import { onMount } from 'svelte';
+  import { t } from '$lib/i18n';
 
   export let enabled = true;
   export let onDrop: (files: globalThis.File[]) => void;
@@ -72,7 +73,7 @@
   >
     <div class="fullpage-drop-content">
       <FileUp size={48} />
-      <span>Drop file to attach</span>
+      <span>{$t('chat.dropFile')}</span>
     </div>
   </div>
 {/if}

@@ -1,5 +1,17 @@
 import { test, expect } from '@playwright/test';
 import * as web from './helpers/web';
+import { modelConfig } from '../src/lib/models';
+
+test('should provide localized system prompts for every model', () => {
+  for (const model of Object.values(modelConfig)) {
+    expect(model.systemPrompt.en).toContain(model.displayName);
+    expect(model.systemPrompt.de).toContain(model.displayName);
+    expect(model.systemPrompt.de).toContain(
+      'Antworte standardmäßig auf Deutsch',
+    );
+    expect(model.systemPrompt.de).not.toBe(model.systemPrompt.en);
+  }
+});
 
 test.describe('General functionality', () => {
   test.beforeEach(async ({ page }) => {
@@ -54,6 +66,43 @@ test.describe('Settings page', () => {
       'content',
       '#18181B',
     );
+  });
+
+  test('should switch to German and persist the language', async ({ page }) => {
+    await page.getByRole('button', { name: 'German', exact: true }).click();
+
+    await expect(
+      page.getByRole('heading', { name: 'Einstellungen', exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'de');
+    await expect(page.getByText('Darstellung', { exact: true })).toBeVisible();
+
+    await page.reload();
+    await expect(
+      page.getByRole('heading', { name: 'Einstellungen', exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'de');
+
+    const chat = web.createTestChat({
+      messages: [
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Hallo!',
+          reasoning: 'Kurze Begründung',
+          thoughtDurationMs: 100,
+          timestamp: Date.now(),
+        },
+      ],
+    });
+    await web.injectTestChat(page, chat);
+    await page.locator('.back-btn').click();
+    await page.reload();
+    await page
+      .locator('.chat-item-wrapper')
+      .filter({ hasText: 'Test Chat' })
+      .click();
+    await expect(page.getByText('0,1 Sekunden nachgedacht')).toBeVisible();
   });
 
   test('should navigate back to chat', async ({ page }) => {

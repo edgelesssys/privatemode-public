@@ -55,7 +55,82 @@ export async function getAuthCredential(): Promise<AuthCredential> {
   return { type: 'anonymous', value: getAnonymousFingerprint() };
 }
 
+// Attribution parameters the marketing site appends to links leaving for a
+// product surface (privatemode.ai, decorateOutboundUrl in lib/analytics.ts).
+// pm_entry is the page on the website the visitor entered through, pm_ref the
+// referring domain.
+const ATTRIBUTION_PARAMS = [
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'gclid',
+  'gbraid',
+  'wbraid',
+  'gad_source',
+  'gad_campaignid',
+  'msclkid',
+  'fbclid',
+  'li_fat_id',
+  'pm_entry',
+  'pm_ref',
+];
+
+let landingAttribution: Record<string, string> | undefined;
+
+/**
+ * Attribution parameters of the URL this visit landed on, read once and kept in
+ * a module variable.
+ *
+ * Cached rather than read on demand because signing up happens in a Clerk modal
+ * that leaves the address bar alone, but a route change in between would not,
+ * and by the time the portal redirect fires the query string may be gone.
+ * Nothing is written to the device, so this needs no consent.
+ */
+function getLandingAttribution(): Record<string, string> {
+  if (landingAttribution) return landingAttribution;
+
+  const found: Record<string, string> = {};
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    for (const key of ATTRIBUTION_PARAMS) {
+      const value = params.get(key);
+      if (value) found[key] = value;
+    }
+  }
+
+  landingAttribution = found;
+  return found;
+}
+
+/**
+ * Carries the attribution parameters of this visit over to the portal.
+ *
+ * Without this the chain breaks here. Someone arrives from a campaign or a
+ * podcast link, tries the chat anonymously, then creates an account — and the
+ * portal has no idea what sent them, because a plain redirect drops the query
+ * string. Visitors who reach the portal through the chat rather than directly
+ * would otherwise lose their attribution at this hop.
+ *
+ * Parameters already on the target URL win.
+ */
+function withAttribution(target: string): string {
+  if (typeof window === 'undefined') return target;
+
+  const url = new URL(target);
+  for (const [key, value] of Object.entries(getLandingAttribution())) {
+    if (!url.searchParams.has(key)) {
+      url.searchParams.set(key, value);
+    }
+  }
+  return url.toString();
+}
+
 export async function initializeAuth(): Promise<void> {
+  // Read the landing URL before Clerk is fetched and anything can navigate.
+  getLandingAttribution();
+
   const publishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
   if (!publishableKey) {
     console.warn('No Clerk publishable key configured; auth disabled');
@@ -68,8 +143,11 @@ export async function initializeAuth(): Promise<void> {
     const clerk = new Clerk(publishableKey);
     await clerk.load({
       ui: clerkUI,
-      signInUrl: 'https://portal.privatemode.ai/sign-in',
-      signUpUrl: 'https://portal.privatemode.ai/sign-up',
+      // openSignIn() renders a modal that routes virtually, so Clerk does not
+      // send anyone to these URLs today. They are decorated anyway, so a switch
+      // to a redirect flow does not silently break attribution again.
+      signInUrl: withAttribution('https://portal.privatemode.ai/sign-in'),
+      signUpUrl: withAttribution('https://portal.privatemode.ai/sign-up'),
     });
 
     clerkInstance.set(clerk);
@@ -100,8 +178,12 @@ export async function initializeAuth(): Promise<void> {
               })),
             );
             if (data.length === 0) {
-              window.location.href =
-                'https://portal.privatemode.ai/create-organization';
+              // The hop that matters for attribution. Signing up happens in a
+              // Clerk modal on this origin, so a new account reaches the portal
+              // for the first time right here, with no organization yet.
+              window.location.href = withAttribution(
+                'https://portal.privatemode.ai/create-organization',
+              );
             }
           })
           .catch((err: unknown) => {

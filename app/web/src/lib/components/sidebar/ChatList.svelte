@@ -2,6 +2,7 @@
   import ChatListItem from './ChatListItem.svelte';
   import { chatStore } from '$lib/chatStore';
   import type { Chat } from '$lib/chatStore';
+  import { t } from '$lib/i18n';
 
   export let currentChatId: string | null;
   export let collapsed: boolean;
@@ -80,7 +81,7 @@
 
   function handleDelete(event: MouseEvent, chatId: string) {
     event.stopPropagation();
-    if (confirm('Are you sure you want to delete this chat?')) {
+    if (confirm($t('sidebar.deleteConfirm'))) {
       chatStore.deleteChat(chatId);
     }
   }
@@ -90,10 +91,10 @@
   );
   $: groupedChats = groupChatsByDate(sortedChats);
   $: chatGroups = [
-    { label: 'Today', chats: groupedChats.today },
-    { label: 'Yesterday', chats: groupedChats.yesterday },
-    { label: 'Last 7 Days', chats: groupedChats.lastWeek },
-    { label: 'Older', chats: groupedChats.older },
+    { label: $t('sidebar.today'), chats: groupedChats.today },
+    { label: $t('sidebar.yesterday'), chats: groupedChats.yesterday },
+    { label: $t('sidebar.lastSevenDays'), chats: groupedChats.lastWeek },
+    { label: $t('sidebar.older'), chats: groupedChats.older },
   ].filter((g) => g.chats.length > 0);
 </script>
 

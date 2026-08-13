@@ -18,6 +18,16 @@
 <body data-sveltekit-preload-data="hover">
     <script>
         (function () {
+            var storedLocale = localStorage.getItem('privatemode_locale');
+            var localePreference =
+                storedLocale === 'en' || storedLocale === 'de' || storedLocale === 'system'
+                    ? storedLocale
+                    : 'system';
+            var locale = localePreference === 'system'
+                ? (navigator.language.toLowerCase().startsWith('de') ? 'de' : 'en')
+                : localePreference;
+            document.documentElement.lang = locale;
+
             var p = localStorage.getItem('privatemode_theme') || 'system';
             var d = p === 'dark' || (p === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
             var theme = d ? 'dark' : 'light';

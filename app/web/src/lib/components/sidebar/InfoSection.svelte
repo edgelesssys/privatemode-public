@@ -9,6 +9,7 @@
   } from 'lucide-svelte';
   import { clientError, clientReady, clientVerifying } from '$lib/clientStore';
   import { resolve } from '$app/paths';
+  import { t } from '$lib/i18n';
 
   export let collapsed: boolean;
   export let onMobileClose: () => void;
@@ -20,24 +21,24 @@
       <p
         class="info-item error-info"
         role="status"
-        title={collapsed ? 'Connection failed' : ''}
+        title={collapsed ? $t('sidebar.connectionFailed') : ''}
       >
         <TriangleAlert size={18} />
         <span
           class="collapsible-text"
-          class:hidden={collapsed}>Connection failed</span
+          class:hidden={collapsed}>{$t('sidebar.connectionFailed')}</span
         >
       </p>
     {:else if $clientVerifying}
       <!-- No live region here: the chat page already announces this state. -->
       <p
         class="info-item connecting-info"
-        title={collapsed ? 'Connecting...' : ''}
+        title={collapsed ? $t('sidebar.connecting') : ''}
       >
         <LoaderCircle size={18} />
         <span
           class="collapsible-text"
-          class:hidden={collapsed}>Connecting...</span
+          class:hidden={collapsed}>{$t('sidebar.connecting')}</span
         >
       </p>
     {:else if $clientReady}
@@ -45,12 +46,12 @@
         class="info-item security-info"
         href={resolve('/security')}
         on:click={onMobileClose}
-        title={collapsed ? 'Your session is secure' : ''}
+        title={collapsed ? $t('sidebar.sessionSecure') : ''}
       >
         <ShieldCheck size={18} />
         <span
           class="collapsible-text"
-          class:hidden={collapsed}>Your session is secure</span
+          class:hidden={collapsed}>{$t('sidebar.sessionSecure')}</span
         >
       </a>
     {/if}
@@ -58,12 +59,12 @@
       class="info-item"
       href={resolve('/settings')}
       on:click={onMobileClose}
-      title={collapsed ? 'Settings' : ''}
+      title={collapsed ? $t('sidebar.settings') : ''}
     >
       <Settings size={18} />
       <span
         class="collapsible-text"
-        class:hidden={collapsed}>Settings</span
+        class:hidden={collapsed}>{$t('sidebar.settings')}</span
       >
     </a>
     <a
@@ -72,12 +73,12 @@
       target="_blank"
       rel="noopener noreferrer"
       on:click={onMobileClose}
-      title={collapsed ? 'How does it work?' : ''}
+      title={collapsed ? $t('sidebar.howItWorks') : ''}
     >
       <CircleHelp size={18} />
       <span
         class="collapsible-text"
-        class:hidden={collapsed}>How does it work?</span
+        class:hidden={collapsed}>{$t('sidebar.howItWorks')}</span
       >
     </a>
     <a
@@ -86,12 +87,12 @@
       target="_blank"
       rel="noopener noreferrer"
       on:click={onMobileClose}
-      title={collapsed ? 'Get support' : ''}
+      title={collapsed ? $t('sidebar.support') : ''}
     >
       <Headset size={18} />
       <span
         class="collapsible-text"
-        class:hidden={collapsed}>Get support</span
+        class:hidden={collapsed}>{$t('sidebar.support')}</span
       >
     </a>
   </div>

@@ -11,6 +11,7 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { privatemodeClient } from '$lib/clientStore';
+  import { t } from '$lib/i18n';
 
   let manifestHash = $state('');
   let trustedMeasurement = $state('');
@@ -62,9 +63,9 @@
       class="back-btn"
     >
       <ArrowLeft size={20} />
-      Back
+      {$t('common.back')}
     </button>
-    <h1>Security</h1>
+    <h1>{$t('security.title')}</h1>
   </div>
 
   <div class="security-content">
@@ -74,11 +75,10 @@
           size={28}
           color="var(--color-accent-green)"
         />
-        <h2>Your session is secure</h2>
+        <h2>{$t('security.sessionSecure')}</h2>
       </div>
       <p class="section-description">
-        Your connection to Privatemode is protected by confidential computing
-        technology.
+        {$t('security.sessionDescription')}
       </p>
     </section>
 
@@ -87,7 +87,7 @@
         <div
           class="check-badge"
           role="img"
-          aria-label="Verified"
+          aria-label={$t('common.verified')}
         >
           <CircleCheck
             size={20}
@@ -97,16 +97,14 @@
       {/if}
       <div class="section-header">
         <BadgeCheck size={24} />
-        <h2>Remote attestation</h2>
+        <h2>{$t('security.remoteAttestation')}</h2>
       </div>
       <p class="section-description">
-        Before establishing a connection, the security of the Privatemode
-        deployment is cryptographically verified. This proves that all
-        components within the deployment run nothing but the expected code.
+        {$t('security.remoteAttestationDescription')}
       </p>
       {#if manifestHash}
         <div class="data-block">
-          <span class="data-label">Manifest hash (SHA-256)</span>
+          <span class="data-label">{$t('security.manifestHash')}</span>
           <code class="data-value">{manifestHash}</code>
         </div>
         <a
@@ -116,14 +114,14 @@
           class="section-link"
         >
           <ExternalLink size={16} />
-          Learn how to reproduce this hash
+          {$t('security.reproduceHash')}
         </a>
       {:else}
         <p
           class="data-loading"
           role="status"
         >
-          Loading...
+          {$t('common.loading')}
         </p>
       {/if}
     </section>
@@ -133,7 +131,7 @@
         <div
           class="check-badge"
           role="img"
-          aria-label="Verified"
+          aria-label={$t('common.verified')}
         >
           <CircleCheck
             size={20}
@@ -143,16 +141,14 @@
       {/if}
       <div class="section-header">
         <Hammer size={24} />
-        <h2>Reproducible software</h2>
+        <h2>{$t('security.reproducibleSoftware')}</h2>
       </div>
       <p class="section-description">
-        The initial memory contents of each virtual machine running the
-        workloads is cryptographically verified before connecting, proving that
-        the machines have not been tampered with.
+        {$t('security.reproducibleSoftwareDescription')}
       </p>
       {#if trustedMeasurement}
         <div class="data-block">
-          <span class="data-label">Trusted measurement</span>
+          <span class="data-label">{$t('security.trustedMeasurement')}</span>
           <code class="data-value">{trustedMeasurement}</code>
         </div>
         <a
@@ -162,14 +158,14 @@
           class="section-link"
         >
           <ExternalLink size={16} />
-          Learn how to reproduce this hash
+          {$t('security.reproduceHash')}
         </a>
       {:else}
         <p
           class="data-loading"
           role="status"
         >
-          Loading...
+          {$t('common.loading')}
         </p>
       {/if}
     </section>
@@ -179,7 +175,7 @@
         <div
           class="check-badge"
           role="img"
-          aria-label="Verified"
+          aria-label={$t('common.verified')}
         >
           <CircleCheck
             size={20}
@@ -189,24 +185,21 @@
       {/if}
       <div class="section-header">
         <Cpu size={24} />
-        <h2>Hardware-based security</h2>
+        <h2>{$t('security.hardwareBased')}</h2>
       </div>
       <p class="section-description">
-        When connecting to Privatemode, the app verifies that all the hardware
-        components are up-to-date and that the latest security updates are
-        available. Below, you see the minimal version numbers of each of the
-        chips' system components accepted by Privatemode.
+        {$t('security.hardwareDescription')}
       </p>
       {#if productLine}
         <div class="data-block">
-          <span class="data-label">Product line</span>
+          <span class="data-label">{$t('security.productLine')}</span>
           <code class="data-value">{productLine}</code>
         </div>
       {/if}
       {#if minimumTCB}
         <div class="tcb-grid">
           <div class="tcb-item">
-            <span class="tcb-label">Bootloader</span>
+            <span class="tcb-label">{$t('security.bootloader')}</span>
             <span class="tcb-value">{minimumTCB.BootloaderVersion}</span>
           </div>
           <div class="tcb-item">
@@ -218,7 +211,7 @@
             <span class="tcb-value">{minimumTCB.SNPVersion}</span>
           </div>
           <div class="tcb-item">
-            <span class="tcb-label">Microcode</span>
+            <span class="tcb-label">{$t('security.microcode')}</span>
             <span class="tcb-value">{minimumTCB.MicrocodeVersion}</span>
           </div>
         </div>
@@ -227,7 +220,7 @@
           class="data-loading"
           role="status"
         >
-          Loading...
+          {$t('common.loading')}
         </p>
       {/if}
     </section>
@@ -240,7 +233,7 @@
         class="learn-more-link"
       >
         <ExternalLink size={20} />
-        Learn more about how Privatemode protects your data
+        {$t('security.learnMore')}
       </a>
     </section>
   </div>

@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { saveImage, loadImage, deleteImages } from './imageStore';
+import { translate } from './i18n';
 import type OpenAI from 'openai';
 import type { PrivatemodeClient } from './clientStore';
 
@@ -226,9 +227,7 @@ function createChatStore() {
       } catch (e) {
         if (e instanceof DOMException && e.name === 'QuotaExceededError') {
           console.error('localStorage quota exceeded');
-          alert(
-            'Chat history storage is full. Please delete some chats to free up space.',
-          );
+          alert(translate('storage.full'));
         } else {
           throw e;
         }
@@ -292,7 +291,7 @@ function createChatStore() {
       const now = Date.now();
       const newChat: Chat = {
         id: crypto.randomUUID(),
-        title: 'New chat',
+        title: translate('storage.newChat'),
         messages: [],
         createdAt: now,
         updatedAt: now,
@@ -338,7 +337,7 @@ function createChatStore() {
                 message.content.trim().slice(0, 50) ||
                 message.attachedFiles?.[0]?.name ||
                 message.attachedImages?.[0]?.name ||
-                'New chat';
+                translate('storage.newChat');
             }
 
             return updatedChat;
@@ -592,7 +591,7 @@ function createChatStore() {
               ? userMessage.trim().slice(0, 50) ||
                 attachedFiles?.[0]?.name ||
                 attachedImages?.[0]?.name ||
-                'New chat'
+                translate('storage.newChat')
               : chat.title;
           return {
             ...chat,
@@ -646,7 +645,7 @@ function createChatStore() {
 
       try {
         const chat = get({ subscribe }).find((c) => c.id === chatId);
-        if (!chat) throw new Error('Chat not found');
+        if (!chat) throw new Error(translate('error.chatNotFound'));
         const messagesToSend = chat.messages.filter(
           (m) => m.id !== assistantMessageId,
         );
@@ -702,15 +701,16 @@ function createChatStore() {
         ) {
           throw error;
         }
-        let errorMessage = `Error: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        let errorMessage = `${translate('chat.error')}: ${
+          error instanceof Error ? error.message : translate('error.unknown')
+        }`;
         if (
           error &&
           typeof error === 'object' &&
           'status' in error &&
           (error as { status: unknown }).status === 401
         ) {
-          errorMessage +=
-            '\n\nYour API key may be invalid or expired. You can try to [update your API key](/settings).';
+          errorMessage += `\n\n${translate('error.apiKeyInvalidMarkdown')}`;
         }
         update((chats) => {
           const updated = chats.map((chat) => {

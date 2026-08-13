@@ -2,6 +2,7 @@
   import { Pencil, Trash2 } from 'lucide-svelte';
   import Tooltip from '../common/Tooltip.svelte';
   import type { Chat } from '$lib/chatStore';
+  import { t } from '$lib/i18n';
 
   export let chat: Chat;
   export let active: boolean;
@@ -62,7 +63,7 @@
     <input
       class="rename-input"
       type="text"
-      aria-label="Chat name"
+      aria-label={$t('sidebar.chatName')}
       bind:value={renameValue}
       bind:this={inputElement}
       on:keydown={handleKeydown}
@@ -71,21 +72,21 @@
   {:else}
     <span class="chat-title">{truncateTitle(chat.title)}</span>
     <div class="chat-actions">
-      <Tooltip text="Rename chat">
+      <Tooltip text={$t('sidebar.renameChat')}>
         <button
           class="rename-btn"
           type="button"
-          aria-label="Rename chat"
+          aria-label={$t('sidebar.renameChat')}
           on:click={onStartRename}
         >
           <Pencil size={16} />
         </button>
       </Tooltip>
-      <Tooltip text="Delete chat">
+      <Tooltip text={$t('sidebar.deleteChat')}>
         <button
           class="delete-btn"
           type="button"
-          aria-label="Delete chat"
+          aria-label={$t('sidebar.deleteChat')}
           on:click={onDelete}
         >
           <Trash2 size={16} />

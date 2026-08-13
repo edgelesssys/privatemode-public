@@ -1,8 +1,8 @@
 diff --git a/vllm/config/model.py b/vllm/config/model.py
-index 8bece410c..8540588ca 100644
+index 312aa35bd7..3a73cb5c84 100644
 --- a/vllm/config/model.py
 +++ b/vllm/config/model.py
-@@ -1517,6 +1517,7 @@ class ModelConfig:
+@@ -1626,6 +1626,7 @@ class ModelConfig:
              "top_p",
              "min_p",
              "max_new_tokens",
@@ -11,10 +11,10 @@ index 8bece410c..8540588ca 100644
          if any(p in config for p in available_params):
              diff_sampling_param = {
 diff --git a/vllm/entrypoints/openai/chat_completion/protocol.py b/vllm/entrypoints/openai/chat_completion/protocol.py
-index 3f68bb41a..c91327269 100644
+index 404632d46a..8254dfa484 100644
 --- a/vllm/entrypoints/openai/chat_completion/protocol.py
 +++ b/vllm/entrypoints/openai/chat_completion/protocol.py
-@@ -255,7 +255,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
+@@ -271,7 +271,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
      include_stop_str_in_output: bool = False
      ignore_eos: bool = False
      min_tokens: int = 0
@@ -23,7 +23,7 @@ index 3f68bb41a..c91327269 100644
      spaces_between_special_tokens: bool = True
      truncate_prompt_tokens: Annotated[int, Field(ge=-1, le=_INT64_MAX)] | None = None
      truncation_side: Literal["left", "right"] | None = Field(
-@@ -618,6 +618,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
+@@ -676,6 +676,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
              min_p = default_sampling_params.get(
                  "min_p", self._DEFAULT_SAMPLING_PARAMS["min_p"]
              )
@@ -34,7 +34,7 @@ index 3f68bb41a..c91327269 100644
  
          # Merge server-default stop_token_ids (e.g., model-specific tokens
          # like </call> for gpt-oss) with any request-specified ones
-@@ -688,7 +692,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
+@@ -722,7 +726,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
              ignore_eos=self.ignore_eos,
              max_tokens=max_tokens,
              min_tokens=self.min_tokens,
@@ -42,4 +42,4 @@ index 3f68bb41a..c91327269 100644
 +            skip_special_tokens=skip_special_tokens,
              spaces_between_special_tokens=self.spaces_between_special_tokens,
              include_stop_str_in_output=self.include_stop_str_in_output,
-             output_kind=RequestOutputKind.DELTA
+             output_kind=(

@@ -2,6 +2,7 @@
   import { Copy, Check, X } from 'lucide-svelte';
   import { modalFocus } from '$lib/modalFocus';
   import type { AttachedFile } from '$lib/chatStore';
+  import { t } from '$lib/i18n';
 
   export let file: AttachedFile;
   export let onClose: () => void;
@@ -37,7 +38,7 @@
   <button
     class="image-preview-close"
     type="button"
-    aria-label="Close preview"
+    aria-label={$t('common.closePreview')}
     onclick={onClose}
   >
     <X size={24} />
@@ -56,7 +57,9 @@
         class:copied
         type="button"
         onclick={copy}
-        aria-label={copied ? 'Copied transcription' : 'Copy transcription'}
+        aria-label={copied
+          ? $t('chat.copiedTranscription')
+          : $t('chat.copyTranscription')}
       >
         {#if copied}
           <Check size={16} />

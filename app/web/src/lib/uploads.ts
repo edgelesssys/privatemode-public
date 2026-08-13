@@ -1,4 +1,5 @@
 import type { AttachedFile, AttachedImage } from './chatStore';
+import { translate } from './i18n';
 import type { PrivatemodeClient } from './clientStore';
 
 export const SUPPORTED_IMAGE_TYPES = [
@@ -117,7 +118,7 @@ export async function transcribeAudio(
   model: string,
 ): Promise<AttachedFile> {
   if (file.size > MAX_AUDIO_FILE_SIZE_BYTES) {
-    throw new Error(`${file.name} exceeds the 50 MB audio upload limit`);
+    throw new Error(translate('error.audioTooLarge', { name: file.name }));
   }
   const transcription = await client.audio.transcriptions.create({
     file,
@@ -126,7 +127,7 @@ export async function transcribeAudio(
 
   const text = transcription.text?.trim();
   if (!text) {
-    throw new Error(`${file.name} did not produce a transcription`);
+    throw new Error(translate('error.noTranscription', { name: file.name }));
   }
 
   return {

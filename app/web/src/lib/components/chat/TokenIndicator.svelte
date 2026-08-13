@@ -1,5 +1,6 @@
 <script lang="ts">
   import Tooltip from '../common/Tooltip.svelte';
+  import { locale, t } from '$lib/i18n';
 
   export let totalWordCount: number;
   export let maxWords: number;
@@ -9,12 +10,15 @@
   $: warning = percentage >= 75 && percentage < 100;
   $: danger = percentage >= 100;
   $: remaining = Math.max(maxWords - totalWordCount, 0);
+  $: tooltip = $t('chat.words', {
+    current: totalWordCount.toLocaleString($locale),
+    maximum: maxWords.toLocaleString($locale),
+    remaining: remaining.toLocaleString($locale),
+  });
 </script>
 
 {#if visible}
-  <Tooltip
-    text="{totalWordCount.toLocaleString()} / {maxWords.toLocaleString()} words&#10;{remaining.toLocaleString()} remaining"
-  >
+  <Tooltip text={tooltip}>
     <div
       class="token-indicator"
       class:warning

@@ -36,6 +36,7 @@ import (
 // Server implements the HTTP server for the API gateway.
 type Server struct {
 	apiKey                       *string
+	disableAPIKeyFallback        bool
 	defaultCacheSalt             string // if no salt is set, a random salt will be used
 	forwarder                    apiForwarder
 	sm                           secretManager
@@ -50,6 +51,7 @@ type Server struct {
 type Opts struct {
 	APIEndpoint                  string
 	APIKey                       *string
+	DisableAPIKeyFallback        bool
 	ProtocolScheme               forwarder.ProtocolScheme
 	PromptCacheSalt              string
 	IsApp                        bool
@@ -79,6 +81,7 @@ func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Se
 
 	return &Server{
 		apiKey:                       opts.APIKey,
+		disableAPIKeyFallback:        opts.DisableAPIKeyFallback,
 		defaultCacheSalt:             opts.PromptCacheSalt,
 		forwarder:                    fwd,
 		sm:                           sm,
@@ -335,7 +338,7 @@ func (s *Server) getClientHeader() string {
 // setStaticRequestHeaders sets static headers for the request. These are the header values
 // that are guaranteed to be immutable over a request's lifetime.
 func (s *Server) setStaticRequestHeaders(r *http.Request) {
-	if s.apiKey != nil {
+	if s.apiKey != nil && !s.disableAPIKeyFallback {
 		r.Header.Set("Authorization", fmt.Sprintf("%s %s", auth.Bearer, *s.apiKey))
 	}
 	r.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())

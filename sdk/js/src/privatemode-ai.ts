@@ -1,20 +1,10 @@
 import { Manifest } from './manifest.js';
 import {
+  createWasmClient,
   errManifestMismatch,
   errNoSecretForID,
   initWasm,
-  initialize,
-  updateSecret,
-  fetchManifest,
-  initializeOffline as wasmInitializeOffline,
-  setAuth as wasmSetAuth,
-  chatCompletions as wasmChatCompletions,
-  streamChatCompletions as wasmStreamChatCompletions,
-  unstructured as wasmUnstructured,
-  transcribeAudio as wasmTranscribeAudio,
-  listModels as wasmListModels,
-  exportSecret as wasmExportSecret,
-  importSecret as wasmImportSecret,
+  type WasmClient,
 } from './wasm.js';
 
 /**
@@ -75,8 +65,19 @@ export interface PrivatemodeCoreOptions {
   dangerouslyAllowBrowser?: boolean;
 
   /**
+   * URL or filesystem path of the Wasm module. In Node.js, the SDK loads the
+   * `privatemode.wasm` file shipped beside its JavaScript output by default.
+   *
+   * The Wasm module is instantiated once per JavaScript realm: the first
+   * client to load it determines the binary, and later clients reuse the
+   * loaded module, ignoring their own {@link wasmURL}. Client state is
+   * still isolated per instance.
+   */
+  wasmURL?: string | URL;
+
+  /**
    * URL to load the Wasm module from in a browser environment.
-   * Ignored in Node.js.
+   * Ignored in Node.js. Takes precedence over {@link wasmURL} in browsers.
    * @default './privatemode.wasm'
    */
   browserWasmURL?: string;
@@ -90,7 +91,10 @@ export interface PrivatemodeCoreOptions {
   /**
    * Expected SHA-256 hash of the Wasm binary (hex-encoded).
    * If provided, the loaded Wasm module is verified against this hash
-   * before instantiation.
+   * before instantiation. If the module was already loaded (see
+   * {@link wasmURL}), the hash is compared against the hash of the first
+   * load; it fails on a mismatch, and also if the module was loaded
+   * without a hash.
    */
   expectedWasmHash?: string;
 
@@ -146,6 +150,7 @@ export class PrivatemodeCore {
   private apiBaseURL: string;
   private isBrowser: boolean;
   private _manifestBytes: Uint8Array | null;
+  private wasmURL: string | URL;
   private browserWasmURL: string;
   private enableWasmLogging: boolean;
   private expectedWasmHash: string | undefined;
@@ -154,6 +159,8 @@ export class PrivatemodeCore {
   private verified = false;
   private initialized = false;
   private hasSecret = false;
+  private closed = false;
+  private wasmClient: WasmClient | null = null;
 
   constructor(options: PrivatemodeCoreOptions = {}) {
     this.isBrowser =
@@ -191,7 +198,11 @@ export class PrivatemodeCore {
 
     this.apiBaseURL = options.apiBaseURL ?? 'https://api.privatemode.ai';
     this._manifestBytes = options.manifestBytes ?? null;
-    this.browserWasmURL = options.browserWasmURL ?? './privatemode.wasm';
+    this.wasmURL = options.wasmURL ?? defaultWasmURL();
+    this.browserWasmURL =
+      options.browserWasmURL ??
+      options.wasmURL?.toString() ??
+      './privatemode.wasm';
     this.enableWasmLogging = options.enableWasmLogging ?? true;
     this.expectedWasmHash = options.expectedWasmHash;
     this.onManifestUpdate = options.onManifestUpdate;
@@ -212,7 +223,9 @@ export class PrivatemodeCore {
     await this.loadWasm();
 
     if (!this._manifestBytes) {
-      this._manifestBytes = new TextEncoder().encode(await fetchManifest());
+      this._manifestBytes = new TextEncoder().encode(
+        await this.wasm.fetchManifest(),
+      );
     }
     this.initialized = true;
 
@@ -236,7 +249,7 @@ export class PrivatemodeCore {
   public async initializeOffline(manifestBytes: Uint8Array): Promise<void> {
     await this.loadWasm();
     const cred = await this.resolveCredential();
-    wasmInitializeOffline(
+    this.wasm.initializeOffline(
       cred.type,
       cred.value,
       this.apiBaseURL,
@@ -264,11 +277,11 @@ export class PrivatemodeCore {
       );
     }
     const cred = await this.resolveCredential();
-    wasmSetAuth(cred.type, cred.value);
+    this.wasm.setAuth(cred.type, cred.value);
     if (!this.verified) {
       await this.initializeWithManifestRetry(cred);
     }
-    await updateSecret();
+    await this.wasm.updateSecret();
     this.hasSecret = true;
     if (this.onSecretUpdate) {
       this.onSecretUpdate(this.exportSecret());
@@ -294,7 +307,33 @@ export class PrivatemodeCore {
   ): Promise<PrivatemodeResponse> {
     await this.applyCredential();
     return this.retryWithSecretRefresh(async () => {
-      const resp = await wasmChatCompletions(
+      const resp = await this.wasm.chatCompletions(
+        JSON.stringify(body),
+        headersToRecord(options?.headers),
+        options?.signal,
+      );
+      return { body: JSON.parse(resp.body), headers: resp.headers };
+    });
+  }
+
+  /**
+   * Send an embeddings request. The request body is encrypted and the
+   * response is decrypted transparently.
+   *
+   * {@link verify} and {@link refreshSecret} must have been called first.
+   *
+   * @param body - The JSON request body (OpenAI embeddings format).
+   * @param options - Optional request headers and abort signal.
+   * @returns The parsed response body and response headers.
+   * @throws If encryption, sending, or decryption fails.
+   */
+  public async embeddings(
+    body: Record<string, unknown>,
+    options?: PrivatemodeRequestOptions,
+  ): Promise<PrivatemodeResponse> {
+    await this.applyCredential();
+    return this.retryWithSecretRefresh(async () => {
+      const resp = await this.wasm.embeddings(
         JSON.stringify(body),
         headersToRecord(options?.headers),
         options?.signal,
@@ -325,7 +364,17 @@ export class PrivatemodeCore {
   ): AsyncGenerator<unknown> {
     await this.applyCredential();
     const generator = await this.retryWithSecretRefresh(async () =>
-      this.initiateStream(body, options),
+      this.initiateStream(
+        (onChunk) =>
+          this.wasm.streamChatCompletions(
+            JSON.stringify(body),
+            onChunk,
+            options?.signal,
+            options?.onResponseHeaders,
+            headersToRecord(options?.headers),
+          ),
+        options,
+      ),
     );
     yield* generator;
   }
@@ -335,50 +384,100 @@ export class PrivatemodeCore {
    * Waits for the stream to successfully start (first chunk, completion,
    * or error) before returning. This allows retryWithSecretRefresh to
    * catch "no secret for ID" errors that occur before streaming starts.
+   *
+   * The chunk callback resolves only when the consumer advances the
+   * iterator, so the bridge holds at most one undelivered chunk and a slow
+   * consumer backpressures the response instead of buffering it in memory.
    */
   private async initiateStream(
-    body: Record<string, unknown>,
-    options?: PrivatemodeStreamOptions,
+    start: (onChunk: (chunk: string) => Promise<void> | void) => Promise<void>,
+    options?: { signal?: AbortSignal },
   ): Promise<AsyncGenerator<unknown>> {
-    const chunks: string[] = [];
+    type PendingChunk = {
+      value: string;
+      acknowledge: () => void;
+      reject: (error: Error) => void;
+    };
+
+    let pending: PendingChunk | null = null;
     let waiter: (() => void) | null = null;
     let done = false;
     let streamError: Error | null = null;
+    let closed = false;
 
-    const onChunk = (chunk: string) => {
-      chunks.push(chunk);
-      if (waiter) {
-        waiter();
-        waiter = null;
-      }
+    const notify = () => {
+      waiter?.();
+      waiter = null;
     };
 
-    const streamPromise = wasmStreamChatCompletions(
-      JSON.stringify(body),
-      onChunk,
-      options?.signal,
-      options?.onResponseHeaders,
-      headersToRecord(options?.headers),
-    );
+    const takePending = (): PendingChunk | null => {
+      const chunk = pending;
+      pending = null;
+      return chunk;
+    };
+
+    const rejectPending = (error: Error): void => {
+      pending?.reject(error);
+      pending = null;
+    };
+
+    const onChunk = (chunk: string): Promise<void> =>
+      new Promise<void>((acknowledge, reject) => {
+        if (closed) {
+          reject(new Error('Stream consumer closed.'));
+          return;
+        }
+        if (options?.signal?.aborted) {
+          reject(
+            options.signal.reason ??
+              new DOMException('The operation was aborted.', 'AbortError'),
+          );
+          return;
+        }
+        if (pending) {
+          reject(new Error('Stream backpressure invariant violated.'));
+          return;
+        }
+
+        const onAbort = () => {
+          pending = null;
+          reject(
+            options?.signal?.reason ??
+              new DOMException('The operation was aborted.', 'AbortError'),
+          );
+          notify();
+        };
+        const cleanup = () =>
+          options?.signal?.removeEventListener('abort', onAbort);
+        options?.signal?.addEventListener('abort', onAbort, { once: true });
+        pending = {
+          value: chunk,
+          acknowledge: () => {
+            cleanup();
+            acknowledge();
+          },
+          reject: (error) => {
+            cleanup();
+            reject(error);
+          },
+        };
+        notify();
+      });
+
+    const streamPromise = start(onChunk);
     streamPromise
       .then(() => {
         done = true;
-        if (waiter) {
-          waiter();
-          waiter = null;
-        }
+        notify();
       })
       .catch((e: Error) => {
         streamError = e;
-        if (waiter) {
-          waiter();
-          waiter = null;
-        }
+        notify();
       });
 
     // Wait for first chunk, completion, or error to verify the stream started successfully.
     // "no secret for ID" errors occur before streaming starts, so they'll be caught here.
-    while (chunks.length === 0 && streamError === null && !done) {
+    while (pending === null && streamError === null && !done) {
       if (options?.signal?.aborted) {
         throw new DOMException('The operation was aborted.', 'AbortError');
       }
@@ -392,30 +491,37 @@ export class PrivatemodeCore {
       throw streamError;
     }
 
-    // Stream has started successfully, return generator for remaining chunks
+    // Stream has started successfully. A chunk is acknowledged only when the
+    // consumer advances the iterator, keeping the bridge bounded to one chunk.
     return (async function* () {
-      // Yield any chunks we already have
-      while (chunks.length > 0) {
-        yield JSON.parse(chunks.shift()!);
-      }
+      let inFlight: PendingChunk | null = null;
+      try {
+        while (true) {
+          if (options?.signal?.aborted) {
+            throw new DOMException('The operation was aborted.', 'AbortError');
+          }
 
-      // Continue streaming
-      while (true) {
-        if (options?.signal?.aborted) {
-          throw new DOMException('The operation was aborted.', 'AbortError');
+          const next = takePending();
+          if (next) {
+            inFlight = next;
+            yield JSON.parse(inFlight.value);
+            inFlight.acknowledge();
+            inFlight = null;
+          } else if (streamError !== null) {
+            throw streamError;
+          } else if (done) {
+            return;
+          } else {
+            await new Promise<void>((r) => {
+              waiter = r;
+            });
+          }
         }
-
-        if (chunks.length > 0) {
-          yield JSON.parse(chunks.shift()!);
-        } else if (streamError !== null) {
-          throw streamError;
-        } else if (done) {
-          return;
-        } else {
-          await new Promise<void>((r) => {
-            waiter = r;
-          });
-        }
+      } finally {
+        closed = true;
+        const error = new Error('Stream consumer closed.');
+        if (inFlight) inFlight.reject(error);
+        rejectPending(error);
       }
     })();
   }
@@ -448,7 +554,7 @@ export class PrivatemodeCore {
         ...(f.contentType ? { contentType: f.contentType } : {}),
       }));
       const optsJSON = options ? JSON.stringify(options) : '';
-      const resp = await wasmUnstructured(wasmFiles, optsJSON);
+      const resp = await this.wasm.unstructured(wasmFiles, optsJSON);
       return JSON.parse(resp);
     });
   }
@@ -474,15 +580,8 @@ export class PrivatemodeCore {
   ): Promise<PrivatemodeResponse> {
     await this.applyCredential();
     return this.retryWithSecretRefresh(async () => {
-      const wasmFile = {
-        name: file.name,
-        content:
-          file.content instanceof Uint8Array
-            ? file.content
-            : new Uint8Array(file.content),
-        ...(file.contentType ? { contentType: file.contentType } : {}),
-      };
-      const resp = await wasmTranscribeAudio(
+      const wasmFile = this.toWasmAudioFile(file);
+      const resp = await this.wasm.transcribeAudio(
         wasmFile,
         JSON.stringify(options),
         headersToRecord(requestOptions?.headers),
@@ -490,6 +589,57 @@ export class PrivatemodeCore {
       );
       return { body: JSON.parse(resp.body), headers: resp.headers };
     });
+  }
+
+  /**
+   * Stream an audio transcription. The request is encrypted and each response
+   * event is decrypted transparently.
+   *
+   * {@link verify} and {@link refreshSecret} must have been called first.
+   *
+   * @param file - The audio file to transcribe.
+   * @param options - Transcription options, including the STT model.
+   * @param streamOptions - Optional request headers, response-header callback,
+   * and abort signal.
+   * @returns An async generator yielding parsed transcription events.
+   */
+  public async *streamTranscribeAudio(
+    file: AudioFile,
+    options: AudioTranscriptionOptions,
+    streamOptions?: PrivatemodeStreamOptions,
+  ): AsyncGenerator<unknown> {
+    await this.applyCredential();
+    const wasmFile = this.toWasmAudioFile(file);
+    const generator = await this.retryWithSecretRefresh(async () =>
+      this.initiateStream(
+        (onChunk) =>
+          this.wasm.streamTranscribeAudio(
+            wasmFile,
+            JSON.stringify(options),
+            onChunk,
+            streamOptions?.signal,
+            streamOptions?.onResponseHeaders,
+            headersToRecord(streamOptions?.headers),
+          ),
+        streamOptions,
+      ),
+    );
+    yield* generator;
+  }
+
+  private toWasmAudioFile(file: AudioFile): {
+    name: string;
+    content: Uint8Array;
+    contentType?: string;
+  } {
+    return {
+      name: file.name,
+      content:
+        file.content instanceof Uint8Array
+          ? file.content
+          : new Uint8Array(file.content),
+      ...(file.contentType ? { contentType: file.contentType } : {}),
+    };
   }
 
   /**
@@ -506,7 +656,7 @@ export class PrivatemodeCore {
     options?: PrivatemodeRequestOptions,
   ): Promise<PrivatemodeResponse> {
     await this.applyCredential();
-    const resp = await wasmListModels(
+    const resp = await this.wasm.listModels(
       headersToRecord(options?.headers),
       options?.signal,
     );
@@ -525,7 +675,7 @@ export class PrivatemodeCore {
    * @throws If no secret has been established yet.
    */
   public exportSecret(): ExportedSecret {
-    return JSON.parse(wasmExportSecret()) as ExportedSecret;
+    return JSON.parse(this.wasm.exportSecret()) as ExportedSecret;
   }
 
   /**
@@ -539,8 +689,28 @@ export class PrivatemodeCore {
    * @throws If the import fails.
    */
   public importSecret(secret: ExportedSecret): void {
-    wasmImportSecret(secret.id, secret.data, secret.expiresAtUnix);
+    this.wasm.importSecret(secret.id, secret.data, secret.expiresAtUnix);
     this.hasSecret = true;
+  }
+
+  /**
+   * Release the Wasm resources backing this client. Any further use of the
+   * client throws. Closing an already-closed client is a no-op.
+   */
+  public close(): void {
+    this.closed = true;
+    this.wasmClient?.close();
+    this.wasmClient = null;
+    this.verified = false;
+    this.initialized = false;
+    this.hasSecret = false;
+  }
+
+  /** @throws If {@link close} has been called on this client. */
+  private ensureNotClosed(): void {
+    if (this.closed) {
+      throw new Error('Client is closed and can no longer be used.');
+    }
   }
 
   /** @internal Whether inference can proceed without automatic setup. */
@@ -572,21 +742,33 @@ export class PrivatemodeCore {
   }
 
   /**
-   * Ensure the WASM module is loaded and initialized.
+   * Ensure the WASM module is loaded and this instance's client is created.
+   * The module itself is a per-realm singleton: only the first loader's
+   * wasmURL takes effect, while client state remains isolated per instance.
+   * A later expectedWasmHash is checked against the hash of the first load.
    */
   private async loadWasm(): Promise<void> {
+    this.ensureNotClosed();
     if (this.isBrowser) {
       await initWasm(fetch(this.browserWasmURL), this.expectedWasmHash);
+      this.wasmClient ??= createWasmClient();
       return;
     }
     const { readFile } = await import('node:fs/promises');
-    const { resolve } = await import('node:path');
-    const wasmPath = resolve(
-      import.meta.dirname,
-      '../../wasm/privatemode.wasm',
-    ); // TODO(msanft): Distribute the Wasm blob via NPM?
-    const wasmBuffer = await readFile(wasmPath);
+    const wasmBuffer = await readFile(this.wasmURL);
     await initWasm(wasmBuffer, this.expectedWasmHash);
+    this.wasmClient ??= createWasmClient();
+  }
+
+  /** The state-isolated Wasm client backing this SDK instance. */
+  private get wasm(): WasmClient {
+    this.ensureNotClosed();
+    if (!this.wasmClient) {
+      throw new Error(
+        'Client not initialized. Call verify() or initializeOffline() first.',
+      );
+    }
+    return this.wasmClient;
   }
 
   /**
@@ -603,7 +785,7 @@ export class PrivatemodeCore {
    */
   private async applyCredential(): Promise<void> {
     const cred = await this.resolveCredential();
-    wasmSetAuth(cred.type, cred.value);
+    this.wasm.setAuth(cred.type, cred.value);
   }
 
   /**
@@ -619,7 +801,7 @@ export class PrivatemodeCore {
     const manifestBase64 = btoa(String.fromCharCode(...this._manifestBytes!));
 
     try {
-      await initialize(
+      await this.wasm.initialize(
         manifestBase64,
         cred.type,
         cred.value,
@@ -633,10 +815,12 @@ export class PrivatemodeCore {
       ) {
         // Fetch a new manifest and retry
         console.log('Manifest mismatch, trying again with new manifest...');
-        const manifestBytes = new TextEncoder().encode(await fetchManifest());
+        const manifestBytes = new TextEncoder().encode(
+          await this.wasm.fetchManifest(),
+        );
         const newManifestBase64 = btoa(String.fromCharCode(...manifestBytes));
 
-        await initialize(
+        await this.wasm.initialize(
           newManifestBase64,
           cred.type,
           cred.value,
@@ -764,4 +948,18 @@ function headersToRecord(
 ): Record<string, string> | undefined {
   if (!headers) return undefined;
   return Object.fromEntries(new Headers(headers));
+}
+
+/** The location of the Wasm binary shipped with the SDK (Node.js loading). */
+function defaultWasmURL(): URL {
+  // Vitest executes the TypeScript source directly. Published builds execute
+  // from dist, where the Wasm binary is copied beside this module.
+  // The path is kept out of the `new URL` literal: bundlers statically
+  // analyze `new URL('...', import.meta.url)` and would otherwise emit the
+  // multi-megabyte binary as an asset of every browser build. Browsers load
+  // the Wasm from `browserWasmURL` instead.
+  const wasmPath = import.meta.url.endsWith('/src/privatemode-ai.ts')
+    ? '../../wasm/privatemode.wasm'
+    : './privatemode.wasm';
+  return new URL(wasmPath, import.meta.url);
 }

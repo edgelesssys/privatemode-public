@@ -1,6 +1,7 @@
 <script lang="ts">
   import { chatStore } from '$lib/chatStore';
   import type { Message } from '$lib/chatStore';
+  import { t } from '$lib/i18n';
 
   export let chatModelUnavailable: boolean;
   export let unavailableModelId: string | undefined;
@@ -33,28 +34,28 @@
 
 <div class="chat-error-banner">
   {#if chatModelUnavailable}
-    The model used in this chat ({unavailableModelId}) is no longer available.
+    {$t('chat.modelUnavailable', { model: unavailableModelId ?? '' })}
   {:else}
-    This chat can no longer be used due to an error.
+    {$t('chat.unusable')}
   {/if}
   <button
     class="new-chat-link"
     type="button"
     on:click={startNewChat}
   >
-    Start a new chat
+    {$t('chat.startNew')}
   </button>
   {#if lastNonErrorMessage}
-    or
+    {$t('chat.or')}
     <button
       class="new-chat-link"
       type="button"
       on:click={branchOff}
     >
-      branch off from the last message
+      {$t('chat.branchLast')}
     </button>
   {/if}
-  to continue.
+  {$t('chat.toContinue')}
 </div>
 
 <style>
