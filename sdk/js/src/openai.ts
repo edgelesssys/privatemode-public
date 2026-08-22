@@ -63,7 +63,7 @@ export type PrivatemodeTransportClient = Pick<
   | 'transcribeAudio'
 >;
 
-/** OpenAI client options whose values are not controlled by Privatemode. */
+/** OpenAI client options whose values aren't controlled by Privatemode. */
 export type PrivatemodeOpenAIClientOptions = Omit<
   ClientOptions,
   | 'adminAPIKey'
@@ -86,6 +86,10 @@ export type PrivatemodeAIOptions = PrivatemodeCoreOptions & {
  * Secure OpenAI-compatible client backed by the encrypted Privatemode
  * transport. Attestation and secret establishment happen lazily before the
  * first OpenAI request.
+ *
+ * Besides its own members, the client exposes the resources of the official
+ * OpenAI client: `chat.completions`, `embeddings`, and `audio.transcriptions`
+ * are routed through the encrypted transport.
  */
 export class PrivatemodeAI extends OpenAI {
   private readonly privatemode: PrivatemodeCore;
@@ -165,7 +169,7 @@ export class PrivatemodeAI extends OpenAI {
     return this.privatemode.refreshSecret();
   }
 
-  /** Partition documents. See {@link PrivatemodeCore.unstructured}. */
+  /** @internal Partition documents. See {@link PrivatemodeCore.unstructured}. */
   public unstructured(
     files: UnstructuredFile[],
     options?: UnstructuredOptions,
@@ -185,8 +189,8 @@ export class PrivatemodeAI extends OpenAI {
 
   /**
    * Release the Wasm resources backing this client, including clients
-   * created from it with {@link withOptions}. See
-   * {@link PrivatemodeCore.close}.
+   * created from it with {@link withOptions}. Any further use of the client
+   * throws. Closing an already-closed client is a no-op.
    */
   public close(): void {
     this.privatemode.close();

@@ -58,7 +58,7 @@ type AudioTranscriptionOptions struct {
 //
 // Use [Client.StreamTranscribeAudio] to create one. The stream must be closed after use.
 type AudioTranscriptionStream struct {
-	reader *sse.Reader
+	reader *sse.EventReader
 	body   io.ReadCloser
 	done   bool
 	// Header contains the decrypted response headers.
@@ -131,7 +131,7 @@ func (c *Client) StreamTranscribeAudioWithOptions(
 	}
 
 	return &AudioTranscriptionStream{
-		reader: sse.NewReader(resp.Body, constants.MaxSSELineBytes),
+		reader: sse.NewEventReader(resp.Body, constants.MaxSSEEventBytes),
 		body:   resp.Body,
 		Header: resp.Header.Clone(),
 	}, nil
@@ -245,7 +245,7 @@ func (s *AudioTranscriptionStream) Next() ([]byte, error) {
 	}
 
 	for {
-		line, err := s.reader.Next()
+		event, err := s.reader.Next()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil, io.ErrUnexpectedEOF
@@ -253,19 +253,17 @@ func (s *AudioTranscriptionStream) Next() ([]byte, error) {
 			return nil, err
 		}
 
-		switch line.Type {
-		case sse.LineEnd, sse.LineComment:
+		if !event.Dispatches() {
 			continue
-		case sse.LineField:
-			if !line.IsField(sse.FieldData) {
-				return nil, fmt.Errorf("unexpected SSE field %q", line.Name)
-			}
-			if openai.IsStreamDone(line.Value) {
-				s.done = true
-				return nil, io.EOF
-			}
-			return line.Value, nil
 		}
+
+		data := event.FullData()
+		if openai.IsStreamDone(data) {
+			s.done = true
+			return nil, io.EOF
+		}
+
+		return data, nil
 	}
 }
 

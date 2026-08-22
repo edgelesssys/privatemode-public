@@ -14,91 +14,40 @@ var ErrNoUsage = errors.New("no usage in response")
 // Returns [ErrNoUsage] if the body does not contain extractable usage.
 type UsageExtractor func(body []byte) (usage.Stats, error)
 
-// WarnFunc reports a non-fatal anomaly encountered while processing the stream.
-type WarnFunc func(msg string, args ...any)
-
-type sseReader interface {
-	Next() (sse.Line, error)
-}
-
-// UsageSSEReader extracts usage stats "online" from an SSE stream and yields lines unchanged.
-//
-// It performs optimistic parsing of the first line of an event (which is sufficient for vLLM),
-// and only buffers data internally if that fails. There are theoretical edge cases which lead to
-// incorrect results.
+// UsageSSEReader extracts usage stats "online" from an SSE stream and yields events unchanged.
 type UsageSSEReader struct {
-	sse          sseReader
-	warn         WarnFunc
+	sse          sseEventReader
 	extractUsage UsageExtractor
 
-	// Cross-event state:
-
 	latestUsage usage.Stats
-
-	// Per-event state:
-
-	// firstLineParsed is true when the first line in the current event was successfully parsed.
-	firstLineParsed bool
-	// multiLineData accumulates the full data field across lines, except if firstLineParsed.
-	multiLineData []byte
 }
 
+var _ sseEventReader = (*UsageSSEReader)(nil)
+
 // NewUsageSSEReader creates a new UsageSSEReader.
-func NewUsageSSEReader(sseReader sseReader, extractUsage UsageExtractor, warn WarnFunc) *UsageSSEReader {
+func NewUsageSSEReader(sseReader sseEventReader, extractUsage UsageExtractor) *UsageSSEReader {
 	return &UsageSSEReader{
 		sse:          sseReader,
-		warn:         warn,
 		extractUsage: extractUsage,
 	}
 }
 
-// Next returns the next SSE line while extracting usage stats as a side effect.
+// Next returns the next SSE event while extracting usage stats as a side effect.
 // Errors are only returned from the underlying sseReader, parsing errors are ignored.
 // [io.EOF] marks the end of the stream.
-func (r *UsageSSEReader) Next() (sse.Line, error) {
-	line, err := r.sse.Next()
+func (r *UsageSSEReader) Next() (sse.Event, error) {
+	event, err := r.sse.Next()
 	if err != nil {
-		return line, err
+		return event, err
 	}
 
-	switch {
-	case line.IsField(sse.FieldData):
-		switch {
-		case r.firstLineParsed:
-			// First data line already parsed successfully
-			// Only incorrect behaviour possible here, because the first line has already been
-			// thrown away. chosen: keep extracted usage stats but skip subsequent data lines.
-			r.warn("Skipping unexpected additional data line in SSE event after successful usage extraction")
-		case len(r.multiLineData) == 0:
-			// First data line in this event: try optimistic single-line parse.
-			stats, err := r.extractUsage(line.Value)
-			if err == nil {
-				r.latestUsage = stats
-				r.firstLineParsed = true
-				break
-			}
-			// Optimistic parse failed: begin multi-line accumulation.
-			fallthrough
-		default:
-			// Accumulating multi-line data
-			r.multiLineData = append(r.multiLineData, line.Value...)
-			r.multiLineData = append(r.multiLineData, '\n')
+	if data := event.FullData(); data != nil {
+		if stats, err := r.extractUsage(data); err == nil {
+			r.latestUsage = stats
 		}
-
-	case line.Type == sse.LineEnd:
-		if len(r.multiLineData) > 0 {
-			stats, err := r.extractUsage(r.multiLineData)
-			if err == nil {
-				r.latestUsage = stats
-			}
-		}
-
-		// Reset per-event state.
-		r.firstLineParsed = false
-		r.multiLineData = r.multiLineData[:0]
 	}
 
-	return line, nil
+	return event, nil
 }
 
 // LatestUsage returns the last successfully extracted usage stats.

@@ -28,8 +28,6 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
-const maxSSELineBytes = 1024 * 1024 // 1 MiB
-
 var ocspStatusMetrics = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "privatemode_nvidia_ocsp_status",
 	Help: "NVIDIA OCSP status of the attested components (0=good, 1=revoked, -1=unknown)",
@@ -250,9 +248,8 @@ func (a *Adapter) reportStreamingUsage(
 	uc *usageContext,
 ) io.ReadCloser {
 	body, clone := cloneReader(source)
-	sseReader := sse.NewReader(clone, maxSSELineBytes)
-	warn := func(msg string, args ...any) { a.Log.WarnContext(ctx, msg, args...) }
-	usageReader := NewUsageSSEReader(sseReader, extractUsage, warn)
+	sseReader := sse.NewEventReader(clone, constants.MaxSSEEventBytes)
+	usageReader := NewUsageSSEReader(sseReader, extractUsage)
 
 	go func() {
 		// Termination behaviour: clone, the io.Reader underneath usageReader, eventually returns
@@ -304,7 +301,8 @@ func (a *Adapter) ForwardEncrypted(
 	legacyDecryptMutator func(cipher.ResponseCipher) forwarder.RequestMutator,
 	postDecryptMutator forwarder.RequestMutator,
 	legacyPlainResponseFields forwarder.FieldSelector,
-	preEncryptMutator *forwarder.MutatingReader,
+	preEncryptMutateUnary MutationFunc,
+	preEncryptMutateStreaming MutationFunc,
 	extractUnaryUsage UsageExtractor,
 	extractStreamingUsage UsageExtractor,
 ) {
@@ -317,9 +315,9 @@ func (a *Adapter) ForwardEncrypted(
 
 	responseMapper := func(resp *http.Response) (forwarder.Response, error) {
 		if strings.Contains(resp.Header.Get("Content-Type"), "event-stream") {
-			return a.mapPlaintextStreamingResponse(ctx, resp, preEncryptMutator, extractStreamingUsage, uc), nil
+			return a.mapPlaintextStreamingResponse(ctx, resp, preEncryptMutateStreaming, extractStreamingUsage, uc), nil
 		}
-		return a.mapPlaintextUnaryResponse(ctx, resp, preEncryptMutator, extractUnaryUsage, uc)
+		return a.mapPlaintextUnaryResponse(ctx, resp, preEncryptMutateUnary, extractUnaryUsage, uc)
 	}
 
 	a.EncForwarder.ForwardEncrypted(w, r, legacyDecryptMutator, postDecryptMutator, legacyPlainResponseFields, responseMapper)
@@ -328,7 +326,7 @@ func (a *Adapter) ForwardEncrypted(
 func (a *Adapter) mapPlaintextUnaryResponse(
 	ctx context.Context,
 	usResp *http.Response,
-	preEncryptMutator *forwarder.MutatingReader,
+	preEncryptMutate MutationFunc,
 	extractUsage UsageExtractor,
 	uc *usageContext,
 ) (*forwarder.UnaryResponse, error) {
@@ -341,8 +339,8 @@ func (a *Adapter) mapPlaintextUnaryResponse(
 
 	a.reportUnaryUsage(ctx, dsResp, extractUsage, uc)
 
-	if preEncryptMutator != nil {
-		dsResp.Body, err = preEncryptMutator.Mutate(dsResp.Body)
+	if preEncryptMutate != nil {
+		dsResp.Body, err = preEncryptMutate(dsResp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("mutating response body: %w", err)
 		}
@@ -354,7 +352,7 @@ func (a *Adapter) mapPlaintextUnaryResponse(
 func (a *Adapter) mapPlaintextStreamingResponse(
 	ctx context.Context,
 	usResp *http.Response,
-	preEncryptMutator *forwarder.MutatingReader,
+	preEncryptMutate MutationFunc,
 	extractUsage UsageExtractor,
 	uc *usageContext,
 ) *forwarder.StreamingResponse {
@@ -362,13 +360,47 @@ func (a *Adapter) mapPlaintextStreamingResponse(
 	dsResp.Header.Set("Content-Type", usResp.Header.Get("Content-Type"))
 
 	body := a.reportStreamingUsage(ctx, dsResp.Body, extractUsage, uc)
-	if preEncryptMutator != nil {
-		body = preEncryptMutator.Reader(body)
+	if preEncryptMutate != nil {
+		reader := newMutatingSSEReader(sse.NewEventReader(body, constants.MaxSSEEventBytes), preEncryptMutate)
+		body = sse.NewEventStream(reader.Next, body)
 	}
 	dsResp.Body = body
 
 	return dsResp
 }
+
+// MutationFunc mutates a full body or each SSE event's data.
+type MutationFunc func(data []byte) ([]byte, error)
+
+type sseEventReader interface {
+	Next() (sse.Event, error)
+}
+
+// mutatingSSEReader applies mutate to each dispatching event's data, yielding other events
+// unchanged.
+type mutatingSSEReader struct {
+	sse    sseEventReader
+	mutate MutationFunc
+}
+
+func newMutatingSSEReader(sse sseEventReader, mutate MutationFunc) *mutatingSSEReader {
+	return &mutatingSSEReader{sse: sse, mutate: mutate}
+}
+
+// Next returns the next SSE event, with its data mutated.
+func (r *mutatingSSEReader) Next() (sse.Event, error) {
+	event, err := r.sse.Next()
+	if err != nil || !event.Dispatches() {
+		return event, err
+	}
+	mutated, err := r.mutate(event.FullData())
+	if err != nil {
+		return sse.Event{}, fmt.Errorf("mutating SSE event data: %w", err)
+	}
+	return event.ReplaceData(mutated), nil
+}
+
+var _ sseEventReader = (*mutatingSSEReader)(nil)
 
 // dispatchReport asynchronously submits a usage report on a context detached from ctx.
 func (a *Adapter) dispatchReport(ctx context.Context, report usagecollector.SubmitUsageReportRequest) {

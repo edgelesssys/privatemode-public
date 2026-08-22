@@ -3,6 +3,7 @@
 package attestation
 
 import (
+	"context"
 	"crypto/x509"
 	"fmt"
 	"log/slog"
@@ -45,20 +46,20 @@ given GPU, if the supplied data is valid.
 It returns the base64-encoded EAT (Entity Attestation Token), as per
 https://docs.attestation.nvidia.com/api-docs/nras.html#operation/attestGPU.
 */
-func (i *Issuer) Issue(nonce [32]byte) ([]byte, []*x509.Certificate, error) {
-	i.log.Info("Issuing attestation statement for GPU", "id", i.device.ID())
+func (i *Issuer) Issue(ctx context.Context, nonce [32]byte) ([]byte, []*x509.Certificate, error) {
+	i.log.InfoContext(ctx, "Issuing attestation statement for GPU", "id", i.device.ID())
 
 	report, err := i.device.AttestationReport(nonce)
 	if err != nil {
 		return nil, nil, fmt.Errorf("retrieving attestation report: %w", err)
 	}
-	i.log.Info("Retrieved attestation report")
+	i.log.InfoContext(ctx, "Retrieved attestation report")
 
 	gpuCertChain, err := i.device.Certificate()
 	if err != nil {
 		return nil, nil, fmt.Errorf("retrieving certificate chain: %w", err)
 	}
-	i.log.Info("Retrieved certificate chain")
+	i.log.InfoContext(ctx, "Retrieved certificate chain")
 
 	return report, gpuCertChain, nil
 }

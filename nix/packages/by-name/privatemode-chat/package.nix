@@ -21,7 +21,7 @@ stdenv.mkDerivation (finalAttrs: {
     inherit (finalAttrs) pname version src;
     fetcherVersion = 4;
     sourceRoot = "${finalAttrs.src.name}/app/web";
-    hash = "sha256-SrwNSssHAlmi8GNlkJ00IztJTNm8iW1S6uNTj+Rl6n4=";
+    hash = "sha256-pktwXyP2PBoVrjSOC9w9/MQTgHsax+LVCOwsIZ2hbpc=";
   };
 
   nativeBuildInputs = [
@@ -48,7 +48,7 @@ stdenv.mkDerivation (finalAttrs: {
     # Vite needs package.json (for exports/main) and dist/ (built output).
     rm app/web/node_modules/privatemode-ai
     ln -s ../../../sdk/js app/web/node_modules/privatemode-ai
-    ln -s ${sdk.js-internal}/share app/web/node_modules/privatemode-ai/dist
+    ln -s ${sdk.js}/share/dist app/web/node_modules/privatemode-ai/dist
 
     pnpm --dir app/web run build
 

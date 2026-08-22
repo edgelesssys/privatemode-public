@@ -150,13 +150,9 @@ const (
 	// forwarder will buffer into memory. Streaming responses are not subject to this limit.
 	MaxUnaryResponseBodyBytes = 128 * 1024 * 1024 // 128MiB
 
-	// MaxSSELineBytes is the maximum allowed length of a single SSE (Server-Sent Events) line
+	// MaxSSEEventBytes is the maximum allowed length of a single SSE (Server-Sent Events) event
 	// when reading streaming inference responses.
-	MaxSSELineBytes = 256 * 1024 // 256 KiB
-
-	// MaxSSEEventBytes is the maximum allowed length of a single SSE event. It accommodates a
-	// single line of [MaxSSELineBytes] plus event framing overhead.
-	MaxSSEEventBytes = MaxSSELineBytes + 256
+	MaxSSEEventBytes = 256 * 1024 // 256 KiB
 
 	// MaxEncryptedFrameSize is the maximum size of a single encrypted body frame that a decrypter
 	// will read. It accommodates the largest body permitted by [MaxFileSizeBytes] plus encryption

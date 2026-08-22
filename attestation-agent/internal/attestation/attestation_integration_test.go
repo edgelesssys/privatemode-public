@@ -17,7 +17,7 @@ func TestIssueVerify(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
-	gpuClient, err := gpu.NewClient(logger)
+	gpuClient, err := gpu.NewClient(t.Context(), logger)
 	require.NoError(err)
 
 	devices, err := gpuClient.ListGPUs()
@@ -31,7 +31,7 @@ func TestIssueVerify(t *testing.T) {
 	require.NoError(err)
 	require.Equal(32, n)
 
-	report, _, err := issuer.Issue(nonce)
+	report, _, err := issuer.Issue(t.Context(), nonce)
 	require.NoError(err)
 
 	_, err = ParseReport(report)

@@ -73,7 +73,7 @@ func DumpRequestAndResponse(next http.Handler, logger *slog.Logger, dumpDir stri
 		respPath := filepath.Join(dir, fmt.Sprintf("%s_resp.txt", base))
 
 		if err := dumpRequestToFile(r, reqPath); err != nil {
-			logger.Error(
+			logger.ErrorContext(r.Context(),
 				"failed to dump request",
 				"error", err,
 				"path", r.URL.Path,
@@ -85,7 +85,7 @@ func DumpRequestAndResponse(next http.Handler, logger *slog.Logger, dumpDir stri
 		next.ServeHTTP(rec, r)
 
 		if err := dumpResponseRecorderToFile(rec, respPath); err != nil {
-			logger.Error(
+			logger.ErrorContext(r.Context(),
 				"failed to dump response",
 				"error", err,
 				"status", rec.Status,

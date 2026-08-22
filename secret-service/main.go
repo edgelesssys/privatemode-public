@@ -47,7 +47,7 @@ func main() {
 	flag.Parse()
 
 	log := logging.NewLogger(*logLevel)
-	log.Info("Continuum Secret Service", "version", constants.Version())
+	log.InfoContext(context.Background(), "Continuum Secret Service", "version", constants.Version())
 
 	config := secretServiceConfig{
 		port:           *port,
@@ -60,7 +60,7 @@ func main() {
 	}
 
 	if err := run(config, afero.Afero{Fs: afero.NewOsFs()}, log); err != nil {
-		log.Error(err.Error())
+		log.ErrorContext(context.Background(), err.Error())
 		os.Exit(1)
 	}
 }
@@ -109,7 +109,7 @@ func run(config secretServiceConfig, fs afero.Afero, log *slog.Logger) error {
 	})
 
 	wg.Go(func() {
-		log.Info("Starting user server", "endpoint", net.JoinHostPort(defaultHost, config.port))
+		log.InfoContext(ctx, "Starting user server", "endpoint", net.JoinHostPort(defaultHost, config.port))
 		if srvErr := userServer.Serve(net.JoinHostPort(defaultHost, config.port)); srvErr != nil {
 			err = srvErr
 			healthServer.Stop()
@@ -118,7 +118,7 @@ func run(config secretServiceConfig, fs afero.Afero, log *slog.Logger) error {
 	})
 
 	wg.Go(func() {
-		log.Info("Starting health server", "endpoint", net.JoinHostPort(defaultHost, config.healthPort))
+		log.InfoContext(ctx, "Starting health server", "endpoint", net.JoinHostPort(defaultHost, config.healthPort))
 		if srvErr := healthServer.Serve(net.JoinHostPort(defaultHost, config.healthPort)); srvErr != nil {
 			err = srvErr
 			userServer.Stop()
@@ -128,7 +128,7 @@ func run(config secretServiceConfig, fs afero.Afero, log *slog.Logger) error {
 
 	wg.Go(func() {
 		httpEndpoint := net.JoinHostPort(defaultHost, "8080")
-		log.Info("Starting HTTP health server", "endpoint", httpEndpoint)
+		log.InfoContext(ctx, "Starting HTTP health server", "endpoint", httpEndpoint)
 		if srvErr := httpHealthServer.Serve(ctx, httpEndpoint); srvErr != nil {
 			err = srvErr
 			userServer.Stop()
@@ -155,26 +155,26 @@ func joinOrBootstrapEtcd(
 	ctx context.Context, config secretServiceConfig, fs afero.Afero, log *slog.Logger,
 ) (*etcd.Etcd, func(), error) {
 	// Step 1: Try to discover an existing etcd cluster
-	log.Info("Discovering existing etcd cluster")
+	log.InfoContext(ctx, "Discovering existing etcd cluster")
 	joinCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	etcdServer, etcdClose, err := etcd.New(joinCtx, etcd.Join, config.k8sNamespace,
 		config.etcdServerCert, config.etcdServerKey, config.etcdCA, fs, log)
 	if etcdServer != nil {
 		// If an existing cluster is found, return the etcd server and a no-op close function
-		log.Info("Found existing etcd cluster, joining it")
+		log.InfoContext(ctx, "Found existing etcd cluster, joining it")
 		return etcdServer, etcdClose, nil
 	}
 	var joinErr *etcd.JoinError
 	if !errors.As(err, &joinErr) {
 		return nil, nil, fmt.Errorf("unexpected error while discovering etcd cluster: %w", err)
 	}
-	log.Info("Etcd discovery failed, proceeding to bootstrap or wait for bootstrapper instance",
+	log.InfoContext(ctx, "Etcd discovery failed, proceeding to bootstrap or wait for bootstrapper instance",
 		"error", err)
 
 	if config.mayBootstrap {
 		// Step 2: If no existing cluster is found, and this instance is the etcd bootstrapper instance, bootstrap a new cluster
-		log.Info("No existing etcd cluster found, bootstrapping a new cluster")
+		log.InfoContext(ctx, "No existing etcd cluster found, bootstrapping a new cluster")
 		etcdServer, etcdClose, err := etcd.New(ctx, etcd.Bootstrap, config.k8sNamespace,
 			config.etcdServerCert, config.etcdServerKey, config.etcdCA, fs, log)
 		if err != nil {
@@ -184,7 +184,7 @@ func joinOrBootstrapEtcd(
 	}
 
 	// Step 3: If no existing cluster is found and this instance is not the etcd bootstrapper instance, wait for the bootstrapper instance
-	log.Info("No existing etcd cluster found, waiting for the bootstrapper instance to bootstrap a new cluster")
+	log.InfoContext(ctx, "No existing etcd cluster found, waiting for the bootstrapper instance to bootstrap a new cluster")
 	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	ticker := time.NewTicker(10 * time.Second)
@@ -194,16 +194,16 @@ func joinOrBootstrapEtcd(
 		case <-waitCtx.Done():
 			return nil, nil, fmt.Errorf("timed out waiting for etcd bootstrapper instance to bootstrap a cluster: %w", waitCtx.Err())
 		case <-ticker.C:
-			log.Info("Checking if cluster has been bootstrapped yet")
+			log.InfoContext(ctx, "Checking if cluster has been bootstrapped yet")
 			joinCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 			etcdServer, etcdClose, err := etcd.New(joinCtx, etcd.Join, config.k8sNamespace,
 				config.etcdServerCert, config.etcdServerKey, config.etcdCA, fs, log)
 			if etcdServer != nil {
-				log.Info("Successfully joined etcd cluster")
+				log.InfoContext(ctx, "Successfully joined etcd cluster")
 				return etcdServer, etcdClose, nil
 			}
-			log.Info("Cluster not yet bootstrapped, retrying", "error", err)
+			log.InfoContext(ctx, "Cluster not yet bootstrapped, retrying", "error", err)
 		}
 	}
 }
@@ -224,7 +224,7 @@ func watchLeaderStatus(ctx context.Context, e *etcd.Etcd, h *health.Server, http
 		case <-ticker.C:
 			if e.HasLeader() {
 				if !leaderlessSince.IsZero() {
-					log.Info("Etcd cluster has regained a leader")
+					log.InfoContext(ctx, "Etcd cluster has regained a leader")
 					leaderlessSince = time.Time{}
 				}
 				h.SetHealthy()
@@ -236,10 +236,10 @@ func watchLeaderStatus(ctx context.Context, e *etcd.Etcd, h *health.Server, http
 				leaderlessSince = time.Now()
 			}
 			leaderlessFor := time.Since(leaderlessSince)
-			log.Warn("Etcd cluster has no leader", "leaderlessFor", leaderlessFor.Seconds(), "threshold", noLeaderThreshold.Seconds())
+			log.WarnContext(ctx, "Etcd cluster has no leader", "leaderlessFor", leaderlessFor.Seconds(), "threshold", noLeaderThreshold.Seconds())
 
 			if leaderlessFor >= noLeaderThreshold {
-				log.Error("Etcd cluster has been leaderless for too long, marking pod as unhealthy for restart",
+				log.ErrorContext(ctx, "Etcd cluster has been leaderless for too long, marking pod as unhealthy for restart",
 					"leaderlessFor", leaderlessFor.Seconds(), "threshold", noLeaderThreshold.Seconds())
 				h.SetUnhealthy()
 				httpHealth.SetUnhealthy()

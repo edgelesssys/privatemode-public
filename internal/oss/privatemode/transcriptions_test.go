@@ -113,7 +113,7 @@ func TestBuildStreamingAudioTranscriptionBody(t *testing.T) {
 
 func TestAudioTranscriptionStream(t *testing.T) {
 	body := io.NopCloser(strings.NewReader("data: {\"delta\":\"hello\"}\n\ndata: [DONE]\n\n"))
-	stream := &AudioTranscriptionStream{reader: sse.NewReader(body, 1024), body: body}
+	stream := &AudioTranscriptionStream{reader: sse.NewEventReader(body, 1024), body: body}
 
 	event, err := stream.Next()
 	require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestAudioTranscriptionStream(t *testing.T) {
 
 func TestAudioTranscriptionStreamUnexpectedEOF(t *testing.T) {
 	body := io.NopCloser(strings.NewReader("data: {}\n\n"))
-	stream := &AudioTranscriptionStream{reader: sse.NewReader(body, 1024), body: body}
+	stream := &AudioTranscriptionStream{reader: sse.NewEventReader(body, 1024), body: body}
 
 	_, err := stream.Next()
 	require.NoError(t, err)

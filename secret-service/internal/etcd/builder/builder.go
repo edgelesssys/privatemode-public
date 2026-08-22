@@ -77,18 +77,18 @@ func JoinExistingCluster(ctx context.Context, k8sNamespace,
 	// Needs to happen *before* adding the member again,
 	// as otherwise, the cluster tries to talk to the added member that's not
 	// yet started.
-	log.Info("Getting available peers")
+	log.InfoContext(ctx, "Getting available peers")
 	knownPeers, err := getPeers(ctx, cli, log)
 	if err != nil {
 		return nil, fmt.Errorf("getting etcd peers: %w", err)
 	}
 
-	log.Info("Trying to remove existing etcd member", "hostname", hostname)
+	log.InfoContext(ctx, "Trying to remove existing etcd member", "hostname", hostname)
 	if err := tryRemoveMember(ctx, cli, knownPeers, hostname, log); err != nil {
 		return nil, fmt.Errorf("removing member %q from etcd cluster: %w", hostname, err)
 	}
 
-	log.Info("Trying to add etcd member", "hostname", hostname)
+	log.InfoContext(ctx, "Trying to add etcd member", "hostname", hostname)
 	if err := memberAdd(ctx, cli, k8sNamespace, hostname); err != nil {
 		return nil, fmt.Errorf("adding member %q to existing etcd cluster: %w", hostname, err)
 	}
@@ -98,7 +98,7 @@ func JoinExistingCluster(ctx context.Context, k8sNamespace,
 		return nil, fmt.Errorf("creating etcd join config: %w", err)
 	}
 
-	log.Info("Starting embedded etcd server", "hostname", hostname)
+	log.InfoContext(ctx, "Starting embedded etcd server", "hostname", hostname)
 	server, err := embed.StartEtcd(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("starting etcd: %w", err)
@@ -135,11 +135,11 @@ func tryRemoveMember(ctx context.Context, cli *clientv3.Client, members map[stri
 ) error {
 	member, found := members[memberName]
 	if !found {
-		log.Info("Member not found, nothing to remove", "memberName", memberName)
+		log.InfoContext(ctx, "Member not found, nothing to remove", "memberName", memberName)
 		return nil // Member not found, nothing to remove
 	}
 
-	log.Info("Removing previously-failed etcd member", "memberName", memberName, "memberID", member.id)
+	log.InfoContext(ctx, "Removing previously-failed etcd member", "memberName", memberName, "memberID", member.id)
 	ctxRemove, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if _, err := cli.MemberRemove(ctxRemove, member.id); err != nil {
@@ -164,11 +164,11 @@ func getPeers(ctx context.Context, cli *clientv3.Client, log *slog.Logger) (map[
 	peers := make(map[string]etcdPeer)
 	for _, member := range resp.Members {
 		if len(member.PeerURLs) == 0 {
-			log.Warn("Member has no peer URLs, skipping", "member", member.Name)
+			log.WarnContext(ctx, "Member has no peer URLs, skipping", "member", member.Name)
 			continue // Skip members without peer URLs
 		}
 		if len(member.PeerURLs) > 1 {
-			log.Warn("Member has multiple peer URLs, using the first one",
+			log.WarnContext(ctx, "Member has multiple peer URLs, using the first one",
 				"member", member.Name, "peerURLs", member.PeerURLs)
 		}
 		peers[member.Name] = etcdPeer{

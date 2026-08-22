@@ -166,54 +166,54 @@ func WithRawFormRequestMutation(mutate func(*multipart.Form, *multipart.Writer) 
 // WithFormRequestMutation mutates each individual field in requests with HTTP form data.
 // Mutation order is deterministic: fields in ascending name order, then files in ascending filename order.
 func WithFormRequestMutation(mutate MutationFunc, skipFields FieldSelector, log *slog.Logger) RequestMutator {
-	innerMutator := WithRawFormRequestMutation(func(form *multipart.Form, writer *multipart.Writer) (bool, error) {
-		formValueKeys := make([]string, 0, len(form.Value))
-		for key := range form.Value {
-			formValueKeys = append(formValueKeys, key)
-		}
-		sort.StringSlice(formValueKeys).Sort()
-
-		formFileKeys := make([]string, 0, len(form.File))
-		for key := range form.File {
-			formFileKeys = append(formFileKeys, key)
-		}
-		sort.StringSlice(formFileKeys).Sort()
-
-		// Copy form values
-		for _, formKey := range formValueKeys {
-			log.Info("Mutating form field", "key", formKey)
-			values := form.Value[formKey]
-			if len(values) == 0 {
-				continue
-			}
-			if err := mutateFormField(writer, formKey, values[0], mutate, skipFields); err != nil {
-				return false, fmt.Errorf("mutating form field %q: %w", formKey, err)
-			}
-		}
-
-		// Copy form files
-		for _, fileKey := range formFileKeys {
-			log.Info("Mutating form file", "key", fileKey)
-			files := form.File[fileKey]
-			if len(files) == 0 {
-				continue
-			}
-			formFile, err := files[0].Open()
-			if err != nil {
-				return false, fmt.Errorf("opening form file %q: %w", fileKey, err)
-			}
-			// mutateFormFile() always closes formFile
-			if err := mutateFormFile(writer, fileKey, formFile, mutate, skipFields); err != nil {
-				return false, fmt.Errorf("mutating form file %q: %w", fileKey, err)
-			}
-		}
-
-		return true, nil
-	}, log)
-
 	return func(r *http.Request) error {
+		ctx := r.Context()
 		log.InfoContext(r.Context(), "Mutating HTTP form request")
-		return innerMutator(r)
+
+		return WithRawFormRequestMutation(func(form *multipart.Form, writer *multipart.Writer) (bool, error) {
+			formValueKeys := make([]string, 0, len(form.Value))
+			for key := range form.Value {
+				formValueKeys = append(formValueKeys, key)
+			}
+			sort.StringSlice(formValueKeys).Sort()
+
+			formFileKeys := make([]string, 0, len(form.File))
+			for key := range form.File {
+				formFileKeys = append(formFileKeys, key)
+			}
+			sort.StringSlice(formFileKeys).Sort()
+
+			// Copy form values
+			for _, formKey := range formValueKeys {
+				log.InfoContext(ctx, "Mutating form field", "key", formKey)
+				values := form.Value[formKey]
+				if len(values) == 0 {
+					continue
+				}
+				if err := mutateFormField(writer, formKey, values[0], mutate, skipFields); err != nil {
+					return false, fmt.Errorf("mutating form field %q: %w", formKey, err)
+				}
+			}
+
+			// Copy form files
+			for _, fileKey := range formFileKeys {
+				log.InfoContext(ctx, "Mutating form file", "key", fileKey)
+				files := form.File[fileKey]
+				if len(files) == 0 {
+					continue
+				}
+				formFile, err := files[0].Open()
+				if err != nil {
+					return false, fmt.Errorf("opening form file %q: %w", fileKey, err)
+				}
+				// mutateFormFile() always closes formFile
+				if err := mutateFormFile(writer, fileKey, formFile, mutate, skipFields); err != nil {
+					return false, fmt.Errorf("mutating form file %q: %w", fileKey, err)
+				}
+			}
+
+			return true, nil
+		}, log)(r)
 	}
 }
 

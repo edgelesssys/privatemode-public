@@ -144,6 +144,7 @@ func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Reques
 		forwarder.NoRequestMutation,
 		openai.PlainEmbeddingsResponseFields,
 		nil,
+		nil,
 		extractOpenAIUsage,
 		extractOpenAIUsage,
 	)
@@ -158,6 +159,7 @@ func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Re
 		},
 		a.mutators.AudioStreamUsageReportingInjector,
 		openai.PlainTranscriptionResponseFields,
+		nil,
 		nil,
 		extractUnaryTranscriptionUsage,
 		a.extractStreamingTranscriptionUsage(ctx),
@@ -178,34 +180,38 @@ func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 			a.mutators.StreamUsageReportingInjector,
 		),
 		openai.PlainCompletionsResponseFields,
-		// TODO: remove after May 1st
-		forwarder.NewJSONMutatingReader(duplicateReasoningFieldInJSON, forwarder.FieldSelector{}),
+		// TODO: remove once clients have caught up.
+		//       We already deprecated the field and announced removal after 1st of May 26, but
+		//       OpenCode does not yet support the "reasoning" field. Tracked in PM-158
+		duplicateReasoningFieldInJSON,
+		duplicateReasoningFieldInJSON,
 		extractOpenAIUsage,
 		extractOpenAIUsage,
 	)
 }
 
-func duplicateReasoningFieldInJSON(in string) (string, error) {
-	data := []byte(in)
+// duplicateReasoningFieldInJSON copies the "reasoning" field of response messages into
+// a "reasoning_content" field alongside it, for backwards compatibility.
+func duplicateReasoningFieldInJSON(data []byte) ([]byte, error) {
 	if len(data) == 0 || !gjson.ValidBytes(data) {
-		return in, nil
+		return data, nil
 	}
 
-	result := gjson.ParseBytes(data)
-	if !result.IsArray() {
-		return in, nil
+	choices := gjson.GetBytes(data, "choices")
+	if !choices.IsArray() {
+		return data, nil
 	}
 
 	var mutateErr error
-	result.ForEach(func(key, _ gjson.Result) bool {
+	choices.ForEach(func(key, _ gjson.Result) bool {
 		for _, field := range []string{"message", "delta"} {
-			reasoningPath := key.String() + "." + field + ".reasoning"
+			reasoningPath := "choices." + key.String() + "." + field + ".reasoning"
 			reasoning := gjson.GetBytes(data, reasoningPath)
 			if !reasoning.Exists() {
 				continue
 			}
 
-			data, mutateErr = sjson.SetRawBytes(data, key.String()+"."+field+".reasoning_content", []byte(reasoning.Raw))
+			data, mutateErr = sjson.SetRawBytes(data, "choices."+key.String()+"."+field+".reasoning_content", []byte(reasoning.Raw))
 			if mutateErr != nil {
 				return false
 			}
@@ -213,10 +219,10 @@ func duplicateReasoningFieldInJSON(in string) (string, error) {
 		return true
 	})
 	if mutateErr != nil {
-		return "", mutateErr
+		return nil, mutateErr
 	}
 
-	return string(data), nil
+	return data, nil
 }
 
 func extractOpenAIUsage(body []byte) (usage.Stats, error) {

@@ -29,6 +29,29 @@ async function loadWasm(): Promise<BufferSource | Response> {
   return originalFetch(new URL('../../wasm/privatemode.wasm', import.meta.url));
 }
 
+async function initWasmAsStandaloneNode(
+  wasmSource: BufferSource | Response,
+): Promise<void> {
+  if (!isNode) {
+    await initWasm(wasmSource);
+    return;
+  }
+
+  // Vitest's Nix-provided worker has an absolute argv0, while `node app.js`
+  // exposes "node" and triggers Go's Node-specific HTTP transport selection.
+  const originalProcess = globalThis.process;
+  const standaloneNodeProcess = Object.create(originalProcess, {
+    argv0: { value: 'node' },
+  }) as NodeJS.Process;
+  globalThis.process = standaloneNodeProcess;
+  try {
+    await initWasm(wasmSource);
+    expect(globalThis.process).toBe(standaloneNodeProcess);
+  } finally {
+    globalThis.process = originalProcess;
+  }
+}
+
 describe('initWasm', () => {
   it('rejects when expectedWasmHash does not match', async () => {
     const fakeWasm = new Uint8Array([0, 1, 2, 3]);
@@ -49,7 +72,7 @@ describe('wasm', () => {
       Promise.resolve(new Response('', { status: 200 })),
     );
     const wasmSource = await loadWasm();
-    await initWasm(wasmSource);
+    await initWasmAsStandaloneNode(wasmSource);
     client = createWasmClient();
   });
 
@@ -156,13 +179,18 @@ describe('wasm', () => {
   });
 
   describe('fetchManifest', () => {
-    it('returns manifest string', async () => {
+    it('uses Fetch when Node argv0 is node', async () => {
       const manifestData = JSON.stringify({ name: 'test' });
+      fetchMock.mockClear();
       fetchMock.mockImplementation(() =>
         Promise.resolve(new Response(manifestData, { status: 200 })),
       );
       const res = await client.fetchManifest();
       expect(res).toBe(manifestData);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      expect(fetchMock.mock.calls[0]?.[0]).toMatch(
+        /^https:\/\/cdn\.confidential\.cloud\/privatemode\/v2\/manifest\.json\?t=\d+$/,
+      );
     });
   });
 

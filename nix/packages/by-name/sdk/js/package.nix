@@ -8,7 +8,7 @@
   sdk,
 }:
 stdenv.mkDerivation (finalAttrs: {
-  pname = "privatemode-internal-js-sdk";
+  pname = "privatemode-js-sdk";
   version = lib.continuumVersion;
 
   src = lib.continuumRepoRootSrc [
@@ -40,8 +40,15 @@ stdenv.mkDerivation (finalAttrs: {
   installPhase = ''
     runHook preInstall
 
-    mkdir -p $out/share/
-    cp -r sdk/js/dist/* $out/share/
+    npm --prefix sdk/js pkg set \
+      "version=${lib.removePrefix "v" finalAttrs.version}" \
+      "repository.type=git" \
+      "repository.url=git+https://github.com/edgelesssys/continuum.git" \
+      "repository.directory=sdk/js"
+
+    mkdir -p $out/share/dist/
+    cp sdk/js/package.json sdk/js/README.md $out/share/
+    cp -r sdk/js/dist/* $out/share/dist/
 
     runHook postInstall
   '';

@@ -12,33 +12,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testWarn(t *testing.T) WarnFunc {
-	return func(msg string, args ...any) {
-		t.Log(append([]any{msg}, args...)...)
-	}
-}
-
-// mockSSEReader yields a fixed sequence of SSE lines.
+// mockSSEReader yields a fixed sequence of SSE events.
 type mockSSEReader struct {
-	lines []sse.Line
-	pos   int
+	events []sse.Event
+	pos    int
 }
 
-func (m *mockSSEReader) Next() (sse.Line, error) {
-	if m.pos >= len(m.lines) {
-		return sse.Line{}, io.EOF
+func (m *mockSSEReader) Next() (sse.Event, error) {
+	if m.pos >= len(m.events) {
+		return sse.Event{}, io.EOF
 	}
-	l := m.lines[m.pos]
+	e := m.events[m.pos]
 	m.pos++
-	return l, nil
+	return e, nil
 }
 
-func dataLine(value string) sse.Line {
-	return sse.Line{Type: sse.LineField, Name: sse.FieldData, Value: []byte(value)}
-}
-
-func endLine() sse.Line {
-	return sse.Line{Type: sse.LineEnd}
+func events(raws ...string) []sse.Event {
+	parsed := make([]sse.Event, 0, len(raws))
+	for _, raw := range raws {
+		parsed = append(parsed, sse.ParseEvent([]byte(raw)))
+	}
+	return parsed
 }
 
 // testExtractor parses {"n": <int>} and maps it to PromptTokens.
@@ -57,86 +51,47 @@ func testExtractor(body []byte) (usage.Stats, error) {
 
 func TestUsageSSEReader(t *testing.T) {
 	testCases := map[string]struct {
-		lines     []sse.Line
+		events    []sse.Event
 		wantUsage usage.Stats
 	}{
 		"empty stream": {
-			lines:     nil,
+			events:    nil,
 			wantUsage: usage.Stats{},
 		},
-		"optimistic single-line parse": {
-			lines: []sse.Line{
-				dataLine(`{"n":7}`),
-				endLine(),
-			},
+		"single data line": {
+			events:    events("data: {\"n\":7}\n\n"),
 			wantUsage: usage.Stats{PromptTokens: 7},
 		},
-		"multi-line accumulation": {
-			lines: []sse.Line{
-				dataLine(`{"n"`),
-				dataLine(`:5}`),
-				endLine(),
-			},
-			wantUsage: usage.Stats{PromptTokens: 5},
-		},
 		"later event overwrites earlier usage": {
-			lines: []sse.Line{
-				dataLine(`{"n":1}`),
-				endLine(),
-				dataLine(`{"n":2}`),
-				endLine(),
-			},
+			events:    events("data: {\"n\":1}\n\n", "data: {\"n\":2}\n\n"),
 			wantUsage: usage.Stats{PromptTokens: 2},
 		},
 		"no extractable usage": {
-			lines: []sse.Line{
-				dataLine(`not json`),
-				endLine(),
-			},
+			events:    events("data: not json\n\n"),
 			wantUsage: usage.Stats{},
 		},
-		"event without usage preserves previous usage": {
-			lines: []sse.Line{
-				dataLine(`{"n":6}`),
-				endLine(),
-				dataLine(`no usage here`),
-				endLine(),
-			},
+		"events without usage are ignored": {
+			events:    events("data: no usage\n\n", "data: {\"n\":6}\n\n", "data: no usage\n\n"),
 			wantUsage: usage.Stats{PromptTokens: 6},
-		},
-		"event without usage preserves later usage": {
-			lines: []sse.Line{
-				dataLine(`no usage here`),
-				endLine(),
-				dataLine(`{"n":6}`),
-				endLine(),
-			},
-			wantUsage: usage.Stats{PromptTokens: 6},
-		},
-		"optimistic parse + erroneous line does not cause an error": {
-			lines: []sse.Line{
-				dataLine(`{"n":4}`),
-				dataLine(`erroneous second line`),
-				endLine(),
-			},
-			// The result is really an implementation detail
-			wantUsage: usage.Stats{PromptTokens: 4},
 		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			mock := &mockSSEReader{lines: tc.lines}
-			reader := NewUsageSSEReader(mock, testExtractor, testWarn(t))
+			mock := &mockSSEReader{events: tc.events}
+			reader := NewUsageSSEReader(mock, testExtractor)
 
+			var got []sse.Event
 			for {
-				_, err := reader.Next()
+				event, err := reader.Next()
 				if errors.Is(err, io.EOF) {
 					break
 				}
 				require.NoError(t, err)
+				got = append(got, event)
 			}
 
+			assert.Equal(t, tc.events, got)
 			assert.Equal(t, tc.wantUsage, reader.LatestUsage())
 		})
 	}

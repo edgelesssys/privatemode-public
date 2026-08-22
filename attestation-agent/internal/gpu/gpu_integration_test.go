@@ -25,7 +25,7 @@ func TestListGPUs(t *testing.T) {
 	require := require.New(t)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	client, err := NewClient(logger)
+	client, err := NewClient(t.Context(), logger)
 	require.NoError(err)
 
 	gpus, err := client.ListGPUs()
@@ -41,7 +41,7 @@ func TestCCFeatures(t *testing.T) {
 
 	// ensure the client is started
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	_, err := NewClient(logger)
+	_, err := NewClient(t.Context(), logger)
 	require.NoError(err)
 
 	caps, ret := nvml.SystemGetConfComputeCapabilities()
@@ -71,7 +71,7 @@ func TestDeviceInfo(t *testing.T) {
 	require := require.New(t)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	client, err := NewClient(logger)
+	client, err := NewClient(t.Context(), logger)
 	require.NoError(err)
 
 	gpus, err := client.ListGPUs()

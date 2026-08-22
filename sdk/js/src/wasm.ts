@@ -15,6 +15,34 @@ export interface WasmAPIResponse {
   headers: Headers;
 }
 
+function runGo(go: InstanceType<typeof Go>, instance: WebAssembly.Instance) {
+  // Go disables its Fetch-based HTTP transport when process.argv0 starts with
+  // "node", leaving js/wasm's fake network unable to reach external hosts.
+  // Go.run enters the module synchronously, so hide argv0 while package
+  // initializers select the transport. See https://go.dev/issue/60810.
+  const globals = globalThis as unknown as {
+    process?: { argv0?: unknown };
+  };
+  const originalProcess = globals.process;
+  const enableNodeFetch =
+    typeof globalThis.fetch === 'function' &&
+    typeof originalProcess?.argv0 === 'string' &&
+    originalProcess.argv0.startsWith('node');
+
+  if (enableNodeFetch) {
+    globals.process = Object.create(originalProcess, {
+      argv0: { value: 'wasm' },
+    });
+  }
+  try {
+    void go.run(instance);
+  } finally {
+    if (enableNodeFetch) {
+      globals.process = originalProcess;
+    }
+  }
+}
+
 /** The raw client object exported by the Go Wasm module. */
 interface WasmClientExports {
   initialize(
@@ -145,7 +173,7 @@ export async function initWasm(
       result = await WebAssembly.instantiate(source, go.importObject);
     }
 
-    void go.run(result.instance);
+    runGo(go, result.instance);
     initialized = true;
     loadedWasmHash = expectedHash?.toLowerCase() ?? null;
   })();

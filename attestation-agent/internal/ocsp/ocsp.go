@@ -84,7 +84,7 @@ func (c *Client) VerifyCertChain(ctx context.Context,
 		intermediatePool.AddCert(cert)
 	}
 
-	c.log.Info("Verifying certificate chain", "mode", mode)
+	c.log.InfoContext(ctx, "Verifying certificate chain", "mode", mode)
 	if _, err := certChain[0].Verify(x509.VerifyOptions{
 		Roots:         rootPool,
 		Intermediates: intermediatePool,
@@ -100,12 +100,12 @@ func (c *Client) VerifyCertChain(ctx context.Context,
 	}
 
 	// Check if any of the certificates where revoked by NVIDIA's OCSP server
-	c.log.Info("Checking OCSP status of certificate chain", "mode", mode)
+	c.log.InfoContext(ctx, "Checking OCSP status of certificate chain", "mode", mode)
 	statusResponses := []internalOCSP.Status{}
 	for i := range len(certChain) - 1 {
 		status, err := c.verifyCertificate(ctx, certChain[i], certChain[i+1])
 		if err != nil {
-			c.log.Error("OCSP verification failed", "error", err,
+			c.log.ErrorContext(ctx, "OCSP verification failed", "error", err,
 				"cert", certChain[i].Subject.CommonName, "issuer", certChain[i+1].Subject.CommonName)
 		}
 		statusResponses = append(statusResponses, status)

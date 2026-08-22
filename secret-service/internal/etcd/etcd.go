@@ -143,7 +143,7 @@ func (e *Etcd) SetSecrets(ctx context.Context, secrets map[string][]byte, ttl in
 		defer func() {
 			if retErr != nil {
 				if _, err = e.server.LeaseRevoke(authCtx(ctx, e.etcdMemberCert), &pb.LeaseRevokeRequest{ID: leaseResp.ID}); err != nil {
-					e.log.Warn("Failed to revoke lease after failed transaction", "error", err, "leaseID", leaseResp.ID)
+					e.log.WarnContext(ctx, "Failed to revoke lease after failed transaction", "error", err, "leaseID", leaseResp.ID)
 				}
 			}
 		}()

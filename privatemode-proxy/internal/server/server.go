@@ -76,7 +76,6 @@ type secretManager interface {
 
 // New sets up a new Server.
 func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Server {
-	log.Info("Version", slog.String("version", constants.Version()))
 	fwd := forwarder.New(client, opts.APIEndpoint, opts.ProtocolScheme, log)
 
 	return &Server{

@@ -13,6 +13,7 @@ package openai
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -21,6 +22,7 @@ import (
 	"log/slog"
 	"math"
 	"mime/multipart"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -517,7 +519,7 @@ func validateVideoURL(rawURL string) error {
 // stream_options.continuous_usage_stats to true.
 func StreamUsageReportingInjector(log *slog.Logger) forwarder.RequestMutator {
 	injectStreamOptions := func(httpBody string) (string, error) {
-		log.Debug("Enabling token tracking for request")
+		log.DebugContext(context.Background(), "Enabling token tracking for request")
 
 		if !gjson.Valid(httpBody) {
 			return "", fmt.Errorf("request body is not valid json")
@@ -551,55 +553,57 @@ func StreamUsageReportingInjector(log *slog.Logger) forwarder.RequestMutator {
 // usage statistics in streaming audio transcription responses. It sets stream_include_usage and
 // stream_continuous_usage_stats to true in the request form.
 func AudioStreamUsageReportingInjector(log *slog.Logger) forwarder.RequestMutator {
-	return forwarder.WithRawFormRequestMutation(func(form *multipart.Form, writer *multipart.Writer) (bool, error) {
-		log.Debug("Enabling audio token tracking for request")
+	return func(r *http.Request) error {
+		return forwarder.WithRawFormRequestMutation(func(form *multipart.Form, writer *multipart.Writer) (bool, error) {
+			log.DebugContext(r.Context(), "Enabling audio token tracking for request")
 
-		if vs := form.Value["stream"]; len(vs) == 0 || !strings.EqualFold(vs[0], "true") {
-			log.Debug("Non-streaming transcription request, no option modification needed")
-			return false, nil
-		}
+			if vs := form.Value["stream"]; len(vs) == 0 || !strings.EqualFold(vs[0], "true") {
+				log.DebugContext(r.Context(), "Non-streaming transcription request, no option modification needed")
+				return false, nil
+			}
 
-		if err := writer.WriteField("stream_include_usage", "true"); err != nil {
-			return false, fmt.Errorf("writing stream_include_usage field: %w", err)
-		}
-		if err := writer.WriteField("stream_continuous_usage_stats", "true"); err != nil {
-			return false, fmt.Errorf("writing stream_continuous_usage_stats field: %w", err)
-		}
+			if err := writer.WriteField("stream_include_usage", "true"); err != nil {
+				return false, fmt.Errorf("writing stream_include_usage field: %w", err)
+			}
+			if err := writer.WriteField("stream_continuous_usage_stats", "true"); err != nil {
+				return false, fmt.Errorf("writing stream_continuous_usage_stats field: %w", err)
+			}
 
-		for key, values := range form.Value {
-			if len(values) == 0 {
-				continue
+			for key, values := range form.Value {
+				if len(values) == 0 {
+					continue
+				}
+				if key == "stream_include_usage" || key == "stream_continuous_usage_stats" {
+					// We already set these fields to enabled, regardless of what the user provided
+					continue
+				}
+				if err := writer.WriteField(key, values[0]); err != nil {
+					return false, fmt.Errorf("writing form field %q: %w", key, err)
+				}
 			}
-			if key == "stream_include_usage" || key == "stream_continuous_usage_stats" {
-				// We already set these fields to enabled, regardless of what the user provided
-				continue
+			for fileKey, fileHeaders := range form.File {
+				if len(fileHeaders) == 0 {
+					continue
+				}
+				formFile, err := fileHeaders[0].Open()
+				if err != nil {
+					return false, fmt.Errorf("opening form file %q: %w", fileKey, err)
+				}
+				fileWriter, err := writer.CreateFormFile(fileKey, fileKey)
+				if err != nil {
+					_ = formFile.Close()
+					return false, fmt.Errorf("creating form file writer %q: %w", fileKey, err)
+				}
+				if _, err := io.Copy(fileWriter, formFile); err != nil {
+					_ = formFile.Close()
+					return false, fmt.Errorf("copying form file %q: %w", fileKey, err)
+				}
+				if err := formFile.Close(); err != nil {
+					return false, fmt.Errorf("closing form file %q: %w", fileKey, err)
+				}
 			}
-			if err := writer.WriteField(key, values[0]); err != nil {
-				return false, fmt.Errorf("writing form field %q: %w", key, err)
-			}
-		}
-		for fileKey, fileHeaders := range form.File {
-			if len(fileHeaders) == 0 {
-				continue
-			}
-			formFile, err := fileHeaders[0].Open()
-			if err != nil {
-				return false, fmt.Errorf("opening form file %q: %w", fileKey, err)
-			}
-			fileWriter, err := writer.CreateFormFile(fileKey, fileKey)
-			if err != nil {
-				_ = formFile.Close()
-				return false, fmt.Errorf("creating form file writer %q: %w", fileKey, err)
-			}
-			if _, err := io.Copy(fileWriter, formFile); err != nil {
-				_ = formFile.Close()
-				return false, fmt.Errorf("copying form file %q: %w", fileKey, err)
-			}
-			if err := formFile.Close(); err != nil {
-				return false, fmt.Errorf("closing form file %q: %w", fileKey, err)
-			}
-		}
 
-		return true, nil
-	}, log)
+			return true, nil
+		}, log)(r)
+	}
 }

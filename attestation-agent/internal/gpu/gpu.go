@@ -6,6 +6,7 @@ Package gpu implements functionality to talk to local NVIDIA GPUs.
 package gpu
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -37,12 +38,12 @@ it does not exist yet. Otherwise, it returns the existing client.
 
 The caller must call Close() on the client when done using it.
 */
-func NewClient(logger *slog.Logger) (*Client, error) {
+func NewClient(ctx context.Context, logger *slog.Logger) (*Client, error) {
 	clientCreator.Do(func() {
 		clientSingleton = &Client{logger}
-		err := clientSingleton.init()
+		err := clientSingleton.init(ctx)
 		if err != nil {
-			logger.Error("Initializing GPU client", "error", err)
+			logger.ErrorContext(ctx, "Initializing GPU client", "error", err)
 		}
 	})
 
@@ -51,8 +52,8 @@ func NewClient(logger *slog.Logger) (*Client, error) {
 
 // init initializes the Client. Internally, it loads the NVML library
 // object file.
-func (c *Client) init() error {
-	c.log.Info("Initializing GPU client")
+func (c *Client) init(ctx context.Context) error {
+	c.log.InfoContext(ctx, "Initializing GPU client")
 	ret := nvml.Init()
 	if ret != nvml.SUCCESS {
 		return fmt.Errorf("initializing NVML: %s", nvml.ErrorString(ret))
@@ -62,8 +63,8 @@ func (c *Client) init() error {
 
 // Close closes the Client. Internally, it unloads the NVML library
 // object file.
-func (c *Client) Close() error {
-	c.log.Info("Closing GPU client")
+func (c *Client) Close(ctx context.Context) error {
+	c.log.InfoContext(ctx, "Closing GPU client")
 	ret := nvml.Shutdown()
 	if ret != nvml.SUCCESS {
 		return fmt.Errorf("shutting down NVML: %s", nvml.ErrorString(ret))

@@ -73,7 +73,7 @@ func run(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("failed to verify GPUs: %w", err)
 	}
 
-	log.Info("Writing OCSP status to file", "file", constants.OCSPStatusFile())
+	log.InfoContext(cmd.Context(), "Writing OCSP status to file", "file", constants.OCSPStatusFile())
 	if err := os.MkdirAll(filepath.Dir(constants.OCSPStatusFile()), 0o644); err != nil {
 		return fmt.Errorf("creating directory for OCSP status file: %w", err)
 	}
@@ -84,7 +84,7 @@ func run(cmd *cobra.Command, _ []string) error {
 	if err := os.WriteFile(constants.OCSPStatusFile(), statusBytes, 0o644); err != nil {
 		return fmt.Errorf("writing OCSP status file: %w", err)
 	}
-	log.Info("OCSP status written successfully", "file", constants.OCSPStatusFile())
+	log.InfoContext(cmd.Context(), "OCSP status written successfully", "file", constants.OCSPStatusFile())
 
 	return nil
 }
@@ -92,11 +92,11 @@ func run(cmd *cobra.Command, _ []string) error {
 // verifyAndEnable verifies the GPUs and sets them to ready state.
 func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOCSP.StatusInfo, error) {
 	// set up issuer
-	gpuClient, err := gpu.NewClient(log)
+	gpuClient, err := gpu.NewClient(ctx, log)
 	if err != nil {
 		return nil, fmt.Errorf("creating GPU client: %w", err)
 	}
-	defer gpuClient.Close()
+	defer gpuClient.Close(ctx)
 	availableGPUs, err := gpuClient.ListGPUs()
 	if err != nil {
 		return nil, fmt.Errorf("listing GPUs: %w", err)
@@ -115,14 +115,14 @@ func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOCSP.Stat
 
 	statusInfos := make([]internalOCSP.StatusInfo, len(gpuIssuers))
 
-	log.Info("Verifying GPUs", "amount", len(gpuIssuers))
+	log.InfoContext(ctx, "Verifying GPUs", "amount", len(gpuIssuers))
 	for i, gpuIssuer := range gpuIssuers {
 		nonce, err := generateNonce()
 		if err != nil {
 			return nil, fmt.Errorf("generating nonce: %w", err)
 		}
 
-		report, gpuCertChain, err := gpuIssuer.Issue(nonce)
+		report, gpuCertChain, err := gpuIssuer.Issue(ctx, nonce)
 		if err != nil {
 			return nil, fmt.Errorf("issuing GPU report: %w", err)
 		}
@@ -137,7 +137,7 @@ func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOCSP.Stat
 			return nil, fmt.Errorf("verifying GPU certificate chain: %w", err)
 		}
 
-		log.Info("Verifying GPU attestation report")
+		log.InfoContext(ctx, "Verifying GPU attestation report")
 		if err := parsedReport.Verify(attestation.VerificationSettings{
 			Nonce:                 nonce,
 			AllowedDriverVersions: driverVersions,
@@ -151,9 +151,9 @@ func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOCSP.Stat
 		if err != nil {
 			return nil, fmt.Errorf("getting GPU architecture: %w", err)
 		}
-		log.Info("Fetching RIM data for GPU", "architecture", arch)
+		log.InfoContext(ctx, "Fetching RIM data for GPU", "architecture", arch)
 
-		driverRIM, err := rimClient.FetchDriverRIM(ctx, arch, parsedReport.DriverVersion())
+		driverRIM, err := rimClient.FetchDriverRIM(ctx, arch, parsedReport.ChipInfo(), parsedReport.DriverVersion())
 		if err != nil {
 			return nil, fmt.Errorf("fetching driver RIM: %w", err)
 		}
@@ -175,7 +175,7 @@ func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOCSP.Stat
 			return nil, fmt.Errorf("verifying VBIOS RIM certificate chain: %w", err)
 		}
 
-		log.Info("Validating GPU attestation report measurements")
+		log.InfoContext(ctx, "Validating GPU attestation report measurements")
 		if err := parsedReport.ValidateMeasurements(driverRIM, vbiosRIM, nil); err != nil {
 			return nil, fmt.Errorf("validating measurements: %w", err)
 		}

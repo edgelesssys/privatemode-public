@@ -64,6 +64,7 @@ func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request)
 		forwarder.RequestMutatorChain(a.cacheSaltValidator, a.mediaContentValidator),
 		anthropic.PlainMessagesResponseFields,
 		nil,
+		nil,
 		extractAnthropicUsage,
 		extractAnthropicUsage,
 	)

@@ -759,7 +759,7 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 
 		data, err := handler(r)
 		if err != nil {
-			log.Error("handler error", "error", err)
+			log.ErrorContext(r.Context(), "handler error", "error", err)
 			http.Error(w, fmt.Sprintf("handler error: %v", err), http.StatusBadRequest)
 			return
 		}

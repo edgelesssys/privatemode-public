@@ -18,7 +18,7 @@ export type AuthCredential =
 
 /**
  * A function that returns the credential to authenticate the next request with.
- * It is invoked before every request, so it can return short-lived credentials
+ * It's invoked before every request, so it can return short-lived credentials
  * (such as JWTs) that are refreshed over time.
  */
 export type AuthProvider = () => AuthCredential | Promise<AuthCredential>;
@@ -724,7 +724,7 @@ export class PrivatemodeCore {
    * The current manifest in use. If no manifest has been set or
    * fetched yet, this returns null.
    * To save/restore the manifest use {@link manifestBytes} instead of this function,
-   * as json encoding/decoding may alter the bytes and cause verification to fail.
+   * as JSON encoding/decoding may alter the bytes and cause verification to fail.
    */
   public get manifest(): Manifest | null {
     if (!this._manifestBytes) return null;
@@ -877,7 +877,7 @@ export class PrivatemodeCore {
   }
 }
 
-/** A file to send to the unstructured partition endpoint. */
+/** @internal A file to send to the unstructured partition endpoint. */
 export interface UnstructuredFile {
   /** Filename (e.g. "document.pdf"). */
   name: string;
@@ -887,7 +887,7 @@ export interface UnstructuredFile {
   contentType?: string;
 }
 
-/** Optional parameters for the unstructured partition endpoint. */
+/** @internal Optional parameters for the unstructured partition endpoint. */
 export interface UnstructuredOptions {
   /** Partitioning strategy: "hi_res", "fast", "ocr_only", "auto", or "vlm". */
   strategy?: string;

@@ -81,7 +81,7 @@ func (s *Server) Stop() {
 // SetSecrets sets user secrets for the attestation service.
 // The attestation service is tasked with distributing secrets to workers.
 func (s *Server) SetSecrets(ctx context.Context, req *userpb.SetSecretsRequest) (*userpb.SetSecretsResponse, error) {
-	s.log.Info("SetSecrets called")
+	s.log.InfoContext(ctx, "SetSecrets called")
 
 	// Sanity check for correct secret length
 	var errs []error

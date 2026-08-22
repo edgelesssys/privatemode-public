@@ -49,10 +49,11 @@ const (
 	OpaqueFieldIDFloorsweptPorts
 	OpaqueFieldIDPositionID
 	OpaqueFieldIDLockSwitchStatus
-	OpaqueFieldIDGpuLinkConn
-	OpaqueFieldIDSysEnableStatus
-	OpaqueFieldIDOpaqueDataVersion
-	OpaqueFieldIDInvalid OpaqueFieldID = 255
+	OpaqueFieldIDGpuLinkConn       OpaqueFieldID = 32
+	OpaqueFieldIDSysEnableStatus   OpaqueFieldID = 33
+	OpaqueFieldIDOpaqueDataVersion OpaqueFieldID = 34
+	OpaqueFieldIDChipInfo          OpaqueFieldID = 35
+	OpaqueFieldIDInvalid           OpaqueFieldID = 255
 )
 
 const (
@@ -177,6 +178,11 @@ func (r *Report) ProjectSKU() string {
 // ChipSKU returns the chip SKU.
 func (r *Report) ChipSKU() string {
 	return opaqueDataToString(r.SPDMResponse.OpaqueData.Fields[OpaqueFieldIDChipSku])
+}
+
+// ChipInfo returns the GPU chip name, e.g. GB100 or GB110.
+func (r *Report) ChipInfo() string {
+	return opaqueDataToString(r.SPDMResponse.OpaqueData.Fields[OpaqueFieldIDChipInfo])
 }
 
 // VBIOSVersion returns the VBIOS version in the format "XX.XX.XX.XX".

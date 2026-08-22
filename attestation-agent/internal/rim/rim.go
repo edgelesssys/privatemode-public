@@ -34,19 +34,30 @@ func New(httpClient *http.Client, baseURL string, log *slog.Logger) *Client {
 	}
 }
 
-// FetchDriverRIM fetches reference values for the given GPU architecture and version.
-func (c *Client) FetchDriverRIM(ctx context.Context, gpuArch gpu.Architecture, version string) (*SoftwareIdentity, error) {
-	var driverID string
-	switch gpuArch {
-	case gpu.ArchHopper:
-		driverID = "NV_GPU_DRIVER_GH100_" + version
-	case gpu.ArchBlackwell:
-		driverID = "NV_GPU_CC_DRIVER_GB100_" + version
-	default:
-		return nil, fmt.Errorf("unsupported GPU architecture: %d", gpuArch)
+// FetchDriverRIM fetches reference values for the given GPU architecture, chip, and version.
+func (c *Client) FetchDriverRIM(ctx context.Context, gpuArch gpu.Architecture, chip, version string) (*SoftwareIdentity, error) {
+	driverID, err := driverRIMID(gpuArch, chip, version)
+	if err != nil {
+		return nil, err
 	}
 
 	return c.FetchRIM(ctx, driverID)
+}
+
+func driverRIMID(gpuArch gpu.Architecture, chip, version string) (string, error) {
+	switch gpuArch {
+	case gpu.ArchHopper:
+		return "NV_GPU_DRIVER_GH100_" + version, nil
+	case gpu.ArchBlackwell:
+		switch chip {
+		case "GB100", "GB110":
+			return "NV_GPU_CC_DRIVER_" + chip + "_" + version, nil
+		default:
+			return "", fmt.Errorf("unsupported Blackwell GPU chip: %q", chip)
+		}
+	default:
+		return "", fmt.Errorf("unsupported GPU architecture: %d", gpuArch)
+	}
 }
 
 // FetchVBIOSRIM fetches reference values for the VBIOS of the given GPU architecture and version.
@@ -57,7 +68,7 @@ func (c *Client) FetchVBIOSRIM(ctx context.Context, project, projectSku, chipSku
 
 // FetchRIM fetches the reference values for the given RIM ID.
 func (c *Client) FetchRIM(ctx context.Context, id string) (*SoftwareIdentity, error) {
-	c.log.Info("Fetching reference values from RIM service", "id", id)
+	c.log.InfoContext(ctx, "Fetching reference values from RIM service", "id", id)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%sv1/rim/%s", c.baseURL, id), nil)
 	if err != nil {
@@ -89,7 +100,7 @@ func (c *Client) FetchRIM(ctx context.Context, id string) (*SoftwareIdentity, er
 		return nil, fmt.Errorf("unmarshal XML response: %w", err)
 	}
 
-	c.log.Info("Validating RIM SoftwareIdentity signature", "id", id)
+	c.log.InfoContext(ctx, "Validating RIM SoftwareIdentity signature", "id", id)
 	signingCerts, err := softwareIdentity.SigningCerts()
 	if err != nil {
 		return nil, fmt.Errorf("extract signing certificates: %w", err)
