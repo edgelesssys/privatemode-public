@@ -1,7 +1,7 @@
-import { writable, get } from 'svelte/store';
-import { PrivatemodeAI } from 'privatemode-ai';
 import type { ExportedSecret, PrivatemodeAIOptions } from 'privatemode-ai';
-import { getAuthCredential, authIdentity } from './authStore';
+import { PrivatemodeAI } from 'privatemode-ai';
+import { get, writable } from 'svelte/store';
+import { authIdentity, getAuthCredential } from './authStore';
 import { translate } from './i18n';
 
 export interface Model {

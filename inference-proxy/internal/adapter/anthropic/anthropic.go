@@ -11,7 +11,6 @@ import (
 	"net/http"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -55,14 +54,9 @@ func (a *Adapter) HandlesCatchAll() bool {
 
 // forwardMessagesRequest forwards a request to the Anthropic messages endpoint.
 func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	a.ForwardEncrypted(
 		w, r,
-		func(s cipher.ResponseCipher) forwarder.RequestMutator {
-			return forwarder.WithJSONRequestMutation(s.DecryptRequest(ctx), anthropic.PlainMessagesRequestFields, a.Log)
-		},
 		forwarder.RequestMutatorChain(a.cacheSaltValidator, a.mediaContentValidator),
-		anthropic.PlainMessagesResponseFields,
 		nil,
 		nil,
 		extractAnthropicUsage,

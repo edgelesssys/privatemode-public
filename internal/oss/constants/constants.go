@@ -130,19 +130,17 @@ const (
 	// InferenceSecretTTL is the time-to-live for inference secrets.
 	InferenceSecretTTL = time.Hour
 
-	// MaxFileSizeBytes is the maximum file size that users may upload.
-	// The user-facing limit is 50 MiB of file content; this higher value (128 MiB)
-	// intentionally includes overhead from hex/base64 encoding, multipart form-data
-	// boundaries, and HTTP framing so that a 50 MiB file plus transport overhead
-	// is still accepted while preventing excessively large requests.
-	MaxFileSizeBytes = 128 * 1024 * 1024 // 128MiB
+	// MaxFileSizeBytes is the maximum request body size that users may upload. The user-facing
+	// limit is 50 MB of file content. This higher value allows for overhead due to encryption,
+	// multipart form-data boundaries, and HTTP framing.
+	MaxFileSizeBytes = 64 * 1024 * 1024 // 64MiB
 	// MaxBodySizeExceededMsg should be presented to the user when [MaxFileSizeBytes] is exceeded.
 	MaxBodySizeExceededMsg = "maximum request size exceeded (max 50MB)"
 
-	// MaxUnstructuredBodySize is the maximum request body size that users may submit to the unstructured API.
-	// The user-facing limit is 25 MiB of file content; this higher value (50 MiB)
+	// MaxUnstructuredBodySize is the maximum request body size that users may submit to the
+	// unstructured API. The user-facing limit is 25 MB of file content. This higher value
 	// intentionally includes overhead, see also [MaxFileSizeBytes].
-	MaxUnstructuredBodySize = 50 * 1024 * 1024 // 50MiB
+	MaxUnstructuredBodySize = 25 * 1024 * 1024 // 25MiB
 	// MaxUnstructuredBodySizeExceededMsg should be presented to the user when [MaxUnstructuredBodySize] is exceeded.
 	MaxUnstructuredBodySizeExceededMsg = "file too large (max 25MB)"
 
@@ -155,9 +153,9 @@ const (
 	MaxSSEEventBytes = 256 * 1024 // 256 KiB
 
 	// MaxEncryptedFrameSize is the maximum size of a single encrypted body frame that a decrypter
-	// will read. It accommodates the largest body permitted by [MaxFileSizeBytes] plus encryption
-	// and framing overhead.
-	MaxEncryptedFrameSize = MaxFileSizeBytes + 64
+	// will read. It accommodates the largest body in either direction
+	// ([MaxUnaryResponseBodyBytes] exceeds [MaxFileSizeBytes]) plus encryption and framing overhead.
+	MaxEncryptedFrameSize = MaxUnaryResponseBodyBytes + 64
 
 	// MetricsEndpoint is the endpoint where Prometheus metrics are exposed by default.
 	MetricsEndpoint = "/metrics"

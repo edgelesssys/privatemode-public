@@ -13,6 +13,7 @@
   "license": "MIT",
   "author": "Edgeless Systems GmbH",
   "type": "module",
+  "packageManager": "pnpm@11.21.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -45,6 +46,7 @@
     "eslint": "10.6.0",
     "globals": "17.7.0",
     "openai": "7.2.0",
+    "playwright": "1.58.2",
     "typescript": "6.0.3",
     "typescript-eslint": "8.63.0",
     "vitest": "4.1.10"

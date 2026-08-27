@@ -1,5 +1,5 @@
 diff --git a/vllm/entrypoints/speech_to_text/base/serving.py b/vllm/entrypoints/speech_to_text/base/serving.py
-index 1cbc4d8f7..a8f3882e5 100644
+index 8065c13d43..3b505d625b 100644
 --- a/vllm/entrypoints/speech_to_text/base/serving.py
 +++ b/vllm/entrypoints/speech_to_text/base/serving.py
 @@ -10,7 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
@@ -22,7 +22,7 @@ index 1cbc4d8f7..a8f3882e5 100644
  from vllm.outputs import RequestOutput
  from vllm.renderers.inputs import DictPrompt, EncoderDecoderDictPrompt
  from vllm.renderers.inputs.preprocess import parse_enc_dec_prompt, parse_model_prompt
-@@ -87,6 +88,73 @@ def asr_inter_chunk_separator(
+@@ -91,6 +92,70 @@ def asr_inter_chunk_separator(
      return "" if language and language.lower() in no_space_languages else " "
  
  
@@ -67,10 +67,7 @@ index 1cbc4d8f7..a8f3882e5 100644
 +                    frame_array = np.mean(frame_array, axis=0)
 +
 +                total += frame_array.shape[-1]
-+                if (
-+                    max_duration_s is not None
-+                    and total / sr_native > max_duration_s
-+                ):
++                if max_duration_s is not None and total / sr_native > max_duration_s:
 +                    raise ValueError("Maximum audio decode duration exceeded")
 +
 +                samples.append(frame_array)
@@ -93,10 +90,10 @@ index 1cbc4d8f7..a8f3882e5 100644
 +        raise ValueError("Invalid or unsupported audio file.") from exc
 +
 +
- class OpenAISpeechToText(OpenAIServing):
+ class SpeechToTextBaseServing(GenerateBaseServing):
      """Base class for speech-to-text operations like transcription and
      translation."""
-@@ -161,22 +229,16 @@ class OpenAISpeechToText(OpenAIServing):
+@@ -168,23 +233,16 @@ class SpeechToTextBaseServing(GenerateBaseServing):
          self,
          audio_data: bytes,
      ) -> tuple[list[np.ndarray], float]:
@@ -113,6 +110,7 @@ index 1cbc4d8f7..a8f3882e5 100644
 -                y, sr = load_audio(
 -                    buf,
 -                    sr=self.asr_config.sample_rate,
+-                    mono=True,
 -                    max_duration_s=self.max_audio_decode_duration_s,
 -                )
 -        except ValueError:
@@ -127,71 +125,3 @@ index 1cbc4d8f7..a8f3882e5 100644
  
          duration = get_audio_duration(y=y, sr=sr)
          do_split_audio = self.asr_config.allow_audio_chunking and (
-@@ -255,7 +317,7 @@ class OpenAISpeechToText(OpenAIServing):
-         request: SpeechToTextRequest,
-         audio_data: bytes,
-         request_id: str,
--    ) -> tuple[list[EngineInput], float]:
-+    ) -> tuple[list[EngineInput], list[float], float]:
-         # Validate request
-         request.language = self.model_cls.validate_language(request.language)
-         request.to_language = (
-@@ -283,6 +345,8 @@ class OpenAISpeechToText(OpenAIServing):
-             )
- 
-         parsed_prompts: list[DictPrompt] = []
-+        start_times: list[float] = []
-+        chunk_offset = 0
-         for chunk in chunks:
-             stt_params = request.build_stt_params(
-                 audio=chunk,
-@@ -300,10 +364,12 @@ class OpenAISpeechToText(OpenAIServing):
-                 parsed_prompt = parse_model_prompt(self.model_config, prompt)
- 
-             parsed_prompts.append(parsed_prompt)
-+            start_times.append(chunk_offset / self.asr_config.sample_rate)
-+            chunk_offset += len(chunk)
- 
-         engine_inputs = await self.renderer.render_cmpl_async(parsed_prompts)
- 
--        return engine_inputs, duration
-+        return engine_inputs, start_times, duration
- 
-     def _preprocess_verbose_prompt(self, prompt: EncoderDecoderDictPrompt):
-         dec_prompt = prompt["decoder_prompt"]
-@@ -388,7 +454,7 @@ class OpenAISpeechToText(OpenAIServing):
-                     SpeechToTextSegment,
-                     segment_class(
-                         id=len(segments),
--                        seek=start_time,
-+                        seek=int(start_time),
-                         start=start_time + BASE_OFFSET * start_timestamp,
-                         end=start_time + BASE_OFFSET * end_timestamp,
-                         temperature=request.temperature,
-@@ -464,7 +530,7 @@ class OpenAISpeechToText(OpenAIServing):
- 
-         lora_request = self._maybe_get_adapters(request)
- 
--        engine_inputs, duration_s = await self._preprocess_speech_to_text(
-+        engine_inputs, start_times, duration_s = await self._preprocess_speech_to_text(
-             request=request,
-             audio_data=audio_data,
-             request_id=request_id,
-@@ -586,16 +652,13 @@ class OpenAISpeechToText(OpenAIServing):
-                 )
-             result_generator = merge_async_iterators(*list_result_generator)
-             async for idx, op in result_generator:
--                start_time = (
--                    float(idx * chunk_size_in_s) if chunk_size_in_s is not None else 0.0
--                )
-                 if request.response_format == "verbose_json":
-                     assert op.outputs[0].logprobs
-                     segments: list[SpeechToTextSegment] = self._get_verbose_segments(
-                         tokens=tuple(op.outputs[0].token_ids),
-                         segment_class=segment_class,
-                         request=request,
--                        start_time=start_time,
-+                        start_time=start_times[idx],
-                         log_probs=op.outputs[0].logprobs,
-                     )
- 

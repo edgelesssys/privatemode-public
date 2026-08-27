@@ -38,8 +38,6 @@ const (
 	// to ensure streaming responses are comparatively smooth to directly interacting with the server.
 	// Size was chosen through experimentation with vllm benchmarks.
 	copyBufferSize = 1024 * 8
-	// privateModeEncryptedHeader is the header used to indicate whether a response is encrypted.
-	privateModeEncryptedHeader = "Privatemode-Encrypted"
 )
 
 // ProtocolScheme is the protocol scheme used for the forwarding.
@@ -416,7 +414,6 @@ func HTTPError(w http.ResponseWriter, r *http.Request, code int, msg string, arg
 		w.Header().Set("Content-Type", "application/json")
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set(privateModeEncryptedHeader, "false")
 	w.WriteHeader(code)
 	fmt.Fprint(w, formattedMsg)
 }
@@ -526,21 +523,6 @@ func ReadUnaryResponse(resp *http.Response, maxBytes int64) (*UnaryResponse, err
 	return &UnaryResponse{
 		StatusCode: resp.StatusCode,
 		Header:     http.Header{},
-		Body:       body,
-	}, nil
-}
-
-// ReadUnaryResponseWithHeaders is like [ReadUnaryResponse] but also copies forwardable headers.
-// Prefer [ReadUnaryResponse] for new code.
-func ReadUnaryResponseWithHeaders(resp *http.Response, maxBytes int64) (*UnaryResponse, error) {
-	body, err := io.ReadAll(http.MaxBytesReader(nil, resp.Body, maxBytes))
-	if err != nil {
-		return nil, err
-	}
-
-	return &UnaryResponse{
-		StatusCode: resp.StatusCode,
-		Header:     cloneForwardableHeaders(resp.Header),
 		Body:       body,
 	}, nil
 }

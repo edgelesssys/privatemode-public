@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -41,14 +40,9 @@ func (t *Adapter) HandlesCatchAll() bool {
 }
 
 func (t *Adapter) forwardRequest(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	t.encForwarder.ForwardEncrypted(
 		w, r,
-		func(s cipher.ResponseCipher) forwarder.RequestMutator {
-			return forwarder.WithRawRequestMutation(s.DecryptRequest(ctx), t.log)
-		},
 		forwarder.NoRequestMutation,
-		nil, // No response fields are left in plaintext.
 		func(resp *http.Response) (forwarder.Response, error) {
 			// All responses are unary JSON
 			dsResp, err := forwarder.ReadUnaryResponse(resp, constants.MaxUnaryResponseBodyBytes)

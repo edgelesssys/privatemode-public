@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { PrivatemodeAPIError } from './errors.js';
 import {
   createWasmClient,
   initWasm,
   privatemodeVersion,
   WasmClient,
 } from './wasm.js';
-import { PrivatemodeAPIError } from './errors.js';
 
 const isNode = typeof process !== 'undefined' && !!process.versions?.node;
 const manifest = btoa('{}');

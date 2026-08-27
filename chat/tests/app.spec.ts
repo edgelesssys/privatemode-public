@@ -1,6 +1,6 @@
-import { test, expect } from '@playwright/test';
-import * as web from './helpers/web';
+import { expect, test } from '@playwright/test';
 import { modelConfig } from '../src/lib/models';
+import * as web from './helpers/web';
 
 test('should provide localized system prompts for every model', () => {
   for (const model of Object.values(modelConfig)) {

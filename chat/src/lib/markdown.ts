@@ -1,7 +1,7 @@
-import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import type { Tokens } from 'marked';
 import hljs from 'highlight.js';
+import type { Tokens } from 'marked';
+import { marked } from 'marked';
 
 const renderer = new marked.Renderer();
 

@@ -130,11 +130,13 @@ func (c *Client) prepareChatCompletionsRequest(
 			return "", fmt.Errorf("reading request body: %w", err)
 		}
 
-		var plainData openai.ChatRequestPlainData
-		if err := json.Unmarshal(body, &plainData); err != nil {
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
 			return "", fmt.Errorf("parsing chat request: %w", err)
 		}
-		return plainData.Model, nil
+		return request.Model, nil
 	}
 	mutator := forwarder.RequestMutatorChain(
 		mutators.ShardKeyInjector(c.promptCacheSalt),

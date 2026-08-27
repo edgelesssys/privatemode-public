@@ -17,22 +17,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	// streamedChunk is written by the stub upstream and is expected by the downstream.
+	streamedChunk = "first chunk\n"
+	// lateStreamedChunk is written by the stub upstream after the downstream request was cancelled.
+	lateStreamedChunk = "late chunk\n"
 )
 
 func TestForwardStreaming(t *testing.T) {
 	assert := assert.New(t)
 
-	mutator := &stubMutator{
-		mutateResponse: `"plainText"`,
-	}
-
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 
 		for range 20 {
-			_, _ = w.Write([]byte("data: {\"field\": \"encryptedData\"}\n\n"))
+			_, _ = w.Write([]byte(streamedChunk))
 			time.Sleep(5 * time.Millisecond)
 		}
 	}))
@@ -47,43 +51,33 @@ func TestForwardStreaming(t *testing.T) {
 		resp,
 		req,
 		NoRequestMutation,
-		JSONResponseMapper(mutator.mutate, nil),
+		PassthroughResponseMapper,
 	)
 
 	assert.Equal(http.StatusOK, resp.Code)
 	assert.Equal("text/event-stream", resp.Header().Get("Content-Type"))
-	var expectedResponse string
-	for range 20 {
-		expectedResponse += `data: {"field": "plainText"}` + "\n\n"
-	}
-	assert.Equal(expectedResponse, resp.Body.String())
+	assert.Equal(strings.Repeat(streamedChunk, 20), resp.Body.String())
 }
 
 func TestForwardStreamingAborted(t *testing.T) {
 	assert := assert.New(t)
 
-	mutator := &stubMutator{
-		mutateResponse: `"plainText"`,
-	}
-
-	sentFirstPart := make(chan struct{})
+	sentFirstChunk := make(chan struct{})
 
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 
 		// Send a complete chunk
-		_, _ = w.Write([]byte("data: {\"field\": \"encryptedData\"}\n\n"))
-		w.(http.Flusher).Flush()
-
-		// Start sending a partial chunk
-		_, _ = w.Write([]byte("data: {\"field\": "))
+		_, _ = w.Write([]byte(streamedChunk))
 		w.(http.Flusher).Flush()
 
 		// Wait before cancelling to let the client start reading
 		time.Sleep(10 * time.Millisecond)
-		sentFirstPart <- struct{}{}
+		sentFirstChunk <- struct{}{}
+
+		// Send a second chunk only after the downstream request was cancelled
 		time.Sleep(100 * time.Millisecond)
-		_, _ = w.Write([]byte("\"encryptedData\"}\n\n"))
+		_, _ = w.Write([]byte(lateStreamedChunk))
 	}))
 	defer stubServer.Close()
 
@@ -97,7 +91,7 @@ func TestForwardStreamingAborted(t *testing.T) {
 	resp := httptest.NewRecorder()
 
 	go func() {
-		<-sentFirstPart
+		<-sentFirstChunk
 		cancel()
 	}()
 
@@ -105,24 +99,14 @@ func TestForwardStreamingAborted(t *testing.T) {
 		resp,
 		req,
 		NoRequestMutation,
-		JSONResponseMapper(mutator.mutate, nil),
+		PassthroughResponseMapper,
 	)
 
 	assert.Equal(http.StatusOK, resp.Code)
 	assert.Equal("text/event-stream", resp.Header().Get("Content-Type"))
 
-	// Use bufio.Scanner to verify streaming response is chunked line by line
-	scanner := bufio.NewScanner(resp.Body)
-	chunkCount := 0
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line != "" {
-			fmt.Printf("chunk %d: %s\n", chunkCount, line)
-			chunkCount++
-		}
-	}
-	assert.NoError(scanner.Err())
-	assert.Equal(1, chunkCount, "Should have received 1 complete chunk before abort")
+	// Forwarding stops at the cancellation
+	assert.Equal(streamedChunk, resp.Body.String())
 }
 
 func TestForwardStreamingUpstreamAborts(t *testing.T) {
@@ -150,16 +134,13 @@ func TestForwardNonStreaming(t *testing.T) {
 	assert := assert.New(t)
 
 	mutator := &stubMutator{
-		mutateResponse: `"plainText"`,
+		mutateResponse: `{"field": "plainText"}`,
 	}
 
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		var encryptedData string
-		for range bufio.MaxScanTokenSize {
-			encryptedData += "AB"
-		}
-		_, _ = w.Write(fmt.Appendf(nil, "{\"field\": \"%s\"}", encryptedData))
+		// A body larger than a single read buffer
+		_, _ = w.Write(fmt.Appendf(nil, "{\"field\": %q}", strings.Repeat("AB", bufio.MaxScanTokenSize)))
 	}))
 	defer stubServer.Close()
 
@@ -172,7 +153,7 @@ func TestForwardNonStreaming(t *testing.T) {
 		resp,
 		req,
 		NoRequestMutation,
-		JSONResponseMapper(mutator.mutate, nil),
+		unaryMapper(mutator.mutate),
 	)
 
 	assert.Equal(http.StatusOK, resp.Code)
@@ -202,11 +183,28 @@ func TestForwardMutationError(t *testing.T) {
 		resp,
 		req,
 		NoRequestMutation,
-		JSONResponseMapper(failingMutator.mutate, nil),
+		unaryMapper(failingMutator.mutate),
 	)
 
 	assert := assert.New(t)
 	assert.Equal(http.StatusInternalServerError, resp.Code)
+}
+
+// unaryMapper maps an upstream response to a [UnaryResponse] with its body mutated as a whole.
+func unaryMapper(mutate MutationFunc) ResponseMapper {
+	return func(resp *http.Response) (Response, error) {
+		r, err := ReadUnaryResponse(resp, constants.MaxUnaryResponseBodyBytes)
+		if err != nil {
+			return nil, err
+		}
+		r.Header.Set("Content-Type", resp.Header.Get("Content-Type"))
+		mutated, err := mutate(string(r.Body))
+		if err != nil {
+			return nil, err
+		}
+		r.Body = []byte(mutated)
+		return r, nil
+	}
 }
 
 func TestHTTPError(t *testing.T) {

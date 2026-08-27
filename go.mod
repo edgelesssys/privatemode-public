@@ -20,7 +20,7 @@ require (
 	github.com/beevik/etree v1.7.0
 	github.com/clerk/clerk-sdk-go/v2 v2.7.0
 	github.com/containerd/errdefs v1.0.0
-	github.com/edgelesssys/contrast v1.23.1
+	github.com/edgelesssys/contrast v1.24.0
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-playground/validator/v10 v10.30.3

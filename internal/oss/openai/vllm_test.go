@@ -177,58 +177,50 @@ func TestMediaContentValidator(t *testing.T) {
 
 func TestStreamUsageReportingInjector(t *testing.T) {
 	testCases := map[string]struct {
-		request           EncryptedChatRequest
+		request           ChatRequest
 		wantStreamOptions bool
 	}{
 		"set stream_options for streaming req": {
-			request: EncryptedChatRequest{
-				Messages: "encrypteddata",
-				ChatRequestPlainData: ChatRequestPlainData{
-					Model:     "testmodel",
-					MaxTokens: 1,
-					N:         1,
-					Stream:    true,
-				},
+			request: ChatRequest{
+				Messages:  []Message{{Role: "user", Content: "Hello!"}},
+				Model:     "testmodel",
+				MaxTokens: 1,
+				N:         1,
+				Stream:    true,
 			},
 			wantStreamOptions: true,
 		},
 		"no stream_options for non-streaming req": {
-			request: EncryptedChatRequest{
-				Messages: "encrypteddata",
-				ChatRequestPlainData: ChatRequestPlainData{
-					Model:     "testmodel",
-					MaxTokens: 1,
-					N:         1,
-				},
+			request: ChatRequest{
+				Messages:  []Message{{Role: "user", Content: "Hello!"}},
+				Model:     "testmodel",
+				MaxTokens: 1,
+				N:         1,
 			},
 			wantStreamOptions: false,
 		},
 		"set stream_options even if continuous_usage_stats is set": {
-			request: EncryptedChatRequest{
-				Messages: "encrypteddata",
-				ChatRequestPlainData: ChatRequestPlainData{
-					Model:     "testmodel",
-					MaxTokens: 1,
-					N:         1,
-					Stream:    true,
-					StreamOptions: &StreamOptions{
-						ContinuousUsageStats: true,
-					},
+			request: ChatRequest{
+				Messages:  []Message{{Role: "user", Content: "Hello!"}},
+				Model:     "testmodel",
+				MaxTokens: 1,
+				N:         1,
+				Stream:    true,
+				StreamOptions: &StreamOptions{
+					ContinuousUsageStats: true,
 				},
 			},
 			wantStreamOptions: true,
 		},
 		"set stream_options even if include_usage is set": {
-			request: EncryptedChatRequest{
-				Messages: "encrypteddata",
-				ChatRequestPlainData: ChatRequestPlainData{
-					Model:     "testmodel",
-					MaxTokens: 1,
-					N:         1,
-					Stream:    true,
-					StreamOptions: &StreamOptions{
-						IncludeUsage: true,
-					},
+			request: ChatRequest{
+				Messages:  []Message{{Role: "user", Content: "Hello!"}},
+				Model:     "testmodel",
+				MaxTokens: 1,
+				N:         1,
+				Stream:    true,
+				StreamOptions: &StreamOptions{
+					IncludeUsage: true,
 				},
 			},
 			wantStreamOptions: true,
@@ -256,7 +248,7 @@ func TestStreamUsageReportingInjector(t *testing.T) {
 			after, err := io.ReadAll(req.Body)
 			require.NoError(err)
 
-			var result EncryptedChatRequest
+			var result ChatRequest
 			require.NoError(json.Unmarshal(after, &result))
 
 			assert.Equal(tc.request.Stream, result.Stream)
@@ -276,13 +268,13 @@ func TestStreamUsageReportingInjectorExtraFields(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
 
-	// The original request body, including a custom field not present in the EncryptedRequest struct.
+	// The original request body, including a custom field not present in the ChatRequest struct.
 	body := `{
-		"stream":true, "messages":"encrypted_data", "model":"model", "max_tokens":1, "n":1, "temperature":"encrypted_data", "custom_field": "foo"
+		"stream":true, "messages":[{"role":"user","content":"Hello!"}], "model":"model", "max_tokens":1, "n":1, "temperature":0.5, "custom_field": "foo"
 	}`
 	// The expected modified request body, it should still include the unknown custom field.
 	bodyExpected := `{
-		"stream":true, "messages":"encrypted_data", "model":"model", "max_tokens":1, "n":1, "temperature":"encrypted_data", "custom_field": "foo",
+		"stream":true, "messages":[{"role":"user","content":"Hello!"}], "model":"model", "max_tokens":1, "n":1, "temperature":0.5, "custom_field": "foo",
 		"stream_options": {
 			"include_usage": true,
 			"continuous_usage_stats": true
@@ -301,7 +293,7 @@ func TestStreamUsageReportingInjectorExtraFields(t *testing.T) {
 	after, err := io.ReadAll(req.Body)
 	require.NoError(err)
 
-	var result EncryptedChatRequest
+	var result ChatRequest
 	require.NoError(json.Unmarshal(after, &result))
 	assert.True(result.StreamOptions.IncludeUsage)
 	assert.True(result.StreamOptions.ContinuousUsageStats)

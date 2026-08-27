@@ -1,6 +1,6 @@
+import { playwright } from '@vitest/browser-playwright';
 import { resolve } from 'path';
 import { defineConfig } from 'vitest/config';
-import { playwright } from '@vitest/browser-playwright';
 
 export default defineConfig({
   define: {

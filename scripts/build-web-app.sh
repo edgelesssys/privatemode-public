@@ -17,7 +17,7 @@ for arg in "$@"; do
   esac
 done
 
-env_file="app/web/.env"
+env_file="chat/.env"
 
 # In release mode, we want to overwrite the .env file with the current
 # environment variables to later commit it. Thus, we skip the backup

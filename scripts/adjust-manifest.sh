@@ -31,7 +31,7 @@ yq eval -i '.ReferenceValues.snp[].AllowedChipIDs=[
 if yq -e .ReferenceValues.tdx "$manifest" &>/dev/null; then
   yq eval -i '.ReferenceValues.tdx[].MinTCBEvaluationDataNumber=21' "$manifest"
   yq eval -i '.ReferenceValues.tdx[].MrSeam="ab62561a173acbd18ee50ff37750db44184c6cf5e886df74247cc575e163b04c34b9e18374757c235affa614d4127f6b"' "$manifest"
-  yq eval -i '.ReferenceValues.tdx[].AllowedPIIDs=["0c47f6f7587ddb0cfbb0fed9e4537ea7", "6454aa54f4f7490d2b946b6a3c20742c"]' "$manifest"
+  yq eval -i '.ReferenceValues.tdx[].AllowedPIIDs=["0c47f6f7587ddb0cfbb0fed9e4537ea7", "6454aa54f4f7490d2b946b6a3c20742c", "8aa932ac20e69d905aa0a5deb1666ab7"]' "$manifest"
 fi
 
 ### Policies

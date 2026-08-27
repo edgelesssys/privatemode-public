@@ -1,6 +1,6 @@
 import type { AttachedFile, AttachedImage } from './chatStore';
-import { translate } from './i18n';
 import type { PrivatemodeClient } from './clientStore';
+import { translate } from './i18n';
 
 export const SUPPORTED_IMAGE_TYPES = [
   'image/png',

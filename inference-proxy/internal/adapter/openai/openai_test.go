@@ -282,9 +282,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 		"success": {
 			clientRequest: func() string {
 				res, err := json.Marshal(openai.ChatRequest{
-					ChatRequestPlainData: openai.ChatRequestPlainData{
-						Model: defaultModel,
-					},
+					Model: defaultModel,
 					Messages: []openai.Message{
 						{
 							Role:    "user",
@@ -301,9 +299,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 		"HTTPS image URL accepted": {
 			clientRequest: func() string {
 				res, err := json.Marshal(openai.ChatRequest{
-					ChatRequestPlainData: openai.ChatRequestPlainData{
-						Model: defaultModel,
-					},
+					Model: defaultModel,
 					Messages: []openai.Message{
 						{
 							Role: "user",
@@ -325,9 +321,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 		"data image URL accepted": {
 			clientRequest: func() string {
 				res, err := json.Marshal(openai.ChatRequest{
-					ChatRequestPlainData: openai.ChatRequestPlainData{
-						Model: defaultModel,
-					},
+					Model: defaultModel,
 					Messages: []openai.Message{
 						{
 							Role: "user",
@@ -349,9 +343,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 		"non-HTTPS image URL rejected": {
 			clientRequest: func() string {
 				res, err := json.Marshal(openai.ChatRequest{
-					ChatRequestPlainData: openai.ChatRequestPlainData{
-						Model: defaultModel,
-					},
+					Model: defaultModel,
 					Messages: []openai.Message{
 						{
 							Role: "user",
@@ -509,9 +501,9 @@ func stubRequestMutator(_ *http.Request) error { return nil }
 func TestUsageExtraction(t *testing.T) {
 	clientRequest := func() string {
 		res, err := json.Marshal(openai.ChatRequest{
-			ChatRequestPlainData: openai.ChatRequestPlainData{Model: defaultModel},
-			Messages:             []openai.Message{{Role: "user", Content: "Hello!"}},
-			CacheSalt:            strings.Repeat("a", 32),
+			Model:     defaultModel,
+			Messages:  []openai.Message{{Role: "user", Content: "Hello!"}},
+			CacheSalt: strings.Repeat("a", 32),
 		})
 		require.NoError(t, err)
 		return string(res)
@@ -525,7 +517,7 @@ func TestUsageExtraction(t *testing.T) {
 		"unary": {
 			contentType: "application/json",
 			serverResponse: func() string {
-				res, err := json.Marshal(openai.EncryptedChatResponse{
+				res, err := json.Marshal(openai.ChatResponse{
 					Usage: openai.Usage{
 						PromptTokens:     50,
 						CompletionTokens: 100,
@@ -549,7 +541,7 @@ func TestUsageExtraction(t *testing.T) {
 		"unary with cached tokens": {
 			contentType: "application/json",
 			serverResponse: func() string {
-				res, err := json.Marshal(openai.EncryptedChatResponse{
+				res, err := json.Marshal(openai.ChatResponse{
 					Usage: openai.Usage{
 						PromptTokens:        50,
 						CompletionTokens:    100,
@@ -565,7 +557,7 @@ func TestUsageExtraction(t *testing.T) {
 		"unary with cached tokens exceeding prompt tokens": {
 			contentType: "application/json",
 			serverResponse: func() string {
-				res, err := json.Marshal(openai.EncryptedChatResponse{
+				res, err := json.Marshal(openai.ChatResponse{
 					Usage: openai.Usage{
 						PromptTokens:        50,
 						CompletionTokens:    100,
@@ -637,12 +629,17 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 		},
 		"unary with top-level duration": {
 			contentType:    "application/json",
-			serverResponse: `{"text":"hello","duration":"42.3"}`,
+			serverResponse: `{"text":"hello","duration":42.3}`,
 			wantUsage:      usage.Stats{AudioSeconds: 43},
+		},
+		"unary with fractional usage seconds": {
+			contentType:    "application/json",
+			serverResponse: `{"text":"hello","usage":{"type":"duration","seconds":25.4}}`,
+			wantUsage:      usage.Stats{AudioSeconds: 26},
 		},
 		"unary with duration and usage.seconds uses max": {
 			contentType:    "application/json",
-			serverResponse: `{"text":"hello","duration":"30","usage":{"type":"duration","seconds":25}}`,
+			serverResponse: `{"text":"hello","duration":30,"usage":{"type":"duration","seconds":25}}`,
 			wantUsage:      usage.Stats{AudioSeconds: 30},
 		},
 		"streaming whisper": {
@@ -709,6 +706,91 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 				report, ok := reporter.LatestReport()
 				return ok && report.Stats == tc.wantUsage
 			}, time.Second, 10*time.Millisecond)
+		})
+	}
+}
+
+func TestTranscriptionDurationCompat(t *testing.T) {
+	const numberResponse = `{"text":"hello","duration":42.3}`
+
+	testCases := map[string]struct {
+		clientVersion  string
+		serverResponse string
+		wantResponse   string
+	}{
+		"client without version header gets the string": {
+			serverResponse: numberResponse,
+			wantResponse:   `{"text":"hello","duration":"42.3"}`,
+		},
+		"old client gets the string": {
+			clientVersion:  "v1.46.0",
+			serverResponse: numberResponse,
+			wantResponse:   `{"text":"hello","duration":"42.3"}`,
+		},
+		"client of the announcing release gets the string": {
+			clientVersion:  "v1.54.0",
+			serverResponse: numberResponse,
+			wantResponse:   `{"text":"hello","duration":"42.3"}`,
+		},
+		"pre-release client of the announcing release gets the string": {
+			clientVersion:  "v1.54.0-pre.0.20260824153000-abcdef123456",
+			serverResponse: numberResponse,
+			wantResponse:   `{"text":"hello","duration":"42.3"}`,
+		},
+		"client after the announcing release gets the number": {
+			clientVersion:  "v1.55.0",
+			serverResponse: numberResponse,
+			wantResponse:   numberResponse,
+		},
+		"integer duration keeps its digits": {
+			clientVersion:  "v1.54.0",
+			serverResponse: `{"text":"hello","duration":42}`,
+			wantResponse:   `{"text":"hello","duration":"42"}`,
+		},
+		"non-numeric duration is left alone": {
+			clientVersion:  "v1.54.0",
+			serverResponse: `{"text":"hello","duration":"42.3"}`,
+			wantResponse:   `{"text":"hello","duration":"42.3"}`,
+		},
+		"response without duration is unchanged": {
+			clientVersion:  "v1.54.0",
+			serverResponse: `{"text":"hello","usage":{"type":"duration","seconds":25}}`,
+			wantResponse:   `{"text":"hello","usage":{"type":"duration","seconds":25}}`,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.serverResponse))
+			}))
+			defer srv.Close()
+
+			ocspStatus, err := json.Marshal([]ocsp.StatusInfo{{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}})
+			require.NoError(t, err)
+			ocspFile := filepath.Join(t.TempDir(), "ocsp.json")
+			require.NoError(t, os.WriteFile(ocspFile, ocspStatus, 0o644))
+
+			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default())
+			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: fwd}, &adaptertest.UsageReporter{}, slog.Default())
+			require.NoError(t, err)
+
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			require.NoError(t, writer.WriteField("model", defaultModel))
+			require.NoError(t, writer.Close())
+
+			ctx := requestid.WithContext(t.Context(), "test-request-id")
+			request := httptest.NewRequestWithContext(ctx, http.MethodPost, openai.TranscriptionsEndpoint, &body)
+			request.Header.Set("Content-Type", writer.FormDataContentType())
+			request.Header.Set(constants.PrivatemodeVersionHeader, tc.clientVersion)
+			responseRecorder := httptest.NewRecorder()
+
+			adapter.forwardTranscriptionsRequest(responseRecorder, request)
+
+			assert.Equal(t, http.StatusOK, responseRecorder.Code)
+			assert.Equal(t, tc.wantResponse, responseRecorder.Body.String())
 		})
 	}
 }

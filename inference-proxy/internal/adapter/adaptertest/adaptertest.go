@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/usagecollector"
@@ -54,9 +53,7 @@ func (f EncForwarder) ForwardPlain(
 func (f EncForwarder) ForwardEncrypted(
 	w http.ResponseWriter,
 	r *http.Request,
-	_ func(cipher.ResponseCipher) forwarder.RequestMutator,
 	postDecryptMutator forwarder.RequestMutator,
-	_ forwarder.FieldSelector,
 	preEncryptMapper forwarder.ResponseMapper,
 ) {
 	if f.Inner != nil {

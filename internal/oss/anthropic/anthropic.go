@@ -1,7 +1,7 @@
 // Copyright (c) Edgeless Systems GmbH
 // SPDX-License-Identifier: MIT
 
-// Package anthropic provides type definitions and field selectors for the Anthropic Messages API.
+// Package anthropic provides type definitions for the Anthropic Messages API.
 // The marshaled value of the types defined here should never be returned to
 // a client, or passed to the model backend.
 // This is important to avoid dropping unknown fields sent by the client/model,
@@ -28,34 +28,12 @@ const (
 	MessagesEndpoint = "/v1/messages"
 )
 
-// PlainMessagesRequestFields is a field selector for all fields in an Anthropic messages request that are NOT encrypted.
-// All other fields (messages, system, tools, etc.) will be encrypted.
-var PlainMessagesRequestFields = forwarder.FieldSelector{
-	{"model"},
-	{"stream"},
-}
-
-// PlainMessagesResponseFields is a field selector for all fields in an Anthropic messages response that are NOT encrypted.
-// All other fields (content, etc.) will be encrypted.
-// The "type" field is included to allow the apigateway to identify message_delta events for token tracking.
-var PlainMessagesResponseFields = forwarder.FieldSelector{
-	{"id"},
-	{"type"},
-	{"usage"},
-}
-
-// MessagesRequestPlainData contains fields that are not encrypted for [MessagesRequest].
-// This is used by the apigateway to parse the model name from requests without decrypting the full body.
-type MessagesRequestPlainData struct {
-	Model  string `json:"model"`
-	Stream bool   `json:"stream,omitzero"`
-}
-
 // MessagesRequest is the request structure for an Anthropic messages call.
 //
 // Don't send the marshalled type to clients/servers. Read package docs for more info.
 type MessagesRequest struct {
-	MessagesRequestPlainData
+	Model     string          `json:"model"`
+	Stream    bool            `json:"stream,omitzero"`
 	MaxTokens int             `json:"max_tokens,omitzero"`
 	Messages  []Message       `json:"messages"`
 	System    string          `json:"system,omitempty"`
@@ -134,7 +112,7 @@ func MediaContentValidator(log *slog.Logger) forwarder.RequestMutator {
 		return httpBody, nil
 	}
 
-	return forwarder.WithRawRequestMutation(validate, log)
+	return forwarder.WithRequestMutation(validate, log)
 }
 
 func validateStringQueryResults(document string, queries []string, validate func(string) error) error {

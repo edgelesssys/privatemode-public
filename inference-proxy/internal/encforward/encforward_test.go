@@ -3,14 +3,13 @@ package encforward
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -18,62 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestForwardEncryptedLegacy(t *testing.T) {
-	cases := map[string]forwarder.Response{
-		"unary": &forwarder.UnaryResponse{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{},
-			Body:       []byte(`{"data":"plain"}`),
-		},
-		"streaming": &forwarder.StreamingResponse{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{},
-			Body:       io.NopCloser(strings.NewReader(`{"data":"plain"}`)),
-		},
-	}
-
-	for name, mappedResponse := range cases {
-		t.Run(name, func(t *testing.T) {
-			require := require.New(t)
-			assert := assert.New(t)
-
-			plainForwarder := &fakePlainForwarder{}
-			f := New(plainForwarder, &fakeCipherCreator{})
-
-			decryptCalled := false
-			legacyDecrypt := func(cipher.ResponseCipher) forwarder.RequestMutator {
-				return func(*http.Request) error {
-					decryptCalled = true
-					return nil
-				}
-			}
-			postDecryptCalled := false
-			postDecrypt := func(*http.Request) error {
-				postDecryptCalled = true
-				return nil
-			}
-
-			r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", http.NoBody)
-			f.ForwardEncrypted(httptest.NewRecorder(), r, legacyDecrypt, postDecrypt, nil,
-				func(*http.Response) (forwarder.Response, error) { return mappedResponse, nil })
-
-			// Run request mutator, as [forwarder.Forwarder] would
-			require.NoError(plainForwarder.reqMutator(r))
-			assert.True(decryptCalled)
-			assert.True(postDecryptCalled)
-
-			// Run response mapper, as [forwarder.Forwarder] would
-			out, err := plainForwarder.mapper(&http.Response{Header: http.Header{}})
-			require.NoError(err)
-			require.IsType(mappedResponse, out)
-			body, err := io.ReadAll(responseBody(t, out))
-			require.NoError(err)
-			assert.Contains(string(body), "ENCRYPTED")
-		})
-	}
-}
-
-func TestForwardEncryptedFBE(t *testing.T) {
+func TestForwardEncrypted(t *testing.T) {
 	unaryResponse := []byte(`{"answer":42}`)
 	sseResponse := []byte("data: hello\n\ndata: world\n\n")
 	cases := map[string]struct {
@@ -111,7 +55,7 @@ func TestForwardEncryptedFBE(t *testing.T) {
 			r, client := buildEncryptedRequest(t, secret, `{"model":"gpt"}`)
 
 			plainForwarder := &fakePlainForwarder{}
-			f := New(plainForwarder, &fakeCipherCreator{secret: secret})
+			f := New(plainForwarder, &fakeSecretGetter{secret: secret})
 
 			postDecryptCalled := false
 			postDecrypt := func(*http.Request) error {
@@ -123,18 +67,7 @@ func TestForwardEncryptedFBE(t *testing.T) {
 				return tc.mappedResponse, nil
 			}
 
-			failIfCalled := func(cipher.ResponseCipher) forwarder.RequestMutator {
-				t.Fatal("legacy scheme selected; FBE path expected")
-				return nil
-			}
-
-			f.ForwardEncrypted(
-				httptest.NewRecorder(), r,
-				failIfCalled, // legacyDecryptMutator should not be called
-				postDecrypt,
-				nil,
-				preEncrypt,
-			)
+			f.ForwardEncrypted(httptest.NewRecorder(), r, postDecrypt, preEncrypt)
 			require.True(plainForwarder.called)
 
 			// Run request mutator, as [forwarder.Forwarder] would
@@ -178,7 +111,7 @@ func TestForwardEncryptedValidation(t *testing.T) {
 		"secret lookup fails": {
 			encrypted:    true,
 			secretID:     "some-id",
-			secretErr:    fmt.Errorf("%s %q", constants.ErrorNoSecretForID, "some-id"),
+			secretErr:    secrets.ErrSecretNotFound,
 			expectedBody: constants.ErrorNoSecretForID,
 		},
 	}
@@ -188,7 +121,7 @@ func TestForwardEncryptedValidation(t *testing.T) {
 			assert := assert.New(t)
 
 			plainForwarder := &fakePlainForwarder{}
-			f := New(plainForwarder, &fakeCipherCreator{secretErr: tc.secretErr})
+			f := New(plainForwarder, &fakeSecretGetter{secretErr: tc.secretErr})
 
 			r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", http.NoBody)
 			r.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
@@ -202,9 +135,7 @@ func TestForwardEncryptedValidation(t *testing.T) {
 			w := httptest.NewRecorder()
 			f.ForwardEncrypted(
 				w, r,
-				func(cipher.ResponseCipher) forwarder.RequestMutator { return forwarder.NoRequestMutation },
 				forwarder.NoRequestMutation,
-				nil,
 				func(*http.Response) (forwarder.Response, error) { return nil, nil },
 			)
 
@@ -263,26 +194,11 @@ func (f *fakePlainForwarder) Forward(
 	f.mapper = mapper
 }
 
-type fakeCipherCreator struct {
+type fakeSecretGetter struct {
 	secret    []byte
 	secretErr error
 }
 
-func (f *fakeCipherCreator) NewResponseCipher() cipher.ResponseCipher {
-	return markerCipher{}
-}
-
-func (f *fakeCipherCreator) Secret(context.Context, string) ([]byte, error) {
+func (f *fakeSecretGetter) Get(context.Context, string) ([]byte, error) {
 	return f.secret, f.secretErr
-}
-
-// markerCipher encrypts every field to the constant "ENCRYPTED" and decrypts to the identity.
-type markerCipher struct{}
-
-func (markerCipher) DecryptRequest(context.Context) func(string) (string, error) {
-	return func(in string) (string, error) { return in, nil }
-}
-
-func (markerCipher) EncryptResponse(context.Context) func(string) (string, error) {
-	return func(string) (string, error) { return `"ENCRYPTED"`, nil }
 }

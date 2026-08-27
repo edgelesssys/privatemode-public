@@ -1,7 +1,7 @@
-import { writable, derived, get } from 'svelte/store';
 import type { Clerk as ClerkType } from '@clerk/clerk-js';
 import { ui as clerkUI } from '@clerk/ui';
 import type { AuthCredential } from 'privatemode-ai';
+import { derived, get, writable } from 'svelte/store';
 
 export interface OrgMembership {
   id: string;

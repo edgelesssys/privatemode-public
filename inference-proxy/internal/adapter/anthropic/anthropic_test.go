@@ -38,9 +38,7 @@ func TestForwardMessagesRequest(t *testing.T) {
 		"success": {
 			clientRequest: func() string {
 				res, err := json.Marshal(anthropic.MessagesRequest{
-					MessagesRequestPlainData: anthropic.MessagesRequestPlainData{
-						Model: defaultModel,
-					},
+					Model:     defaultModel,
 					MaxTokens: 1024,
 					Messages: []anthropic.Message{
 						{Role: "user", Content: "Hello, Claude!"},
@@ -70,10 +68,8 @@ func TestForwardMessagesRequest(t *testing.T) {
 		"with streaming": {
 			clientRequest: func() string {
 				res, err := json.Marshal(anthropic.MessagesRequest{
-					MessagesRequestPlainData: anthropic.MessagesRequestPlainData{
-						Model:  defaultModel,
-						Stream: true,
-					},
+					Model:     defaultModel,
+					Stream:    true,
 					MaxTokens: 1024,
 					Messages: []anthropic.Message{
 						{Role: "user", Content: "Hello, Claude!"},
@@ -98,9 +94,7 @@ func TestForwardMessagesRequest(t *testing.T) {
 		"with system prompt": {
 			clientRequest: func() string {
 				res, err := json.Marshal(anthropic.MessagesRequest{
-					MessagesRequestPlainData: anthropic.MessagesRequestPlainData{
-						Model: defaultModel,
-					},
+					Model:     defaultModel,
 					MaxTokens: 1024,
 					System:    "You are a helpful assistant.",
 					Messages: []anthropic.Message{
@@ -218,10 +212,10 @@ func TestRegisterRoutes(t *testing.T) {
 func TestUsageExtraction(t *testing.T) {
 	clientRequest := func() string {
 		res, err := json.Marshal(anthropic.MessagesRequest{
-			MessagesRequestPlainData: anthropic.MessagesRequestPlainData{Model: defaultModel},
-			MaxTokens:                1024,
-			Messages:                 []anthropic.Message{{Role: "user", Content: "Hello!"}},
-			CacheSalt:                testCacheSalt,
+			Model:     defaultModel,
+			MaxTokens: 1024,
+			Messages:  []anthropic.Message{{Role: "user", Content: "Hello!"}},
+			CacheSalt: testCacheSalt,
 		})
 		require.NoError(t, err)
 		return string(res)

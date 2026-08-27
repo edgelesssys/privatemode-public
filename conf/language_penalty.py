@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import math
+import os
 from typing import TYPE_CHECKING, Any
 
 import regex as re
@@ -18,11 +20,37 @@ if TYPE_CHECKING:
 # INFO records would be dropped.
 logger = init_logger("vllm." + __name__)
 
-# -3 is insufficient for Kimi
-LANGUAGE_LOGIT_BIAS = -5.0
+# How much a model drifts differs per model, so the bias is a deployment setting
+# with no default: every model enabling this processor states its own value
+# (see extraEnv in values.yaml).
+LOGIT_BIAS_ENV = "LANGUAGE_PENALTY_LOGIT_BIAS"
 _HAN_RE = re.compile(r"\p{Han}")
 _KANA_RE = re.compile(r"[\p{Hiragana}\p{Katakana}]")
-_LOGIT_BIAS_CACHE: dict[tuple[str, str, str | None, bool, int], torch.Tensor] = {}
+_LOGIT_BIAS_CACHE: dict[
+    tuple[str, str, str | None, bool, int, float], torch.Tensor
+] = {}
+
+
+def configured_logit_bias() -> float:
+    """Bias added to Han-only token logits, read from the environment.
+
+    Required: a missing, malformed or not-negative-finite value raises instead
+    of falling back to some assumed bias, so a deployment mistake fails at
+    engine start rather than silently serving the model unpenalized. Called
+    once per processor, not per request.
+    """
+    raw = os.environ.get(LOGIT_BIAS_ENV)
+    if raw is None or not raw.strip():
+        raise ValueError(f"{LOGIT_BIAS_ENV} is required but unset")
+    try:
+        bias = float(raw)
+    except ValueError:
+        raise ValueError(f"{LOGIT_BIAS_ENV}={raw!r} is not a number") from None
+    # float() accepts "nan" and "inf": nan would pass a plain `>= 0.0` check and
+    # poison every penalized logit, so require a finite value explicitly.
+    if not math.isfinite(bias) or bias >= 0.0:
+        raise ValueError(f"{LOGIT_BIAS_ENV}={raw!r} must be a finite negative number")
+    return bias
 
 
 def _should_penalize_token(decoded: str) -> bool:
@@ -33,7 +61,9 @@ def _should_penalize_token(decoded: str) -> bool:
     return not _KANA_RE.search(decoded)
 
 
-def compute_bias_from_tokenizer(tokenizer: Any, vocab_size: int) -> torch.Tensor:
+def compute_bias_from_tokenizer(
+    tokenizer: Any, vocab_size: int, bias: float
+) -> torch.Tensor:
     logit_bias = torch.zeros(vocab_size, dtype=torch.float32)
     max_token_id = getattr(tokenizer, "max_token_id", None)
     upper_bound = vocab_size
@@ -51,11 +81,13 @@ def compute_bias_from_tokenizer(tokenizer: Any, vocab_size: int) -> torch.Tensor
         except Exception:
             continue
         if _should_penalize_token(decoded):
-            logit_bias[token_id] = LANGUAGE_LOGIT_BIAS
+            logit_bias[token_id] = bias
     return logit_bias
 
 
-def _get_logit_bias_cpu(model_config: "ModelConfig", vocab_size: int) -> torch.Tensor:
+def _get_logit_bias_cpu(
+    model_config: "ModelConfig", vocab_size: int, bias: float
+) -> torch.Tensor:
     from vllm.tokenizers import cached_tokenizer_from_config
 
     tokenizer_name = model_config.tokenizer or model_config.model
@@ -65,18 +97,20 @@ def _get_logit_bias_cpu(model_config: "ModelConfig", vocab_size: int) -> torch.T
         model_config.tokenizer_revision,
         model_config.trust_remote_code,
         vocab_size,
+        bias,
     )
     if cache_key in _LOGIT_BIAS_CACHE:
         return _LOGIT_BIAS_CACHE[cache_key]
     tokenizer = cached_tokenizer_from_config(model_config)
     if tokenizer is None:
         raise ValueError("Language penalty requires tokenizer initialization.")
-    logit_bias = compute_bias_from_tokenizer(tokenizer, vocab_size)
-    # One-time (per model/vocab) confirmation that the penalty is active.
+    logit_bias = compute_bias_from_tokenizer(tokenizer, vocab_size, bias)
+    # One-time (per model/vocab) confirmation that the penalty is active, with
+    # the effective bias so the configured value is visible in the log.
     logger.info(
         "Language penalty active: %d tokens biased by %s for %s (vocab_size=%d).",
         int(torch.count_nonzero(logit_bias).item()),
-        LANGUAGE_LOGIT_BIAS,
+        bias,
         tokenizer_name,
         vocab_size,
     )
@@ -85,9 +119,11 @@ def _get_logit_bias_cpu(model_config: "ModelConfig", vocab_size: int) -> torch.T
 
 
 def get_logit_bias(
-    model_config: "ModelConfig", vocab_size: int, device: torch.device
+    model_config: "ModelConfig", vocab_size: int, device: torch.device, bias: float
 ) -> torch.Tensor:
-    logit_bias = _get_logit_bias_cpu(model_config=model_config, vocab_size=vocab_size)
+    logit_bias = _get_logit_bias_cpu(
+        model_config=model_config, vocab_size=vocab_size, bias=bias
+    )
     return logit_bias.to(device=device, non_blocking=True)
 
 
@@ -103,6 +139,8 @@ class LanguagePenaltyLogitsProcessor(LogitsProcessor):
         del device
         del is_pin_memory
         self.model_config = vllm_config.model_config
+        # Resolved at engine start so a bad override crashes the workload early.
+        self.bias = configured_logit_bias()
         self.logit_bias: torch.Tensor | None = None
 
     def apply(self, logits: torch.Tensor) -> torch.Tensor:
@@ -129,5 +167,6 @@ class LanguagePenaltyLogitsProcessor(LogitsProcessor):
                 model_config=self.model_config,
                 vocab_size=logits.shape[-1],
                 device=logits.device,
+                bias=self.bias,
             )
         return self.logit_bias

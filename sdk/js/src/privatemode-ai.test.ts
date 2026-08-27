@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PrivatemodeCore, type AuthProvider } from './privatemode-ai.js';
 import * as wasm from './wasm.js';
 

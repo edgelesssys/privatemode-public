@@ -19,12 +19,16 @@ import (
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
-	crypto "github.com/edgelesssys/continuum/internal/oss/crypto"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/usagecollector"
 	"github.com/stretchr/testify/require"
 )
+
+// secretID is the inference secret ID used by the benchmark setup.
+const secretID = "test"
 
 func BenchmarkServeOpenAI(b *testing.B) {
 	benchmarkServe(b, adapter.InferenceAPIOpenAI)
@@ -41,7 +45,7 @@ func benchmarkServe(b *testing.B, apiType string) {
 		_, _ = io.Copy(w, r.Body)
 	}))
 	defer echoServer.Close()
-	payload, server := setup(b, apiType, echoServer.Listener.Addr().String(), log)
+	secret, payload, server := setup(b, apiType, echoServer.Listener.Addr().String(), log)
 
 	proxyLis, err := net.Listen("tcp", "")
 	require.NoError(err)
@@ -85,6 +89,11 @@ func benchmarkServe(b *testing.B, apiType string) {
 			for pb.Next() {
 				req, err := http.NewRequestWithContext(b.Context(), http.MethodPost, endpoint, bytes.NewBuffer(payload))
 				require.NoError(err)
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set(constants.PrivatemodeSecretIDHeader, secretID)
+				exchange, err := encbody.InitializeClientExchange(secret)
+				require.NoError(err)
+				require.NoError(exchange.EncryptRequest(req))
 
 				resp, err := http.DefaultClient.Do(req)
 				require.NoError(err)
@@ -106,22 +115,19 @@ func benchmarkServe(b *testing.B, apiType string) {
 	})
 }
 
-func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]byte, *Server) {
+func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) (secret, payload []byte, server *Server) {
 	require := require.New(b)
 	fw := forwarder.New(http.DefaultClient, workloadEndpoint, forwarder.SchemeHTTP, log)
 
-	secret := []byte(strings.Repeat("a", 32))
+	secret = []byte(strings.Repeat("a", 32))
 	secrets := secrets.New(stubSecretGetter{})
-	secrets.Reset(map[string][]byte{"test": secret})
-	requestCipher, err := crypto.NewRequestCipher(secret, "test")
-	require.NoError(err)
+	secrets.Reset(map[string][]byte{secretID: secret})
 
-	cacheSalt, err := requestCipher.Encrypt(fmt.Sprintf("%q", strings.Repeat("a", 32)))
-	require.NoError(err)
-	m, err := requestCipher.Encrypt(`[{"role": "system","content": "You are a helpful assistant."},{"role": "user","content": "Hello!"}]`)
-	require.NoError(err)
-
-	payload := fmt.Sprintf(`{"model": "model", "messages": %s, "cache_salt": %s}`, m, cacheSalt)
+	payload = fmt.Appendf(
+		nil,
+		`{"model": "model", "messages": [{"role": "system","content": "You are a helpful assistant."},{"role": "user","content": "Hello!"}], "cache_salt": %q}`,
+		strings.Repeat("a", 32),
+	)
 
 	ocspStatus, err := json.Marshal([]ocsp.StatusInfo{{GPU: ocsp.StatusGood, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}})
 	require.NoError(err)
@@ -131,9 +137,7 @@ func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) ([]
 	adapters, err := adapter.New([]string{apiType}, []string{"generate"}, secrets, ocspFile, fw, &stubUsageReporter{}, log)
 	require.NoError(err)
 
-	server := New(adapters, nil, log)
-
-	return []byte(payload), server
+	return secret, payload, New(adapters, nil, log)
 }
 
 type stubSecretGetter struct{}

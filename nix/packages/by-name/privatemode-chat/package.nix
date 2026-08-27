@@ -12,16 +12,16 @@ stdenv.mkDerivation (finalAttrs: {
   version = lib.continuumVersion;
 
   src = lib.continuumRepoRootSrc [
-    "app/web"
+    "chat"
     "sdk/js"
   ];
-  pnpmRoot = "app/web";
+  pnpmRoot = "chat";
 
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) pname version src;
     fetcherVersion = 4;
-    sourceRoot = "${finalAttrs.src.name}/app/web";
-    hash = "sha256-pktwXyP2PBoVrjSOC9w9/MQTgHsax+LVCOwsIZ2hbpc=";
+    sourceRoot = "${finalAttrs.src.name}/chat";
+    hash = "sha256-3avJooUQw42JAkJkdN3vadoBw9nxEf1Yb1kZWC+AzY0=";
   };
 
   nativeBuildInputs = [
@@ -36,21 +36,21 @@ stdenv.mkDerivation (finalAttrs: {
     # Hacky way to pass the VITE_ environment variables into Nix.
     # TODO(msanft): Find a cleaner way to do this.
     set -a
-    source app/web/.env
+    source chat/.env
     set +a
 
-    rm app/web/static/privatemode.wasm
+    rm chat/static/privatemode.wasm
     if [[ "''${LOCAL_BUILD:-}" == "true" ]]; then
-      cp ${sdk.wasm-internal}/bin/privatemode.wasm app/web/static/privatemode.wasm
+      cp ${sdk.wasm-internal}/bin/privatemode.wasm chat/static/privatemode.wasm
     fi
 
     # pnpmConfigHook breaks the symlink, so we need to create it ourselves.
     # Vite needs package.json (for exports/main) and dist/ (built output).
-    rm app/web/node_modules/privatemode-ai
-    ln -s ../../../sdk/js app/web/node_modules/privatemode-ai
-    ln -s ${sdk.js}/share/dist app/web/node_modules/privatemode-ai/dist
+    rm chat/node_modules/privatemode-ai
+    ln -s ../../sdk/js chat/node_modules/privatemode-ai
+    ln -s ${sdk.js}/share/dist chat/node_modules/privatemode-ai/dist
 
-    pnpm --dir app/web run build
+    pnpm --dir chat run build
 
     runHook postBuild
   '';
@@ -59,7 +59,7 @@ stdenv.mkDerivation (finalAttrs: {
     runHook preInstall
 
     mkdir -p $out/share/
-    cp -r app/web/build/. $out/share/
+    cp -r chat/build/. $out/share/
 
     runHook postInstall
   '';

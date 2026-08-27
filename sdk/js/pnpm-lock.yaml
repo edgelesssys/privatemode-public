@@ -26,6 +26,9 @@ importers:
       openai:
         specifier: 7.2.0
         version: 7.2.0(ws@8.19.0)
+      playwright:
+        specifier: 1.58.2
+        version: 1.58.2
       typescript:
         specifier: 6.0.3
         version: 6.0.3

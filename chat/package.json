@@ -19,16 +19,16 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@playwright/test": "^1.60.0",
-    "@privatemode/design": "link:../../design/components",
+    "@privatemode/design": "link:../design/components",
     "@sveltejs/adapter-static": "3.0.10",
-    "@sveltejs/kit": "2.70.2",
+    "@sveltejs/kit": "2.70.3",
     "@sveltejs/vite-plugin-svelte": "7.3.0",
     "@types/node": "^24.12.4",
     "eslint": "10.8.1",
     "eslint-plugin-svelte": "3.22.0",
     "globals": "17.9.0",
     "lucide-svelte": "1.0.1",
-    "svelte": "5.56.8",
+    "svelte": "5.56.10",
     "svelte-check": "4.7.5",
     "typescript": "6.0.3",
     "typescript-eslint": "8.67.0",
@@ -42,6 +42,6 @@
     "highlight.js": "11.11.1",
     "marked": "^17.0.6",
     "openai": "7.4.0",
-    "privatemode-ai": "link:../../sdk/js"
+    "privatemode-ai": "link:../sdk/js"
   }
 }

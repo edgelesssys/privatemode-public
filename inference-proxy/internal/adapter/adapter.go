@@ -11,7 +11,6 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/openai"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/unstructured"
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -41,7 +40,7 @@ func New(
 	apiTypes []string, workloadTasks []string, secrets *secrets.Secrets, ocspStatusFile string,
 	plainForwarder plainForwarder, reporter inference.UsageReporter, log *slog.Logger,
 ) ([]InferenceAdapter, error) {
-	encForwarder := encforward.New(plainForwarder, cipher.New(secrets))
+	encForwarder := encforward.New(plainForwarder, secrets)
 	var adapters []InferenceAdapter
 	for _, apiType := range apiTypes {
 		var adapter InferenceAdapter

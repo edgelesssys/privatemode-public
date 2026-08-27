@@ -607,9 +607,7 @@ func TestTargetModelHeader(t *testing.T) {
 		"chat completions": {
 			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
 				return prepareJSONRequest(t.Context(), require, openai.ChatCompletionsEndpoint, openai.ChatRequest{
-					ChatRequestPlainData: openai.ChatRequestPlainData{
-						Model: randomModel,
-					},
+					Model: randomModel,
 					Messages: []openai.Message{
 						{
 							Role:    "user",
@@ -623,9 +621,7 @@ func TestTargetModelHeader(t *testing.T) {
 		"legacy (chat) completions": {
 			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
 				return prepareJSONRequest(t.Context(), require, openai.LegacyCompletionsEndpoint, openai.ChatRequest{
-					ChatRequestPlainData: openai.ChatRequestPlainData{
-						Model: randomModel,
-					},
+					Model: randomModel,
 					Messages: []openai.Message{
 						{
 							Role:    "user",
@@ -639,9 +635,7 @@ func TestTargetModelHeader(t *testing.T) {
 		"embeddings": {
 			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
 				return prepareJSONRequest(t.Context(), require, openai.EmbeddingsEndpoint, openai.EmbeddingsRequest{
-					EmbeddingsRequestPlainData: openai.EmbeddingsRequestPlainData{
-						Model: randomModel,
-					},
+					Model: randomModel,
 					Input: []string{"Hello"},
 				})
 			},
@@ -671,9 +665,7 @@ func TestTargetModelHeader(t *testing.T) {
 		"anthropic messages": {
 			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
 				return prepareJSONRequest(t.Context(), require, anthropic.MessagesEndpoint, anthropic.MessagesRequest{
-					MessagesRequestPlainData: anthropic.MessagesRequestPlainData{
-						Model: randomModel,
-					},
+					Model: randomModel,
 					Messages: []anthropic.Message{
 						{
 							Role:    "user",
@@ -785,9 +777,7 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 
 func prepareChatRequest(ctx context.Context, require *require.Assertions, content any, tools []any, cacheSalt string) *http.Request {
 	return prepareJSONRequest(ctx, require, openai.ChatCompletionsEndpoint, openai.ChatRequest{
-		ChatRequestPlainData: openai.ChatRequestPlainData{
-			Model: "gpt-oss-120b",
-		},
+		Model: "gpt-oss-120b",
 		Messages: []openai.Message{
 			{
 				Role:    "user",

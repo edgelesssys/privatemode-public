@@ -5,8 +5,8 @@
 //
 // This only works with production builds to to Vite's HMR in dev mode.
 
-import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Plugin, ResolvedConfig } from 'vite';
 

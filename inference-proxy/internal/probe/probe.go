@@ -146,9 +146,9 @@ func deriveProbeKind(tasks []string) string {
 
 func buildGenerateRequest(ctx context.Context, baseURL, modelName, cacheSalt string) (*http.Request, error) {
 	body, err := json.Marshal(openai.ChatRequest{
-		ChatRequestPlainData: openai.ChatRequestPlainData{Model: modelName, N: 1, MaxCompletionTokens: 10},
-		Messages:             []openai.Message{{Role: "user", Content: "heartbeat"}},
-		CacheSalt:            cacheSalt,
+		Model: modelName, N: 1, MaxCompletionTokens: 10,
+		Messages:  []openai.Message{{Role: "user", Content: "heartbeat"}},
+		CacheSalt: cacheSalt,
 	})
 	if err != nil {
 		return nil, err
@@ -163,7 +163,7 @@ func buildGenerateRequest(ctx context.Context, baseURL, modelName, cacheSalt str
 
 func buildEmbedRequest(ctx context.Context, baseURL, modelName string) (*http.Request, error) {
 	body, err := json.Marshal(openai.EmbeddingsRequest{
-		EmbeddingsRequestPlainData: openai.EmbeddingsRequestPlainData{Model: modelName},
+		Model: modelName,
 		Input: []string{
 			"Instruct: Retrieve semantically similar text.",
 			"heartbeat 1",

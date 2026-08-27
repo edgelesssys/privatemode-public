@@ -68,11 +68,13 @@ func (c *Client) prepareEmbeddingsRequest(
 			return "", fmt.Errorf("reading request body: %w", err)
 		}
 
-		var plainData openai.EmbeddingsRequestPlainData
-		if err := json.Unmarshal(body, &plainData); err != nil {
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.Unmarshal(body, &request); err != nil {
 			return "", fmt.Errorf("parsing embeddings request: %w", err)
 		}
-		return plainData.Model, nil
+		return request.Model, nil
 	}
 	if err := mutators.ModelHeaderInjector(modelExtractor)(req); err != nil {
 		return nil, fmt.Errorf("mutating request: %w", err)

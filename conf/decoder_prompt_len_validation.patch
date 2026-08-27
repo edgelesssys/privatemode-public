@@ -1,8 +1,8 @@
 diff --git a/vllm/v1/engine/input_processor.py b/vllm/v1/engine/input_processor.py
-index 10a6329f5..3c6e53dc3 100644
+index 1fe460b54a..0c39eee848 100644
 --- a/vllm/v1/engine/input_processor.py
 +++ b/vllm/v1/engine/input_processor.py
-@@ -389,7 +389,7 @@ class InputProcessor:
+@@ -398,7 +398,7 @@ class InputProcessor:
          prompt_len: int,
          prompt_type: Literal["encoder", "decoder"],
      ):

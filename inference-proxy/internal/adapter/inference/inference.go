@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
@@ -298,9 +297,7 @@ func (a *Adapter) reportStreamingUsage(
 func (a *Adapter) ForwardEncrypted(
 	w http.ResponseWriter,
 	r *http.Request,
-	legacyDecryptMutator func(cipher.ResponseCipher) forwarder.RequestMutator,
 	postDecryptMutator forwarder.RequestMutator,
-	legacyPlainResponseFields forwarder.FieldSelector,
 	preEncryptMutateUnary MutationFunc,
 	preEncryptMutateStreaming MutationFunc,
 	extractUnaryUsage UsageExtractor,
@@ -320,7 +317,7 @@ func (a *Adapter) ForwardEncrypted(
 		return a.mapPlaintextUnaryResponse(ctx, resp, preEncryptMutateUnary, extractUnaryUsage, uc)
 	}
 
-	a.EncForwarder.ForwardEncrypted(w, r, legacyDecryptMutator, postDecryptMutator, legacyPlainResponseFields, responseMapper)
+	a.EncForwarder.ForwardEncrypted(w, r, postDecryptMutator, responseMapper)
 }
 
 func (a *Adapter) mapPlaintextUnaryResponse(

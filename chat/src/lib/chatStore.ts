@@ -1,8 +1,8 @@
-import { writable, get } from 'svelte/store';
-import { saveImage, loadImage, deleteImages } from './imageStore';
-import { translate } from './i18n';
 import type OpenAI from 'openai';
+import { get, writable } from 'svelte/store';
 import type { PrivatemodeClient } from './clientStore';
+import { translate } from './i18n';
+import { deleteImages, loadImage, saveImage } from './imageStore';
 
 export interface AttachedFile {
   name: string;

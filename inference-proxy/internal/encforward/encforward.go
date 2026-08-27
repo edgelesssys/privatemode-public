@@ -1,17 +1,14 @@
 // Package encforward provides a request forwarder that decrypts requests and encrypts responses
-// for inference adapters.
-//
-// Two protocol variants are supported, selected by the client version header: the full-body
-// encryption (FBE) scheme and the legacy field-based scheme.
+// for inference adapters, using the full-body encryption (FBE) scheme.
 package encforward
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
-	"github.com/edgelesssys/continuum/internal/oss/compat"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -26,25 +23,15 @@ type Forwarder interface {
 	ForwardEncrypted(
 		w http.ResponseWriter,
 		r *http.Request,
-		legacyDecryptMutator func(cipher.ResponseCipher) forwarder.RequestMutator,
 		postDecryptMutator forwarder.RequestMutator,
-		legacyPlainResponseFields forwarder.FieldSelector,
 		preEncryptMapper forwarder.ResponseMapper,
 	)
 }
 
-// responseCipherCreator creates cipher instances for legacy encryption and provides direct access
-// to secrets for FBE.
-//
-// When the legacy scheme is removed, this should be replaced by a secretsGetter interface. Most
-// importantly, this [Forwarder] must take on the responsibility of putting
-// [constants.ErrorNoSecretForID] into the response message. That is required so that clients know
-// to upload a fresh secret.
-type responseCipherCreator interface {
-	// NewResponseCipher creates a new [cipher.ResponseCipher] for the legacy scheme.
-	NewResponseCipher() cipher.ResponseCipher
-	// Secret returns the secret for the given ID.
-	Secret(ctx context.Context, id string) ([]byte, error)
+// secretGetter provides the inference secrets a request/response exchange is encrypted with.
+type secretGetter interface {
+	// Get returns the secret for the given ID, or [secrets.ErrSecretNotFound].
+	Get(ctx context.Context, id string) ([]byte, error)
 }
 
 // plainForwarder forwards a plaintext request with request/response transformation.
@@ -56,14 +43,14 @@ type plainForwarder interface {
 // [forwarder.Forwarder].
 type encForwarder struct {
 	plainForwarder plainForwarder
-	cipher         responseCipherCreator
+	secrets        secretGetter
 }
 
 // New creates a new encrypting Forwarder.
-func New(plainForwarder plainForwarder, cipher responseCipherCreator) Forwarder {
+func New(plainForwarder plainForwarder, secrets secretGetter) Forwarder {
 	return &encForwarder{
 		plainForwarder: plainForwarder,
-		cipher:         cipher,
+		secrets:        secrets,
 	}
 }
 
@@ -86,62 +73,6 @@ func (e *encForwarder) ForwardPlain(
 func (e *encForwarder) ForwardEncrypted(
 	w http.ResponseWriter,
 	r *http.Request,
-	legacyDecryptMutator func(cipher.ResponseCipher) forwarder.RequestMutator,
-	postDecryptMutator forwarder.RequestMutator,
-	legacyPlainResponseFields forwarder.FieldSelector,
-	preEncryptMapper forwarder.ResponseMapper,
-) {
-	if compat.AtLeastMajorMinor(r.Header.Get(constants.PrivatemodeVersionHeader), 1, 46) {
-		e.forwardEncryptedFBE(w, r, postDecryptMutator, preEncryptMapper)
-	} else {
-		e.forwardEncryptedLegacy(w, r, legacyDecryptMutator, postDecryptMutator, legacyPlainResponseFields, preEncryptMapper)
-	}
-}
-
-func (e *encForwarder) forwardEncryptedLegacy(
-	w http.ResponseWriter,
-	r *http.Request,
-	legacyDecryptMutator func(cipher.ResponseCipher) forwarder.RequestMutator,
-	postDecryptMutator forwarder.RequestMutator,
-	legacyPlainResponseFields forwarder.FieldSelector,
-	preEncryptMapper forwarder.ResponseMapper,
-) {
-	session := e.cipher.NewResponseCipher()
-	encryptMutator := forwarder.NewJSONMutatingReader(session.EncryptResponse(r.Context()), legacyPlainResponseFields)
-
-	e.plainForwarder.Forward(
-		w, r,
-		forwarder.RequestMutatorChain(legacyDecryptMutator(session), postDecryptMutator),
-		func(resp *http.Response) (forwarder.Response, error) {
-			dsResp, err := preEncryptMapper(resp)
-			if err != nil {
-				return nil, err
-			}
-			return encryptLegacy(dsResp, encryptMutator)
-		},
-	)
-}
-
-func encryptLegacy(resp forwarder.Response, encryptMutator *forwarder.MutatingReader) (forwarder.Response, error) {
-	switch r := resp.(type) {
-	case *forwarder.UnaryResponse:
-		body, err := encryptMutator.Mutate(r.Body)
-		if err != nil {
-			return nil, fmt.Errorf("encrypting unary response: %w", err)
-		}
-		r.Body = body
-		return r, nil
-	case *forwarder.StreamingResponse:
-		r.Body = encryptMutator.Reader(r.Body)
-		return r, nil
-	default:
-		return nil, fmt.Errorf("unexpected response type %T", resp)
-	}
-}
-
-func (e *encForwarder) forwardEncryptedFBE(
-	w http.ResponseWriter,
-	r *http.Request,
 	postDecryptMutator forwarder.RequestMutator,
 	preEncryptMapper forwarder.ResponseMapper,
 ) {
@@ -157,9 +88,15 @@ func (e *encForwarder) forwardEncryptedFBE(
 		forwarder.HTTPError(w, r, http.StatusBadRequest, "request must contain secret ID")
 		return
 	}
-	secret, err := e.cipher.Secret(r.Context(), secretID)
+	secret, err := e.secrets.Get(r.Context(), secretID)
 	if err != nil {
-		forwarder.HTTPError(w, r, http.StatusBadRequest, "%v", err)
+		status := http.StatusInternalServerError
+		if errors.Is(err, secrets.ErrSecretNotFound) {
+			// [constants.ErrorNoSecretForID] is matched by clients
+			err = fmt.Errorf("%s %q: %w", constants.ErrorNoSecretForID, secretID, err)
+			status = http.StatusBadRequest
+		}
+		forwarder.HTTPError(w, r, status, "%v", err)
 		return
 	}
 
@@ -184,12 +121,12 @@ func (e *encForwarder) forwardEncryptedFBE(
 			if err != nil {
 				return nil, fmt.Errorf("mapping response pre-encryption: %w", err)
 			}
-			return encryptFBE(dsResp, exchange)
+			return encrypt(dsResp, exchange)
 		},
 	)
 }
 
-func encryptFBE(resp forwarder.Response, exchange *encbody.ServerExchange) (forwarder.Response, error) {
+func encrypt(resp forwarder.Response, exchange *encbody.ServerExchange) (forwarder.Response, error) {
 	switch r := resp.(type) {
 	case *forwarder.UnaryResponse:
 		if err := exchange.EncryptUnaryResponse(r); err != nil {

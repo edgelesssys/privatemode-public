@@ -1,5 +1,5 @@
-import './wasm_exec.js';
 import { PrivatemodeAPIError } from './errors.js';
+import './wasm_exec.js';
 
 // Go is provided by wasm_exec.js
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

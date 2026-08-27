@@ -13,9 +13,9 @@ import (
 	"net/http"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
-	"github.com/edgelesssys/continuum/inference-proxy/internal/cipher"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
 	"github.com/edgelesssys/continuum/internal/model"
+	"github.com/edgelesssys/continuum/internal/oss/compat"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
@@ -56,7 +56,7 @@ func (a *Adapter) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("/v1/chat/completions", a.VerifyOCSP(http.HandlerFunc(a.forwardChatCompletionsRequest)))
 
 	// Legacy chat completions endpoint: https://platform.openai.com/docs/api-reference/completions/create
-	// Reuse the same handler as for /v1/chat/completions since the unencrypted fields are the same.
+	// Reuse the same handler as for /v1/chat/completions since both endpoints require the same mutators.
 	mux.Handle(openai.LegacyCompletionsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardChatCompletionsRequest)))
 
 	// Create embeddings: https://platform.openai.com/docs/api-reference/embeddings/create
@@ -135,14 +135,9 @@ func mapSuccessResponseBody(fn func([]byte) ([]byte, error)) forwarder.ResponseM
 }
 
 func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	a.ForwardEncrypted(
 		w, r,
-		func(s cipher.ResponseCipher) forwarder.RequestMutator {
-			return forwarder.WithJSONRequestMutation(s.DecryptRequest(ctx), openai.PlainEmbeddingsRequestFields, a.Log)
-		},
 		forwarder.NoRequestMutation,
-		openai.PlainEmbeddingsResponseFields,
 		nil,
 		nil,
 		extractOpenAIUsage,
@@ -154,32 +149,49 @@ func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Re
 	ctx := r.Context()
 	a.ForwardEncrypted(
 		w, r,
-		func(s cipher.ResponseCipher) forwarder.RequestMutator {
-			return forwarder.WithFormRequestMutation(s.DecryptRequest(ctx), openai.PlainTranscriptionRequestFields, a.Log)
-		},
 		a.mutators.AudioStreamUsageReportingInjector,
-		openai.PlainTranscriptionResponseFields,
-		nil,
+		legacyStringDurationMutation(r.Header.Get(constants.PrivatemodeVersionHeader)),
 		nil,
 		extractUnaryTranscriptionUsage,
 		a.extractStreamingTranscriptionUsage(ctx),
 	)
 }
 
-// forwardChatCompletionsRequest forwards chat completions with field mutation using the given selectors.
+// legacyStringDurationMutation returns a mutation that re-encodes the top-level `duration` of a
+// verbose_json transcription response as a JSON string, or nil for clients that expect the number
+// the OpenAI API specifies.
+//
+// vLLM encoded the field as a string up to v0.24.0 and as a number since v0.27.1, so the upgrade
+// would change our API's response type. Keep the string for clients up to v1.54, which is the
+// release that announces the change.
+// TODO: drop this once the minimum client version is past v1.54.
+func legacyStringDurationMutation(clientVersion string) inference.MutationFunc {
+	if compat.AtLeastMajorMinor(clientVersion, 1, 55) {
+		return nil
+	}
+
+	return func(data []byte) ([]byte, error) {
+		if len(data) == 0 || !gjson.ValidBytes(data) {
+			return data, nil
+		}
+		duration := gjson.GetBytes(data, "duration")
+		if duration.Type != gjson.Number {
+			return data, nil
+		}
+		// Setting a Go string writes a JSON string. Use the raw value to keep the digits vLLM sent.
+		return sjson.SetBytes(data, "duration", duration.Raw)
+	}
+}
+
+// forwardChatCompletionsRequest forwards a request to the chat completions endpoint.
 func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	a.ForwardEncrypted(
 		w, r,
-		func(s cipher.ResponseCipher) forwarder.RequestMutator {
-			return forwarder.WithJSONRequestMutation(s.DecryptRequest(ctx), openai.PlainCompletionsRequestFields, a.Log)
-		},
 		forwarder.RequestMutatorChain(
 			a.mutators.CacheSaltValidator,
 			a.mutators.MediaContentValidator,
 			a.mutators.StreamUsageReportingInjector,
 		),
-		openai.PlainCompletionsResponseFields,
 		// TODO: remove once clients have caught up.
 		//       We already deprecated the field and announced removal after 1st of May 26, but
 		//       OpenCode does not yet support the "reasoning" field. Tracked in PM-158

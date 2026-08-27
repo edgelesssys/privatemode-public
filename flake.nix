@@ -57,10 +57,7 @@
         }
         // pkgs;
 
-        devShells = {
-          default = pkgs.callPackage ./nix/devShells/devshell.nix { };
-          ci = pkgs.callPackage ./nix/devShells/ci-shell.nix { };
-        };
+        devShells = import ./nix/devShells/devshell.nix { inherit pkgs; };
 
         formatter = treefmtEval.config.build.wrapper;
 

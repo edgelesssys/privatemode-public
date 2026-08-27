@@ -24,7 +24,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -35,12 +34,6 @@ import (
 )
 
 const (
-	// ChatRequestMessagesField is the messages field in the request that is encrypted / decrypted.
-	ChatRequestMessagesField = "messages"
-	// ChatRequestToolsField is the tools field in the request that is encrypted / decrypted.
-	ChatRequestToolsField = "tools"
-	// ChatResponseEncryptionField is the field in the response that is encrypted / decrypted.
-	ChatResponseEncryptionField = "choices"
 	// ChatCompletionsEndpoint is the endpoint for chat completions.
 	ChatCompletionsEndpoint = "/v1/chat/completions"
 	// LegacyCompletionsEndpoint is the legacy endpoint for chat completions.
@@ -63,47 +56,6 @@ func IsStreamDone(value []byte) bool {
 	return bytes.Equal(value, StreamDone)
 }
 
-// PlainCompletionsRequestFields is a field selector for all fields in an OpenAI chat completions request that are not encrypted.
-var PlainCompletionsRequestFields = forwarder.FieldSelector{
-	{"model"},
-	{"stream_options"},
-	{"max_tokens"},
-	{"max_completion_tokens"},
-	{"n"},
-	{"stream"},
-}
-
-// PlainCompletionsResponseFields is a field selector for all fields in an OpenAI chat completions response that are not encrypted.
-var PlainCompletionsResponseFields = forwarder.FieldSelector{
-	{"id"},
-	{"usage"},
-}
-
-// PlainEmbeddingsRequestFields is a field selector for all fields in an OpenAI embeddings request that are not encrypted.
-var PlainEmbeddingsRequestFields = forwarder.FieldSelector{
-	{"model"},
-}
-
-// PlainEmbeddingsResponseFields is a field selector for all fields in an OpenAI embeddings response that are not encrypted.
-var PlainEmbeddingsResponseFields = forwarder.FieldSelector{
-	{"id"},
-	{"usage"},
-}
-
-// PlainTranscriptionRequestFields are the plain form fields for OpenAI audio transcriptions.
-var PlainTranscriptionRequestFields = forwarder.FieldSelector{
-	{"model"},
-	{"stream"},
-	{"stream_include_usage"},
-	{"stream_continuous_usage_stats"},
-}
-
-// PlainTranscriptionResponseFields is a field selector for all fields in an OpenAI transcription response that are not encrypted.
-var PlainTranscriptionResponseFields = forwarder.FieldSelector{
-	{"duration"},
-	{"usage"},
-}
-
 // RandomPromptCacheSalt generates a random salt for prompt caching and
 // returns it as a base64-encoded string.
 func RandomPromptCacheSalt() string {
@@ -115,94 +67,35 @@ func RandomPromptCacheSalt() string {
 	return base64.StdEncoding.EncodeToString(salt)
 }
 
-// EncryptedChatRequest is the request structure for an OpenAI chat completion call,
-// with encrypted fields.
-// Fields that should not be encrypted need to be added to [PlainCompletionsRequestFields].
-// See [ChatRequest] for the unencrypted request structure.
-//
-// Don't send the marshalled type to clients/servers. Read package docs for more info.
-type EncryptedChatRequest struct {
-	ChatRequestPlainData
-	Messages    string  `json:"messages"` // The whole messages array from Request as an encrypted blob.
-	Temperature string  `json:"temperature,omitzero"`
-	Tools       *string `json:"tools,omitempty"` // The whole tools array from Request as an encrypted blob.
-	CacheSalt   string  `json:"cache_salt,omitempty"`
-}
-
 // ChatRequest is the request structure for an OpenAI chat completion call.
 //
 // Don't send the marshalled type to clients/servers. Read package docs for more info.
 type ChatRequest struct {
-	ChatRequestPlainData
-	Messages    []Message `json:"messages"`
-	Temperature float32   `json:"temperature,omitzero"`
-	Tools       []any     `json:"tools,omitempty"`
-	CacheSalt   string    `json:"cache_salt,omitempty"`
-}
-
-// ChatRequestPlainData contains fields that are not encrypted for [ChatRequest] and [EncryptedChatRequest].
-type ChatRequestPlainData struct {
 	Model               string         `json:"model"`
 	MaxTokens           int            `json:"max_tokens,omitzero"` // deprecated in favor of max_completion_tokens
 	MaxCompletionTokens int            `json:"max_completion_tokens,omitzero"`
 	N                   int            `json:"n,omitzero"`
 	Stream              bool           `json:"stream"`
 	StreamOptions       *StreamOptions `json:"stream_options,omitempty"`
-}
-
-// EncryptedEmbeddingsRequest is the request structure for an OpenAI embeddings call.
-// Fields we currently don't use are omitted.
-type EncryptedEmbeddingsRequest struct {
-	EmbeddingsRequestPlainData
-	Input          string `json:"input"`
-	Dimensions     string `json:"dimensions,omitzero"`
-	EncodingFormat string `json:"encoding_format,omitzero"`
-	User           string `json:"user,omitzero"`
+	Messages            []Message      `json:"messages"`
+	Temperature         float32        `json:"temperature,omitzero"`
+	Tools               []any          `json:"tools,omitempty"`
+	CacheSalt           string         `json:"cache_salt,omitempty"`
 }
 
 // EmbeddingsRequest is the request structure for an OpenAI embeddings call.
 type EmbeddingsRequest struct {
-	EmbeddingsRequestPlainData
+	Model          string   `json:"model"`
 	Input          []string `json:"input"`
 	Dimensions     int      `json:"dimensions,omitzero"`
 	EncodingFormat string   `json:"encoding_format,omitzero"`
 	User           string   `json:"user,omitzero"`
 }
 
-// EmbeddingsRequestPlainData contains fields that are not encrypted for [EncryptedEmbeddingsRequest].
-type EmbeddingsRequestPlainData struct {
-	Model string `json:"model"`
-}
-
-// EncryptedEmbeddingsResponse is the response structure for an OpenAI embeddings call.
-type EncryptedEmbeddingsResponse struct {
-	Data   string `json:"data,omitzero"`
-	Object string `json:"object,omitzero"`
-	Model  string `json:"model,omitzero"`
-	Usage  Usage  `json:"usage,omitzero"`
-}
-
 // StreamOptions contains options for streaming completions. It is an extended version of the OpenAI StreamOptions type.
 type StreamOptions struct {
 	IncludeUsage         bool `json:"include_usage"`
 	ContinuousUsageStats bool `json:"continuous_usage_stats"`
-}
-
-// EncryptedChatResponse is the response structure for an OpenAI chat completion call,
-// with an encrypted fields.
-// Fields that should not be encrypted need to be added to [PlainCompletionsResponseFields].
-// See [ChatResponse] for the unencrypted response structure.
-//
-// Don't send the marshalled type to clients/servers. Read package docs for more info.
-type EncryptedChatResponse struct {
-	// Choices is the whole choices array from Response as an encrypted blob.
-	// The field is marked as omitzero to avoid adding empty strings in unit tests.
-	Choices string `json:"choices,omitzero"`
-	ID      string `json:"id,omitzero"`
-	Object  string `json:"object,omitzero"`
-	Created string `json:"created,omitzero"`
-	Model   string `json:"model,omitzero"`
-	Usage   Usage  `json:"usage,omitzero"`
 }
 
 // ChatResponse is the response structure for an OpenAI chat completion call.
@@ -324,38 +217,52 @@ type APIError struct {
 	Code json.RawMessage `json:"code,omitzero"`
 }
 
-// MarshalJSON implements custom JSON marshalling for AudioUsage to serialize Duration as a string.
-func (a *TranscriptionUsageResponse) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		Duration string     `json:"duration,omitzero"`
-		Usage    AudioUsage `json:"usage,omitzero"`
-	}{
-		Duration: strconv.FormatFloat(float64(a.Duration), 'f', -1, 64),
-		Usage:    a.Usage,
-	})
-}
-
-// UnmarshalJSON implements custom JSON unmarshalling for AudioUsage to parse Duration from a string.
+// UnmarshalJSON implements custom JSON unmarshalling for TranscriptionUsageResponse to round
+// Duration up to whole seconds.
 func (a *TranscriptionUsageResponse) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		Duration string     `json:"duration,omitzero"`
+		// For requests with response_format=verbose_json, a top-level `duration` attribute is set
+		// containing a float of the duration in seconds. vLLM encoded it as a string up to
+		// v0.24.0, which we don't support anymore.
+		Duration float64    `json:"duration,omitzero"`
 		Usage    AudioUsage `json:"usage,omitzero"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 
+	a.Duration = ceilSeconds(aux.Duration)
 	a.Usage = aux.Usage
-	if aux.Duration != "" {
-		// For requests with response_format=verbose_json, a top-level `duration` attribute is set
-		// as a string containing a float of the duration in seconds.
-		duration, err := strconv.ParseFloat(aux.Duration, 64)
-		if err != nil {
-			return fmt.Errorf("parsing duration: %w", err)
-		}
-		a.Duration = int(math.Ceil(duration))
+	return nil
+}
+
+// UnmarshalJSON implements custom JSON unmarshalling for AudioUsage to accept a fractional
+// Seconds, which the OpenAI API specifies as a number.
+func (a *AudioUsage) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		Type             string  `json:"type"`
+		Seconds          float64 `json:"seconds,omitzero"`
+		PromptTokens     int     `json:"prompt_tokens,omitzero"`
+		TotalTokens      int     `json:"total_tokens,omitzero"`
+		CompletionTokens int     `json:"completion_tokens,omitzero"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	*a = AudioUsage{
+		Type:             aux.Type,
+		Seconds:          ceilSeconds(aux.Seconds),
+		PromptTokens:     aux.PromptTokens,
+		TotalTokens:      aux.TotalTokens,
+		CompletionTokens: aux.CompletionTokens,
 	}
 	return nil
+}
+
+// ceilSeconds rounds seconds up to whole seconds, as we bill started seconds.
+func ceilSeconds(seconds float64) int {
+	return int(math.Ceil(seconds))
 }
 
 // CacheSaltGenerator returns a cache salt for the vLLM prompt cache.
@@ -402,7 +309,7 @@ func CacheSaltInjector(cacheSaltGenerator CacheSaltGenerator, log *slog.Logger) 
 		}
 		return mutatedBody, nil
 	}
-	return forwarder.WithRawRequestMutation(injectSalt, log)
+	return forwarder.WithRequestMutation(injectSalt, log)
 }
 
 // CacheSaltValidator creates a [forwarder.RequestMutator] that ensures a non-empty cache salt.
@@ -422,7 +329,7 @@ func CacheSaltValidator(log *slog.Logger) forwarder.RequestMutator {
 		return httpBody, nil
 	}
 
-	return forwarder.WithRawRequestMutation(validateSalt, log)
+	return forwarder.WithRequestMutation(validateSalt, log)
 }
 
 // MediaContentValidator creates a [forwarder.RequestMutator] that enforces policy on media
@@ -475,7 +382,7 @@ func MediaContentValidator(log *slog.Logger) forwarder.RequestMutator {
 		return httpBody, nil
 	}
 
-	return forwarder.WithRawRequestMutation(validate, log)
+	return forwarder.WithRequestMutation(validate, log)
 }
 
 func validateStringQueryResults(document string, queries []string, validate func(string) error) error {
@@ -546,7 +453,7 @@ func StreamUsageReportingInjector(log *slog.Logger) forwarder.RequestMutator {
 		}
 		return body, nil
 	}
-	return forwarder.WithRawRequestMutation(injectStreamOptions, log)
+	return forwarder.WithRequestMutation(injectStreamOptions, log)
 }
 
 // AudioStreamUsageReportingInjector creates a [forwarder.RequestMutator] that ensures vLLM includes
@@ -554,7 +461,7 @@ func StreamUsageReportingInjector(log *slog.Logger) forwarder.RequestMutator {
 // stream_continuous_usage_stats to true in the request form.
 func AudioStreamUsageReportingInjector(log *slog.Logger) forwarder.RequestMutator {
 	return func(r *http.Request) error {
-		return forwarder.WithRawFormRequestMutation(func(form *multipart.Form, writer *multipart.Writer) (bool, error) {
+		return forwarder.WithFormRequestMutation(func(form *multipart.Form, writer *multipart.Writer) (bool, error) {
 			log.DebugContext(r.Context(), "Enabling audio token tracking for request")
 
 			if vs := form.Value["stream"]; len(vs) == 0 || !strings.EqualFold(vs[0], "true") {
