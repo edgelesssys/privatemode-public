@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,9 +10,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
+	"github.com/edgelesssys/continuum/internal/mtls"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/contrast"
 	"github.com/edgelesssys/continuum/internal/oss/logging"
@@ -22,6 +21,7 @@ import (
 	"github.com/edgelesssys/continuum/secret-service/internal/health"
 	"github.com/edgelesssys/continuum/secret-service/internal/userapi"
 	"github.com/spf13/afero"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -41,6 +41,9 @@ func main() {
 	etcdServerCert := flag.String("etcd-server-cert", filepath.Join(constants.EtcdBasePath(), "etcd.crt"), "path to the etcd server certificate")
 	etcdServerKey := flag.String("etcd-server-key", filepath.Join(constants.EtcdBasePath(), "etcd.key"), "path to the etcd server key")
 	etcdCA := flag.String("etcd-ca", filepath.Join(constants.EtcdBasePath(), "ca.crt"), "path to the etcd CA certificate")
+	identityCertPath := flag.String("identity-cert-path", "", "path to the workload identity certificate")
+	identityKeyPath := flag.String("identity-key-path", "", "path to the workload identity key")
+	identityCAPath := flag.String("identity-ca-path", "", "path to the workload identity CA bundle (used to verify peer identity certs)")
 	k8sNamespace := flag.String("k8s-namespace", "", "kubernetes namespace of this secret-service instance")
 	logLevel := flag.String(logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
 	mayBootstrap := flag.Bool("may-bootstrap", false, "whether this instance is allowed to bootstrap the etcd cluster")
@@ -50,13 +53,16 @@ func main() {
 	log.InfoContext(context.Background(), "Continuum Secret Service", "version", constants.Version())
 
 	config := secretServiceConfig{
-		port:           *port,
-		healthPort:     *healthPort,
-		etcdServerCert: *etcdServerCert,
-		etcdServerKey:  *etcdServerKey,
-		etcdCA:         *etcdCA,
-		k8sNamespace:   *k8sNamespace,
-		mayBootstrap:   *mayBootstrap,
+		port:             *port,
+		healthPort:       *healthPort,
+		etcdServerCert:   *etcdServerCert,
+		etcdServerKey:    *etcdServerKey,
+		etcdCA:           *etcdCA,
+		identityCertPath: *identityCertPath,
+		identityKeyPath:  *identityKeyPath,
+		identityCAPath:   *identityCAPath,
+		k8sNamespace:     *k8sNamespace,
+		mayBootstrap:     *mayBootstrap,
 	}
 
 	if err := run(config, afero.Afero{Fs: afero.NewOsFs()}, log); err != nil {
@@ -66,13 +72,16 @@ func main() {
 }
 
 type secretServiceConfig struct {
-	port           string
-	healthPort     string
-	etcdServerCert string
-	etcdServerKey  string
-	etcdCA         string
-	k8sNamespace   string
-	mayBootstrap   bool
+	port             string
+	healthPort       string
+	etcdServerCert   string
+	etcdServerKey    string
+	etcdCA           string
+	identityCertPath string
+	identityKeyPath  string
+	identityCAPath   string
+	k8sNamespace     string
+	mayBootstrap     bool
 }
 
 func run(config secretServiceConfig, fs afero.Afero, log *slog.Logger) error {
@@ -85,60 +94,46 @@ func run(config secretServiceConfig, fs afero.Afero, log *slog.Logger) error {
 	}
 	defer etcdClose()
 
-	contrastMTLS, err := contrast.ServerTLSConfig("")
+	meshTLSConfig, err := contrast.ServerTLSConfig("")
 	if err != nil {
 		return fmt.Errorf("setting up Contrast TLS config: %w", err)
 	}
-	contrastTLS := contrastMTLS.Clone()
-	contrastTLS.ClientAuth = tls.NoClientCert // the user API should not enforce mTLS
-	userServer, err := userapi.New(contrastTLS, etcdServer, log)
+	mtlsIdentity, err := mtls.LoadIdentity(config.identityCertPath, config.identityKeyPath, config.identityCAPath)
+	if err != nil {
+		return fmt.Errorf("loading workload identity: %w", err)
+	}
+	userServer, err := userapi.New(meshTLSConfig, mtlsIdentity, etcdServer, log)
 	if err != nil {
 		return fmt.Errorf("setting up user server: %w", err)
 	}
 	healthServer := health.New(log)
-	httpHealthServer := health.NewHTTP(log)
 
-	var wg sync.WaitGroup
+	group, groupCtx := errgroup.WithContext(ctx)
 
-	// Start the servers as Goroutines
-	// If one of them fails, the routine will stop the other server and return the error
-
-	wg.Go(func() {
-		watchLeaderStatus(ctx, etcdServer, healthServer, httpHealthServer, log)
-		cancel()
+	group.Go(func() error {
+		watchLeaderStatus(groupCtx, etcdServer, healthServer, log)
+		return nil
 	})
 
-	wg.Go(func() {
-		log.InfoContext(ctx, "Starting user server", "endpoint", net.JoinHostPort(defaultHost, config.port))
-		if srvErr := userServer.Serve(net.JoinHostPort(defaultHost, config.port)); srvErr != nil {
-			err = srvErr
-			healthServer.Stop()
-			cancel()
+	group.Go(func() error {
+		endpoint := net.JoinHostPort(defaultHost, config.port)
+		log.InfoContext(groupCtx, "Starting user server", "endpoint", endpoint)
+		if err := userServer.Serve(groupCtx, endpoint); err != nil && groupCtx.Err() == nil {
+			return fmt.Errorf("serving user API: %w", err)
 		}
+		return nil
 	})
 
-	wg.Go(func() {
-		log.InfoContext(ctx, "Starting health server", "endpoint", net.JoinHostPort(defaultHost, config.healthPort))
-		if srvErr := healthServer.Serve(net.JoinHostPort(defaultHost, config.healthPort)); srvErr != nil {
-			err = srvErr
-			userServer.Stop()
-			cancel()
+	group.Go(func() error {
+		endpoint := net.JoinHostPort(defaultHost, config.healthPort)
+		log.InfoContext(groupCtx, "Starting health server", "endpoint", endpoint)
+		if err := healthServer.Serve(groupCtx, endpoint); err != nil && groupCtx.Err() == nil {
+			return fmt.Errorf("serving health API: %w", err)
 		}
+		return nil
 	})
 
-	wg.Go(func() {
-		httpEndpoint := net.JoinHostPort(defaultHost, "8080")
-		log.InfoContext(ctx, "Starting HTTP health server", "endpoint", httpEndpoint)
-		if srvErr := httpHealthServer.Serve(ctx, httpEndpoint); srvErr != nil {
-			err = srvErr
-			userServer.Stop()
-			healthServer.Stop()
-			cancel()
-		}
-	})
-
-	wg.Wait()
-	return err
+	return group.Wait()
 }
 
 // joinOrBootstrapEtcd sets up the etcd cluster by either joining an existing cluster or bootstrapping a new one.
@@ -211,7 +206,7 @@ func joinOrBootstrapEtcd(
 // watchLeaderStatus periodically checks whether the etcd cluster has a leader.
 // If the cluster has been leaderless for longer than [noLeaderThreshold], the health server
 // is marked as unhealthy, causing the Kubernetes liveness probe to fail and the pod to be restarted.
-func watchLeaderStatus(ctx context.Context, e *etcd.Etcd, h *health.Server, httpHealth *health.HTTPServer, log *slog.Logger) {
+func watchLeaderStatus(ctx context.Context, e *etcd.Etcd, h *health.Server, log *slog.Logger) {
 	ticker := time.NewTicker(noLeaderCheckInterval)
 	defer ticker.Stop()
 
@@ -227,8 +222,7 @@ func watchLeaderStatus(ctx context.Context, e *etcd.Etcd, h *health.Server, http
 					log.InfoContext(ctx, "Etcd cluster has regained a leader")
 					leaderlessSince = time.Time{}
 				}
-				h.SetHealthy()
-				httpHealth.SetHealthy()
+				h.SetHealthy(true)
 				continue
 			}
 
@@ -241,8 +235,7 @@ func watchLeaderStatus(ctx context.Context, e *etcd.Etcd, h *health.Server, http
 			if leaderlessFor >= noLeaderThreshold {
 				log.ErrorContext(ctx, "Etcd cluster has been leaderless for too long, marking pod as unhealthy for restart",
 					"leaderlessFor", leaderlessFor.Seconds(), "threshold", noLeaderThreshold.Seconds())
-				h.SetUnhealthy()
-				httpHealth.SetUnhealthy()
+				h.SetHealthy(false)
 			}
 		}
 	}

@@ -1,5 +1,4 @@
-// Package userapi package is responsible for handling requests
-// from users to the attestation service.
+// Package userapi handles user requests to the secret-service.
 package userapi
 
 import (
@@ -8,140 +7,147 @@ import (
 	"crypto/hpke"
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"time"
 
+	"github.com/edgelesssys/continuum/internal/mtls"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
-	userpb "github.com/edgelesssys/continuum/internal/oss/proto/secret-service/userapi"
+	"github.com/edgelesssys/continuum/internal/oss/httpapi"
+	"github.com/edgelesssys/continuum/internal/oss/process"
+	"github.com/edgelesssys/continuum/internal/oss/secretclient"
 	"github.com/edgelesssys/continuum/internal/oss/secretexchange"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/grpc/status"
 )
 
 // Server handles communication with users.
 type Server struct {
-	grpc        *grpc.Server
-	secretStore secretSetter
-	log         *slog.Logger
-	meshCertRaw []byte
-	meshPriv    *ecdsa.PrivateKey
-
-	userpb.UnimplementedUserAPIServer
+	mtlsIdentity mtls.Identity
+	secretStore  secretSetter
+	log          *slog.Logger
+	meshCertRaw  []byte
+	meshPriv     *ecdsa.PrivateKey
 }
 
 // New returns a new Server for the user API.
-func New(tlsConfig *tls.Config, secretStore secretSetter, logger *slog.Logger) (*Server, error) {
-	if tlsConfig == nil || len(tlsConfig.Certificates) != 1 {
-		return nil, errors.New("expected a tlsConfig with exactly one certificate chain")
+func New(meshTLSConfig *tls.Config, mtlsIdentity mtls.Identity, secretStore secretSetter, logger *slog.Logger) (*Server, error) {
+	if meshTLSConfig == nil || len(meshTLSConfig.Certificates) != 1 {
+		return nil, errors.New("expected a mesh TLS config with exactly one certificate chain")
 	}
-	tlsCertChain := tlsConfig.Certificates[0]
+	tlsCertChain := meshTLSConfig.Certificates[0]
 	priv, ok := tlsCertChain.PrivateKey.(*ecdsa.PrivateKey)
 	if !ok {
 		return nil, errors.New("expected an ECDSA private key in the TLS certificate")
 	}
 
-	grpcServer := grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(tlsConfig)),
-		grpc.KeepaliveParams(keepalive.ServerParameters{Time: 15 * time.Second}),
-	)
-
-	s := &Server{
-		grpc:                       grpcServer,
-		secretStore:                secretStore,
-		log:                        logger,
-		meshCertRaw:                tlsCertChain.Certificate[0],
-		meshPriv:                   priv,
-		UnimplementedUserAPIServer: userpb.UnimplementedUserAPIServer{},
-	}
-	userpb.RegisterUserAPIServer(grpcServer, s)
-
-	return s, nil
+	return &Server{
+		mtlsIdentity: mtlsIdentity,
+		secretStore:  secretStore,
+		log:          logger,
+		meshCertRaw:  tlsCertChain.Certificate[0],
+		meshPriv:     priv,
+	}, nil
 }
 
 // Serve starts the server on the given endpoint.
-func (s *Server) Serve(endpoint string) error {
+func (s *Server) Serve(ctx context.Context, endpoint string) error {
 	lis, err := net.Listen("tcp", endpoint)
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
-	return s.grpc.Serve(lis)
+	server := &http.Server{
+		Addr:      endpoint,
+		ErrorLog:  slog.NewLogLogger(s.log.Handler(), slog.LevelError),
+		Handler:   s.handler(),
+		TLSConfig: s.mtlsIdentity.ServerConfig(),
+	}
+	return process.HTTPServeContext(ctx, server, lis, s.log)
 }
 
-// Stop stops the server.
-func (s *Server) Stop() {
-	s.grpc.GracefulStop()
+// handler returns the HTTP handler for the user API.
+func (s *Server) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST "+secretclient.SecretPath, s.exchangeSecretHandler)
+	return mux
 }
 
-// SetSecrets sets user secrets for the attestation service.
-// The attestation service is tasked with distributing secrets to workers.
-func (s *Server) SetSecrets(ctx context.Context, req *userpb.SetSecretsRequest) (*userpb.SetSecretsResponse, error) {
-	s.log.InfoContext(ctx, "SetSecrets called")
-
-	// Sanity check for correct secret length
-	var errs []error
-	for id, secret := range req.Secrets {
-		switch len(secret) {
-		case 16, 24, 32: // AES-128, AES-192, AES-256
-		default:
-			errs = append(errs, fmt.Errorf("secret %q has invalid length: %d", id, len(secret)))
+func (s *Server) exchangeSecretHandler(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, secretclient.MaxRequestBodyBytes)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
 		}
-	}
-	if len(errs) > 0 {
-		return nil, status.Errorf(
-			codes.InvalidArgument,
-			"invalid secret format: secrets must be 16 (AES-128), 24 (AES-192), or 32 (AES-256) bytes long: %s",
-			errors.Join(errs...),
-		)
+		http.Error(w, fmt.Sprintf("reading request: %s", err), http.StatusBadRequest)
+		return
 	}
 
-	// Store the secrets.
-	if err := s.secretStore.SetSecrets(ctx, req.Secrets, req.TimeToLive); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to save secrets: %s", err)
+	var req httpapi.SecretReq
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, fmt.Sprintf("decoding request: %s", err), http.StatusBadRequest)
+		return
 	}
-
-	return &userpb.SetSecretsResponse{}, nil
+	resp, err := s.exchangeSecret(r.Context(), &req)
+	if err != nil {
+		if requestErr, ok := errors.AsType[*requestError](err); ok {
+			http.Error(w, requestErr.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		s.log.ErrorContext(r.Context(), "Encoding response", "error", err)
+	}
 }
 
-// ExchangeSecret performs a cryptographic key agreement.
-func (s *Server) ExchangeSecret(ctx context.Context, req *userpb.ExchangeSecretRequest) (*userpb.ExchangeSecretResponse, error) {
+// exchangeSecret performs a cryptographic key agreement.
+func (s *Server) exchangeSecret(ctx context.Context, req *httpapi.SecretReq) (*httpapi.SecretResp, error) {
 	// Create HPKE encapsulated key and sender context.
 	pub, err := hpke.MLKEM768X25519().NewPublicKey(req.PublicKey)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "parsing public key: %v", err)
+		return nil, &requestError{fmt.Errorf("parsing public key: %w", err)}
 	}
 	encapKey, sender, err := hpke.NewSender(pub, hpke.HKDFSHA256(), hpke.ExportOnly(), nil)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "creating HPKE sender: %v", err)
+		return nil, fmt.Errorf("creating HPKE sender: %w", err)
 	}
 
 	// Sign the request (to prove freshness) and the response (to prove that it has been generated inside the TEE) with the mesh private key.
 	signature, err := ecdsa.SignASN1(rand.Reader, s.meshPriv, secretexchange.Hash(req.PublicKey, encapKey))
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "signing: %v", err)
+		return nil, fmt.Errorf("signing: %w", err)
 	}
 
 	// Store the shared secret.
 	secret, err := sender.Export("", 32)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "exporting secret: %v", err)
+		return nil, fmt.Errorf("exporting secret: %w", err)
 	}
 	secrets := map[string][]byte{secretexchange.ID(req.PublicKey): secret}
 	if err := s.secretStore.SetSecrets(ctx, secrets, int64(constants.InferenceSecretTTL/time.Second)); err != nil {
-		return nil, status.Errorf(codes.Internal, "saving secrets: %s", err)
+		return nil, fmt.Errorf("saving secrets: %w", err)
 	}
 
-	return &userpb.ExchangeSecretResponse{
+	return &httpapi.SecretResp{
 		EncapsulatedKey: encapKey,
 		Signature:       signature,
 		MeshCert:        s.meshCertRaw,
 	}, nil
 }
+
+type requestError struct {
+	err error
+}
+
+func (e *requestError) Error() string { return e.err.Error() }
+func (e *requestError) Unwrap() error { return e.err }
 
 type secretSetter interface {
 	SetSecrets(context.Context, map[string][]byte, int64) error

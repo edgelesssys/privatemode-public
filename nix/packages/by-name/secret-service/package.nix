@@ -4,7 +4,6 @@
   buildContinuumGoModule,
   buildEnv,
   dockerTools,
-  grpc-health-probe,
 }:
 let
   secret-service = buildContinuumGoModule {
@@ -16,6 +15,7 @@ let
       "go.sum"
       "secret-service"
       "internal/crypto"
+      "internal/mtls"
       "internal/oss"
     ];
 
@@ -41,7 +41,6 @@ rec {
       paths = [
         bin
         bash
-        grpc-health-probe
         dockerTools.caCertificates
       ];
       pathsToLink = [
@@ -51,16 +50,6 @@ rec {
 
     config = {
       Entrypoint = [ "${bin}/bin/secret-service" ];
-      Healthcheck = {
-        Test = [
-          "CMD"
-          "${grpc-health-probe}/bin/grpc_health_probe"
-          "--addr=localhost:3001"
-        ];
-        Interval = 30000000000;
-        Timeout = 2000000000;
-        Retries = 3;
-      };
     };
   };
 }

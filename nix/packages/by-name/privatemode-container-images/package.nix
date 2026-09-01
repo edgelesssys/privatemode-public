@@ -47,7 +47,6 @@ let
     linuxPkgs.apigateway.image
     linuxPkgs.disk-daemon.image
     linuxPkgs.fake-workload.image
-    linuxPkgs.rim-cache.image
     linuxPkgs.contrast.image
     linuxPkgs.availability-test.image
   ];

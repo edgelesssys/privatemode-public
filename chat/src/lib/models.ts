@@ -1,6 +1,10 @@
 import type { Locale } from './i18n';
 
-export const DEFAULT_MODEL_ID = 'kimi-k2.6';
+export const DEFAULT_MODEL_ID = 'kimi-latest';
+
+// Effort levels accepted by the models that expose `reasoning_effort`. Each model
+// only honours a subset: gpt-oss takes low/medium/high, glm low/high/max.
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'max';
 
 export interface ModelInfo {
   displayName: string;
@@ -9,6 +13,10 @@ export interface ModelInfo {
   thinkingMode?: 'extended' | 'toggle';
   thinkingToggleParam?: 'thinking' | 'enable_thinking';
   thinkingToggleAlwaysSend?: boolean;
+  // For thinkingMode 'extended': effort sent with the button off and on. Off is the
+  // cheapest level the model honours and on is its maximum, so the button spans the
+  // same range as kimi's thinking toggle.
+  reasoningEffort?: { normal: ReasoningEffort; extended: ReasoningEffort };
   supportsFileUploads: boolean;
   supportsVision: boolean;
   maxWords: number;
@@ -49,11 +57,12 @@ export const modelConfig: Record<string, ModelInfo> = {
     subtitle: 'Reasoning model suited for complex tasks',
     systemPrompt: getSystemPrompt('gpt-oss-120b'),
     thinkingMode: 'extended',
+    reasoningEffort: { normal: 'low', extended: 'high' },
     supportsFileUploads: true,
     supportsVision: false,
     maxWords: 70000,
   },
-  'kimi-k2.6': {
+  'kimi-latest': {
     displayName: 'Kimi K2.6',
     subtitle: 'Reasoning model with a large context window',
     systemPrompt: getSystemPrompt('Kimi K2.6'),
@@ -63,12 +72,15 @@ export const modelConfig: Record<string, ModelInfo> = {
     supportsVision: true,
     maxWords: 70000,
   },
-  'glm-5.2': {
-    displayName: 'GLM-5.2',
+  'glm-latest': {
+    displayName: 'GLM-5.3',
     subtitle: 'Reasoning model with a large context window',
-    systemPrompt: getSystemPrompt('GLM-5.2'),
-    thinkingMode: 'toggle',
-    thinkingToggleParam: 'enable_thinking',
+    systemPrompt: getSystemPrompt('GLM-5.3'),
+    // glm can't switch reasoning off: enable_thinking=false only empties
+    // reasoning_content while the model keeps reasoning inline in the answer at
+    // the same token cost. Offer the gpt-oss-style effort button instead.
+    thinkingMode: 'extended',
+    reasoningEffort: { normal: 'low', extended: 'max' },
     supportsFileUploads: true,
     supportsVision: false,
     maxWords: 70000,

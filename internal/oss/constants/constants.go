@@ -39,7 +39,7 @@ const (
 	// MetricsServerPort is the port on which our standalone metrics servers are exposed by default.
 	MetricsServerPort = "8185"
 	// SecretServiceHealthPort is the port on which the Secret Service Health Server listens for health probes.
-	SecretServiceHealthPort = "3001"
+	SecretServiceHealthPort = "8080"
 	// SecretServiceUserPort is the port on which the Secret Service listens on for client connection.
 	SecretServiceUserPort = "3000"
 	// WorkloadDefaultPort is the default port on which a workload container, e.g. vLLM or unstructured-api, listens for connections.

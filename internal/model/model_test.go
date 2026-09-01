@@ -21,7 +21,11 @@ func TestResolve(t *testing.T) {
 		},
 		"glm latest to current": {
 			input:    "glm-latest",
-			expected: "glm-5.2",
+			expected: "glm-5.3",
+		},
+		"glm predecessor to current": {
+			input:    "glm-5.2",
+			expected: "glm-5.3",
 		},
 		"whisper short to full": {
 			input:    "whisper-large-v3",

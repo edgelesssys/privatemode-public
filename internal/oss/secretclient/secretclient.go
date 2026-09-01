@@ -19,6 +19,15 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/secretexchange"
 )
 
+const (
+	// SecretPath is the API path for exchanging an inference secret.
+	SecretPath = "/privatemode/v1/secret"
+	// MaxRequestBodyBytes is the maximum accepted size of a secret exchange request body.
+	MaxRequestBodyBytes = 16 * 1024 // 16 KiB
+	// MaxBodySizeExceededMsg is the error message returned when the request body exceeds the maximum size.
+	MaxBodySizeExceededMsg = "maximum request size exceeded"
+)
+
 // Client is used to interact with Privatemode's API.
 type Client struct {
 	httpClient *http.Client
@@ -35,33 +44,46 @@ func New(httpClient *http.Client, endpoint string) *Client {
 
 // ExchangeSecret performs a cryptographic key agreement with the Privatemode backend.
 func (c *Client) ExchangeSecret(ctx context.Context, meshCA *x509.Certificate, cred auth.Credential) (string, []byte, error) {
+	return ExchangeSecret(ctx, c.httpClient, c.endpoint, cred, func(req *httpapi.SecretReq, resp *httpapi.SecretResp) error {
+		ssPublicKey, err := getVerifiedPublicKey(resp.MeshCert, meshCA)
+		if err != nil {
+			return fmt.Errorf("getting public key: %w", err)
+		}
+		if !ecdsa.VerifyASN1(ssPublicKey, secretexchange.Hash(req.PublicKey, resp.EncapsulatedKey), resp.Signature) {
+			return errors.New("invalid signature")
+		}
+		return nil
+	})
+}
+
+type responseVerifier func(*httpapi.SecretReq, *httpapi.SecretResp) error
+
+// ExchangeSecret performs a cryptographic key agreement with the Privatemode backend.
+func ExchangeSecret(
+	ctx context.Context, httpClient *http.Client, endpoint string, cred auth.Credential, verify responseVerifier,
+) (string, []byte, error) {
 	priv, err := hpke.MLKEM768X25519().GenerateKey()
 	if err != nil {
 		return "", nil, fmt.Errorf("generating key: %w", err)
 	}
-	req := httpapi.SecretReq{PublicKey: priv.PublicKey().Bytes()}
+	req := &httpapi.SecretReq{PublicKey: priv.PublicKey().Bytes()}
 
 	// Do the request
 	reqJSON, err := json.Marshal(req)
 	if err != nil {
 		return "", nil, fmt.Errorf("marshaling request: %w", err)
 	}
-	body, err := httpapi.Do(ctx, c.httpClient, http.MethodPost, "https://"+c.endpoint+"/privatemode/v1/secret", reqJSON, cred)
+	body, err := httpapi.Do(ctx, httpClient, http.MethodPost, "https://"+endpoint+SecretPath, reqJSON, cred)
 	if err != nil {
 		return "", nil, fmt.Errorf("doing request: %w", err)
 	}
-	var resp httpapi.SecretResp
-	if err := json.Unmarshal(body, &resp); err != nil {
+	resp := &httpapi.SecretResp{}
+	if err := json.Unmarshal(body, resp); err != nil {
 		return "", nil, fmt.Errorf("unmarshaling response: %w", err)
 	}
 
-	// Verify signature with secret-service public key
-	ssPublicKey, err := getVerifiedPublicKey(resp.MeshCert, meshCA)
-	if err != nil {
-		return "", nil, fmt.Errorf("getting public key: %w", err)
-	}
-	if !ecdsa.VerifyASN1(ssPublicKey, secretexchange.Hash(req.PublicKey, resp.EncapsulatedKey), resp.Signature) {
-		return "", nil, errors.New("invalid signature")
+	if err := verify(req, resp); err != nil {
+		return "", nil, err
 	}
 
 	// Export the shared secret

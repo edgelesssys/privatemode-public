@@ -3,14 +3,13 @@ package server
 
 import (
 	"context"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
 	"github.com/edgelesssys/continuum/internal/mtls"
+	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/edgelesssys/continuum/internal/oss/middleware"
 	"github.com/edgelesssys/continuum/internal/oss/process"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
@@ -83,7 +82,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 		Addr:      listener.Addr().String(),
 		Handler:   handler,
 		TLSConfig: s.mtlsIdentity.ServerConfig(),
-		ErrorLog:  newHTTPLogger(s.log), // Prometheus tries to scrape metrics from this TLS endpoint, causing errors we want to ignore
+		ErrorLog:  logging.NewHTTPErrorLogger(s.log),
 	}
 	return process.HTTPServeContext(ctx, server, listener, s.log)
 }
@@ -117,26 +116,4 @@ func tagRequestID(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
-}
-
-type httpLogger struct {
-	infoLog  *log.Logger
-	errorLog *log.Logger
-}
-
-func newHTTPLogger(slogger *slog.Logger) *log.Logger {
-	return log.New(&httpLogger{
-		infoLog:  slog.NewLogLogger(slogger.With("component", "httpErrorLog").Handler(), slog.LevelInfo),
-		errorLog: slog.NewLogLogger(slogger.With("component", "httpErrorLog").Handler(), slog.LevelError),
-	}, "", 0)
-}
-
-func (h *httpLogger) Write(b []byte) (n int, err error) {
-	s := string(b)
-	if strings.HasPrefix(s, "http: TLS handshake error from") {
-		h.infoLog.Print(s)
-	} else {
-		h.errorLog.Print(s)
-	}
-	return len(b), nil
 }

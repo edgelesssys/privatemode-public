@@ -99,7 +99,7 @@ func (s *Server) Serve(ctx context.Context, lis net.Listener, tlsConfig *tls.Con
 		Addr:      lis.Addr().String(),
 		Handler:   s.GetHandler(),
 		TLSConfig: tlsConfig,
-		ErrorLog:  slog.NewLogLogger(s.log.Handler(), slog.LevelError),
+		ErrorLog:  logging.NewHTTPErrorLogger(s.log),
 	}
 	return process.HTTPServeContext(ctx, server, lis, s.log)
 }

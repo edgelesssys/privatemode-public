@@ -112,3 +112,14 @@ data:
       "file_hash_sha256": "f5837aa367118e995bd0ac8271db5c20c5ba10de2829d1adf5888f6a25559a6b",
       "file_size_bytes": 468534808576
     }
+  libertaidai-glm-5-3-nvfp4: |-
+    {
+      "model_source": "https://huggingface.co/LibertAIDAI/GLM-5.3-NVFP4",
+      "commit_hash": "653d98214a487d78c1b2a37167b56764b6240080",
+      "excluded_files": "",
+      "root_hash": "dc26b305dda688e323cb2ff3dd49d57a400759503f9cd7886f7e71aebc66b7de",
+      "hash_offset": "464864735232",
+      "erofs_version": "1.9.4",
+      "veritysetup_version": "2.8.6",
+      "file_size_bytes": 468525105152
+    }

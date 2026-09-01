@@ -7,72 +7,20 @@ import (
 	"crypto/elliptic"
 	"crypto/hpke"
 	"crypto/rand"
+	"encoding/json"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
 
-	"github.com/edgelesssys/continuum/internal/oss/proto/secret-service/userapi"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/httpapi"
+	"github.com/edgelesssys/continuum/internal/oss/secretclient"
 	"github.com/edgelesssys/continuum/internal/oss/secretexchange"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestSetSecrets(t *testing.T) {
-	testCases := map[string]struct {
-		secretReq    *userapi.SetSecretsRequest
-		secretSetter *stubSecretSetter
-		wantErr      bool
-	}{
-		"success": {
-			secretReq: &userapi.SetSecretsRequest{
-				Secrets: map[string][]byte{
-					"16-bytes": bytes.Repeat([]byte{0x01}, 16),
-					"24-bytes": bytes.Repeat([]byte{0x01}, 24),
-					"32-bytes": bytes.Repeat([]byte{0x01}, 32),
-				},
-			},
-			secretSetter: &stubSecretSetter{},
-		},
-		"invalid secret length": {
-			secretReq: &userapi.SetSecretsRequest{
-				Secrets: map[string][]byte{
-					"invalid": bytes.Repeat([]byte{0x01}, 17),
-				},
-			},
-			secretSetter: &stubSecretSetter{},
-			wantErr:      true,
-		},
-		"secret setter error": {
-			secretReq: &userapi.SetSecretsRequest{
-				Secrets: map[string][]byte{
-					"16-bytes": bytes.Repeat([]byte{0x01}, 16),
-					"24-bytes": bytes.Repeat([]byte{0x01}, 24),
-					"32-bytes": bytes.Repeat([]byte{0x01}, 32),
-				},
-			},
-			secretSetter: &stubSecretSetter{err: assert.AnError},
-			wantErr:      true,
-		},
-	}
-
-	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			assert := assert.New(t)
-
-			s := &Server{
-				secretStore: tc.secretSetter,
-				log:         slog.Default(),
-			}
-
-			_, err := s.SetSecrets(t.Context(), tc.secretReq)
-			if tc.wantErr {
-				assert.Error(err)
-				return
-			}
-			assert.NoError(err)
-			assert.Equal(tc.secretReq.Secrets, tc.secretSetter.gotSecrets)
-		})
-	}
-}
 
 func TestExchangeSecret(t *testing.T) {
 	validKey, err := hpke.MLKEM768X25519().GenerateKey()
@@ -81,28 +29,29 @@ func TestExchangeSecret(t *testing.T) {
 	require.NoError(t, err)
 
 	testCases := map[string]struct {
-		req          *userapi.ExchangeSecretRequest
+		req          *httpapi.SecretReq
 		secretSetter *stubSecretSetter
-		wantErr      bool
+		wantStatus   int
 	}{
 		"success": {
-			req:          &userapi.ExchangeSecretRequest{PublicKey: validKey.PublicKey().Bytes()},
+			req:          &httpapi.SecretReq{PublicKey: validKey.PublicKey().Bytes()},
 			secretSetter: &stubSecretSetter{},
+			wantStatus:   http.StatusOK,
 		},
 		"empty key": {
-			req:          &userapi.ExchangeSecretRequest{PublicKey: nil},
+			req:          &httpapi.SecretReq{PublicKey: nil},
 			secretSetter: &stubSecretSetter{},
-			wantErr:      true,
+			wantStatus:   http.StatusBadRequest,
 		},
 		"invalid key": {
-			req:          &userapi.ExchangeSecretRequest{PublicKey: []byte{2, 3}},
+			req:          &httpapi.SecretReq{PublicKey: []byte{2, 3}},
 			secretSetter: &stubSecretSetter{},
-			wantErr:      true,
+			wantStatus:   http.StatusBadRequest,
 		},
 		"secret setter error": {
-			req:          &userapi.ExchangeSecretRequest{PublicKey: validKey.PublicKey().Bytes()},
+			req:          &httpapi.SecretReq{PublicKey: validKey.PublicKey().Bytes()},
 			secretSetter: &stubSecretSetter{err: assert.AnError},
-			wantErr:      true,
+			wantStatus:   http.StatusInternalServerError,
 		},
 	}
 
@@ -113,16 +62,23 @@ func TestExchangeSecret(t *testing.T) {
 
 			s := &Server{
 				secretStore: tc.secretSetter,
+				log:         slog.Default(),
 				meshCertRaw: []byte("meshcert"),
 				meshPriv:    meshPriv,
 			}
 
-			resp, err := s.ExchangeSecret(t.Context(), tc.req)
-			if tc.wantErr {
-				assert.Error(err)
+			var body bytes.Buffer
+			require.NoError(json.NewEncoder(&body).Encode(tc.req))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, secretclient.SecretPath, &body)
+			recorder := httptest.NewRecorder()
+			s.handler().ServeHTTP(recorder, req)
+
+			assert.Equal(tc.wantStatus, recorder.Code)
+			if tc.wantStatus != http.StatusOK {
 				return
 			}
-			require.NoError(err)
+			var resp httpapi.SecretResp
+			require.NoError(json.NewDecoder(recorder.Body).Decode(&resp))
 
 			assert.EqualValues("meshcert", resp.MeshCert)
 			require.True(ecdsa.VerifyASN1(&meshPriv.PublicKey, secretexchange.Hash(tc.req.PublicKey, resp.EncapsulatedKey), resp.Signature))
@@ -134,16 +90,19 @@ func TestExchangeSecret(t *testing.T) {
 
 			require.Len(tc.secretSetter.gotSecrets, 1)
 			assert.Equal(secret, tc.secretSetter.gotSecrets[secretexchange.ID(tc.req.PublicKey)])
+			assert.Equal(int64(constants.InferenceSecretTTL/time.Second), tc.secretSetter.gotTTL)
 		})
 	}
 }
 
 type stubSecretSetter struct {
 	gotSecrets map[string][]byte
+	gotTTL     int64
 	err        error
 }
 
-func (s *stubSecretSetter) SetSecrets(_ context.Context, secrets map[string][]byte, _ int64) error {
+func (s *stubSecretSetter) SetSecrets(_ context.Context, secrets map[string][]byte, ttl int64) error {
 	s.gotSecrets = secrets
+	s.gotTTL = ttl
 	return s.err
 }

@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"github.com/edgelesssys/continuum/internal/oss/httputil"
+	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/edgelesssys/continuum/internal/oss/process"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/expfmt"
@@ -59,7 +60,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	server := &http.Server{
 		Addr:     listener.Addr().String(),
 		Handler:  s.handler,
-		ErrorLog: slog.NewLogLogger(s.log.With("component", "metricsServer").Handler(), slog.LevelError),
+		ErrorLog: logging.NewHTTPErrorLogger(s.log, "component", "metricsServer"),
 	}
 	return process.HTTPServeContext(ctx, server, listener, s.log)
 }

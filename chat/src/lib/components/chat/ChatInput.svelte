@@ -257,8 +257,8 @@
         systemPrompt: activeModelConfig?.systemPrompt[$locale],
         reasoningEffort: supportsExtendedThinking
           ? extendedThinking
-            ? 'high'
-            : 'medium'
+            ? activeModelConfig?.reasoningEffort?.extended
+            : activeModelConfig?.reasoningEffort?.normal
           : undefined,
         thinkingToggle:
           shouldSendThinkingToggle && thinkingToggleParam

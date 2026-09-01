@@ -3,6 +3,7 @@ import { get, writable } from 'svelte/store';
 import type { PrivatemodeClient } from './clientStore';
 import { translate } from './i18n';
 import { deleteImages, loadImage, saveImage } from './imageStore';
+import type { ReasoningEffort } from './models';
 
 export interface AttachedFile {
   name: string;
@@ -73,14 +74,13 @@ export interface SendOptions {
   attachedFiles?: AttachedFile[];
   attachedImages?: AttachedImage[];
   systemPrompt?: string;
-  reasoningEffort?: 'medium' | 'high';
+  reasoningEffort?: ReasoningEffort;
   thinkingToggle?: { paramName: string; enabled: boolean };
   signal: AbortSignal;
 }
 
 type ContentPart =
-  | OpenAI.ChatCompletionContentPartText
-  | OpenAI.ChatCompletionContentPartImage;
+  OpenAI.ChatCompletionContentPartText | OpenAI.ChatCompletionContentPartImage;
 
 type PrivatemodeChatCompletionCreateParams =
   OpenAI.ChatCompletionCreateParamsStreaming & {
@@ -505,18 +505,17 @@ function createChatStore() {
       const branchedMessages = sourceChat.messages
         .slice(0, sliceEnd)
         .filter((m) => !m.isError)
-        .map(
-          (m): Message =>
-            m.role === 'user'
-              ? {
-                  ...m,
+        .map((m): Message =>
+          m.role === 'user'
+            ? {
+                ...m,
+                id: crypto.randomUUID(),
+                attachedImages: m.attachedImages?.map((img) => ({
+                  ...img,
                   id: crypto.randomUUID(),
-                  attachedImages: m.attachedImages?.map((img) => ({
-                    ...img,
-                    id: crypto.randomUUID(),
-                  })),
-                }
-              : { ...m, id: crypto.randomUUID() },
+                })),
+              }
+            : { ...m, id: crypto.randomUUID() },
         );
 
       const now = Date.now();
@@ -672,8 +671,7 @@ function createChatStore() {
         });
         for await (const chunk of stream) {
           const delta = chunk.choices[0]?.delta as
-            | { content?: string | null; reasoning?: string | null }
-            | undefined;
+            { content?: string | null; reasoning?: string | null } | undefined;
           if (delta?.reasoning) accumulatedReasoning += delta.reasoning;
           if (delta?.content) accumulatedContent += delta.content;
           if (delta?.content || delta?.reasoning) {

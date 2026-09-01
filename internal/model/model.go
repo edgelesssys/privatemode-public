@@ -8,6 +8,7 @@ const (
 	KimiK26              = "kimi-k2.6"
 	VoxtralMini3b        = "voxtral-mini-3b"
 	DeepSeekOCR2         = "deepseek-ocr-2"
+	GLM53                = "glm-5.3"
 	GLM52                = "glm-5.2"
 )
 
@@ -24,7 +25,8 @@ const (
 var modelMap = map[string]string{
 	"gpt-oss-latest":   OpenAIGPTOSS120B,
 	"kimi-latest":      KimiK26,
-	"glm-latest":       GLM52,
+	"glm-latest":       GLM53,
+	GLM52:              GLM53,
 	"whisper-large-v3": OpenAIWhisperLargeV3,
 	"gpt-oss-120b":     OpenAIGPTOSS120B,
 }

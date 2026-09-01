@@ -29,9 +29,12 @@
   onMount(() => {
     const savedModel = localStorage.getItem(SELECTED_MODEL_KEY);
 
-    if (savedModel) {
+    // A retired model has no config left, so drop the selection and let the default apply.
+    if (savedModel && Object.hasOwn(modelConfig, savedModel)) {
       selectedModel = savedModel;
       onModelChange(savedModel);
+    } else if (savedModel) {
+      localStorage.removeItem(SELECTED_MODEL_KEY);
     }
 
     const handleOnline = () => {
@@ -124,7 +127,7 @@
 
   function getModelSubtitle(modelId: string): string | undefined {
     if (modelId === 'openai/gpt-oss-120b') return $t('model.gptOssSubtitle');
-    if (modelId === 'kimi-k2.6') return $t('model.kimiSubtitle');
+    if (modelId === 'kimi-latest') return $t('model.kimiSubtitle');
     return modelConfig[modelId]?.subtitle;
   }
 

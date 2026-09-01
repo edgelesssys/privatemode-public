@@ -32,6 +32,7 @@ import (
 var (
 	logLevel       string
 	identityCAPath string
+	rimURL         string
 	driverVersions []string
 	vbiosVersions  []string
 )
@@ -53,6 +54,8 @@ func execute() error {
 	cmd.Flags().StringVar(&logLevel, logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
 	cmd.Flags().StringVar(&identityCAPath, "identity-ca-path", "", "path to the workload identity CA bundle (used to verify peer identity certs)")
 	must(cmd.MarkFlagRequired("identity-ca-path"))
+	cmd.Flags().StringVar(&rimURL, "rim-url", "", "URL of the RIM service")
+	must(cmd.MarkFlagRequired("rim-url"))
 
 	// GPU policy flags
 	cmd.Flags().StringSliceVar(&driverVersions, "gpu-driver-versions", nil, "List of allowed GPU driver versions")
@@ -109,7 +112,7 @@ func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOCSP.Stat
 	if err != nil {
 		return nil, fmt.Errorf("creating RIM TLS config: %w", err)
 	}
-	rimClient := rim.New(&http.Client{Transport: rimTransport}, "https://rim-cache/", log) // Use the local RIM cache
+	rimClient := rim.New(&http.Client{Transport: rimTransport}, rimURL, log)
 
 	ocspClient := ocsp.New(log)
 

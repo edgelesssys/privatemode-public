@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"os"
 	"strconv"
@@ -159,4 +160,34 @@ func NewFileLogger(logLevel string, output io.Writer, filename string) *slog.Log
 		Level: LevelFromString(logLevel, slog.LevelInfo),
 	})
 	return slog.New(newContextHandler(baseHandler))
+}
+
+// NewHTTPErrorLogger returns a [*log.Logger] suitable for usage as an error logger for http servers.
+// The logger filters out TLS handshake errors, which are common for servers exposed on public endpoints,
+// or TLS endpoints that are scraped by Prometheus.
+//
+// The logger sets the attribute "source" to "httpErrorLog".
+// Additional attributes may be provided to add to the logger, e.g. "component", "usageCollector".
+func NewHTTPErrorLogger(slogger *slog.Logger, args ...any) *log.Logger {
+	slogger = slogger.With(append([]any{"source", "httpErrorLog"}, args...)...)
+
+	return log.New(&httpLogger{
+		infoLog:  slog.NewLogLogger(slogger.Handler(), slog.LevelInfo),
+		errorLog: slog.NewLogLogger(slogger.Handler(), slog.LevelError),
+	}, "", 0)
+}
+
+type httpLogger struct {
+	infoLog  *log.Logger
+	errorLog *log.Logger
+}
+
+func (h *httpLogger) Write(b []byte) (n int, err error) {
+	s := string(b)
+	if strings.HasPrefix(s, "http: TLS handshake error from") {
+		h.infoLog.Print(s)
+	} else {
+		h.errorLog.Print(s)
+	}
+	return len(b), nil
 }
