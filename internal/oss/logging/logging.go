@@ -102,7 +102,13 @@ func (c contextHandler) WithGroup(name string) slog.Handler {
 // NewLogger returns a new [*slog.Logger] at the given log level.
 // The logger writes to [os.Stderr] and uses the JSON format.
 func NewLogger(logLevel string) *slog.Logger {
-	baseHandler := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+	return NewWriterLogger(logLevel, os.Stderr)
+}
+
+// NewWriterLogger returns a new [*slog.Logger] at the given log level.
+// The logger writes to out and uses the JSON format.
+func NewWriterLogger(logLevel string, out io.Writer) *slog.Logger {
+	baseHandler := slog.NewJSONHandler(out, &slog.HandlerOptions{
 		Level: LevelFromString(logLevel, slog.LevelInfo),
 	})
 	return slog.New(newContextHandler(baseHandler))
@@ -156,10 +162,7 @@ func NewFileLogger(logLevel string, output io.Writer, filename string) *slog.Log
 		Compress:   false, // compress old files
 		LocalTime:  false,
 	}
-	baseHandler := slog.NewJSONHandler(io.MultiWriter(writer, output), &slog.HandlerOptions{
-		Level: LevelFromString(logLevel, slog.LevelInfo),
-	})
-	return slog.New(newContextHandler(baseHandler))
+	return NewWriterLogger(logLevel, io.MultiWriter(writer, output))
 }
 
 // NewHTTPErrorLogger returns a [*log.Logger] suitable for usage as an error logger for http servers.

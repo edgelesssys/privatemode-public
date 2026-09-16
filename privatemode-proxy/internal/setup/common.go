@@ -5,7 +5,9 @@
 package setup
 
 import (
+	"crypto/tls"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -27,6 +29,7 @@ type Flags struct {
 	NvidiaOCSPAllowUnknown       bool
 	NvidiaOCSPRevokedGracePeriod time.Duration
 	DumpRequestsDir              string
+	CORSAllowedOrigins           []string
 }
 
 // ContrastFlags holds the configuration for the Contrast deployment.
@@ -36,10 +39,14 @@ type ContrastFlags struct {
 
 // NewServer creates a new server instance.
 func NewServer(flags Flags, isApp bool, manager *secretmanager.SecretManager, log *slog.Logger) *server.Server {
-	client := httputil.NewClient()
+	transport := httputil.NewTransport()
+	// Non-streaming inference can be silent for more than ten minutes. Allow one hour,
+	// consistent with the load balancer's tunnel timeout, without limiting response body duration.
+	transport.ResponseHeaderTimeout = time.Hour
 	if flags.InsecureAPIConnection {
-		client = httputil.InsecureNewSkipVerifyClient()
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
+	client := &http.Client{Transport: transport}
 
 	opts := server.Opts{
 		APIEndpoint:                  flags.APIEndpoint,
@@ -51,6 +58,7 @@ func NewServer(flags Flags, isApp bool, manager *secretmanager.SecretManager, lo
 		NvidiaOCSPAllowUnknown:       flags.NvidiaOCSPAllowUnknown,
 		NvidiaOCSPRevokedGracePeriod: flags.NvidiaOCSPRevokedGracePeriod,
 		DumpRequestsDir:              flags.DumpRequestsDir,
+		CORSAllowedOrigins:           flags.CORSAllowedOrigins,
 	}
 
 	return server.New(client, manager, opts, log)

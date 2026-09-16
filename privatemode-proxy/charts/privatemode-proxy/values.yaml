@@ -1,12 +1,24 @@
 replicaCount: 1
 image:
-  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.55.1-pre
+  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.56.1-pre
   pullPolicy: IfNotPresent
   restartPolicy: Always
 service:
   type: ClusterIP
   port: 8080
   annotations: {}
+ingress:
+  enabled: false
+  className: ''
+  annotations: {}
+  # hosts:
+  #   - host: privatemode-proxy.example.com
+  hosts: []
+  # tls:
+  #   - hosts:
+  #       - privatemode-proxy.example.com
+  #     secretName: privatemode-proxy-ingress-tls
+  tls: []
 probes:
   startup:
     failureThreshold: 30
@@ -35,6 +47,8 @@ config:
     apiEndpoint: 'api.privatemode.ai:443'
   # Container port configuration
   port: '8080'
+  # Exact browser origins; empty disables CORS. Use ['*'] to allow any origin.
+  corsAllowedOrigins: []
   workspace:
     enabled: false
     volumeClaimName: 'privatemode-proxy-pvc'

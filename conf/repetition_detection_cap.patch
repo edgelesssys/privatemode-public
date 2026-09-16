@@ -1,8 +1,8 @@
 diff --git a/vllm/config/model.py b/vllm/config/model.py
-index ab3a56a1fe..312aa35bd7 100644
+index ab2d49b91a..9b558662c0 100644
 --- a/vllm/config/model.py
 +++ b/vllm/config/model.py
-@@ -244,6 +244,12 @@ class ModelConfig:
+@@ -247,6 +247,12 @@ class ModelConfig:
      specified in `SamplingParams`. The default value comes the default for the
      OpenAI Chat Completions API. -1 means no cap, i.e. all (output_length *
      vocab_size) logprobs are allowed to be returned and it may cause OOM."""
@@ -16,10 +16,10 @@ index ab3a56a1fe..312aa35bd7 100644
      """Indicates the content returned in the logprobs and prompt_logprobs.
      Supported mode:
 diff --git a/vllm/engine/arg_utils.py b/vllm/engine/arg_utils.py
-index 219f8ffb08..b801bf91ea 100644
+index 44ee837c6f..ebf41e0561 100644
 --- a/vllm/engine/arg_utils.py
 +++ b/vllm/engine/arg_utils.py
-@@ -535,6 +535,9 @@ class EngineArgs:
+@@ -538,6 +538,9 @@ class EngineArgs:
      long_prefill_token_threshold: int = SchedulerConfig.long_prefill_token_threshold
      max_num_seqs: int | None = None
      max_logprobs: int = ModelConfig.max_logprobs
@@ -29,8 +29,8 @@ index 219f8ffb08..b801bf91ea 100644
      logprobs_mode: LogprobsMode = ModelConfig.logprobs_mode
      use_fp64_gumbel: bool = ModelConfig.use_fp64_gumbel
      disable_log_stats: bool = False
-@@ -867,6 +870,10 @@ class EngineArgs:
-             **model_kwargs["enable_return_routed_experts"],
+@@ -879,6 +882,10 @@ class EngineArgs:
+             **model_kwargs["return_sampling_mask"],
          )
          model_group.add_argument("--max-logprobs", **model_kwargs["max_logprobs"])
 +        model_group.add_argument(
@@ -40,9 +40,9 @@ index 219f8ffb08..b801bf91ea 100644
          model_group.add_argument("--logprobs-mode", **model_kwargs["logprobs_mode"])
          model_group.add_argument("--use-fp64-gumbel", **model_kwargs["use_fp64_gumbel"])
          model_group.add_argument(
-@@ -1709,6 +1716,9 @@ class EngineArgs:
-             enforce_eager=self.enforce_eager,
+@@ -1751,6 +1758,9 @@ class EngineArgs:
              enable_return_routed_experts=self.enable_return_routed_experts,
+             return_sampling_mask=self.return_sampling_mask,
              max_logprobs=self.max_logprobs,
 +            max_repetition_detection_pattern_size=(
 +                self.max_repetition_detection_pattern_size
@@ -51,10 +51,10 @@ index 219f8ffb08..b801bf91ea 100644
              use_fp64_gumbel=self.use_fp64_gumbel,
              disable_sliding_window=self.disable_sliding_window,
 diff --git a/vllm/sampling_params.py b/vllm/sampling_params.py
-index 97ab54e9f6..6f4148eda4 100644
+index ada67c91a6..8951055752 100644
 --- a/vllm/sampling_params.py
 +++ b/vllm/sampling_params.py
-@@ -142,6 +142,10 @@ class StructuredOutputsParams:
+@@ -158,6 +158,10 @@ class StructuredOutputsParams:
          )
  
  
@@ -65,7 +65,7 @@ index 97ab54e9f6..6f4148eda4 100644
  @dataclass
  class RepetitionDetectionParams:
      """Parameters for detecting repetitive N-gram patterns in output tokens."""
-@@ -171,6 +175,22 @@ class RepetitionDetectionParams:
+@@ -187,6 +191,22 @@ class RepetitionDetectionParams:
                  "with min_pattern_size <= max_pattern_size. "
                  "Set both to 0 to disable repetitive pattern detection."
              )
@@ -88,7 +88,7 @@ index 97ab54e9f6..6f4148eda4 100644
          if self.max_pattern_size > 0 and self.min_count < 2:
              raise VLLMValidationError(
                  "min_count must be >= 2 to detect repetitive patterns "
-@@ -769,6 +789,7 @@ class SamplingParams(
+@@ -788,6 +808,7 @@ class SamplingParams(
          self._validate_structured_outputs(
              model_config, structured_outputs_config, tokenizer
          )
@@ -96,7 +96,7 @@ index 97ab54e9f6..6f4148eda4 100644
  
      def _validate_logprobs(self, model_config: ModelConfig) -> None:
          max_logprobs = model_config.max_logprobs
-@@ -906,6 +927,47 @@ class SamplingParams(
+@@ -925,6 +946,47 @@ class SamplingParams(
                      value=invalid_token_ids,
                  )
  

@@ -123,3 +123,36 @@ data:
       "veritysetup_version": "2.8.6",
       "file_size_bytes": 468525105152
     }
+  zai-org-glm-5-3-flash: |-
+    {
+      "model_source": "https://huggingface.co/zai-org/GLM-5.3-Flash",
+      "commit_hash": "04c4e9e95c5da8862dced7e5056455116f83a7e0",
+      "excluded_files": "",
+      "root_hash": "cf61e9b6c80c3bed9524c972aa89610a7c691d0ff00cb42774eb0083a8100591",
+      "hash_offset": "328366215168",
+      "erofs_version": "1.9.4",
+      "veritysetup_version": "2.8.6",
+      "file_size_bytes": 330951790592
+    }
+  qwen-qwen3-0-6b: |-
+    {
+      "model_source": "https://huggingface.co/Qwen/Qwen3-0.6B",
+      "commit_hash": "c1899de289a04d12100db370d81485cdf75e47ca",
+      "excluded_files": "",
+      "root_hash": "7de2454761415718ceb4226b0df0b83f6760b6b7362ff1177c3cadee6b140099",
+      "hash_offset": "1519214592",
+      "erofs_version": "1.9.4",
+      "veritysetup_version": "2.8.7",
+      "file_size_bytes": 1531187200
+    }
+  paddlepaddle-paddleocr-vl-1-6: |-
+    {
+      "model_source": "https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6",
+      "commit_hash": "c5630abae1d940eafe0697512a0325494b02ab42",
+      "excluded_files": "",
+      "root_hash": "62089cf7a51f529595b101c654687a9d1894d151cb9917c8686e88ea34634334",
+      "hash_offset": "1930469376",
+      "erofs_version": "1.9.4",
+      "veritysetup_version": "2.8.7",
+      "file_size_bytes": 1945681920
+    }

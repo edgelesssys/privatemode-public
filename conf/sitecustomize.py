@@ -3,13 +3,22 @@
 # 1. Drops a benign, noisy print() from the remote-code tokenizer path.
 # 2. If VLLM_MEM_POLL_SECONDS is set, emits periodic "MEMSTATS {json}" lines
 #    with torch allocator stats (reserved vs. allocated fragmentation) that
-#    nvidia-smi cannot see from outside the process.
+#    nvidia-smi cannot see from outside the process, plus NVML utilization
+#    and power draw.
 import builtins
 import json
 import os
 import sys
 import threading
 import time
+
+
+def _nvml_stat(fn, dev):
+    # None if NVML is unavailable or the query unsupported.
+    try:
+        return fn(dev)
+    except Exception:
+        return None
 
 
 def _mem_poll_loop(interval, with_snapshot):
@@ -49,6 +58,10 @@ def _mem_poll_loop(interval, with_snapshot):
                     >> 20,
                     "alloc_retries": s.get("num_alloc_retries", 0),
                     "ooms": s.get("num_ooms", 0),
+                    "gpu_util_pct": _nvml_stat(torch.cuda.utilization, dev),
+                    "power_w": _nvml_stat(
+                        lambda d: round(torch.cuda.power_draw(d) / 1000, 1), dev
+                    ),
                 }
                 if with_snapshot:
                     # largest_free_block: an alloc bigger than both it and

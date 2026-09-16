@@ -37,6 +37,23 @@ const (
 	defaultClientVersion string = "v1.999.0" // greater than any test case
 )
 
+func TestReadinessBypassesBodyLimit(t *testing.T) {
+	// No secret manager or forwarder: probes must not reach either dependency.
+	s := &Server{log: slog.Default()}
+	handler := s.GetHandler()
+	for path, method := range map[string]string{"/readyz": http.MethodGet, openai.ChatCompletionsEndpoint: http.MethodPost} {
+		req := httptest.NewRequestWithContext(t.Context(), method, path, nil)
+		req.ContentLength = int64(constants.MaxFileSizeBytes) + 1
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, req)
+		if path == "/readyz" {
+			assert.Equal(t, http.StatusNoContent, resp.Code)
+		} else {
+			assert.Equal(t, http.StatusRequestEntityTooLarge, resp.Code)
+		}
+	}
+}
+
 func TestChatCompletionsPromptEncryption(t *testing.T) {
 	apiKey := testAPIKey
 	testCases := map[string]struct {

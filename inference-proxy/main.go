@@ -17,6 +17,7 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/metrics"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/probe"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/server"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/statsfeed"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/usagereporter"
 	"github.com/edgelesssys/continuum/internal/mtls"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
@@ -49,6 +50,7 @@ func newRootCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&cfg.listenPort, "listen-port", constants.InferenceProxyServerPort, "port the proxy server is listening on")
 	cmd.Flags().StringVar(&cfg.metricsPort, "metrics-port", constants.MetricsServerPort, "port the metrics server is listening on")
+	cmd.Flags().StringVar(&cfg.statsFeedPort, "stats-feed-port", constants.StatsFeedServerPort, "port the vLLM stats feed receiver is listening on")
 	cmd.Flags().StringVar(&cfg.workloadPort, "workload-port", constants.WorkloadDefaultPort, "port the workload is listening on")
 	cmd.Flags().StringSliceVar(&cfg.adapterTypes, "adapter-type", []string{"openai"}, "type of adapter to use (can be specified multiple times or comma-separated)")
 	cmd.Flags().StringVar(&cfg.workloadAddress, "workload-address", "", "host name or IP the workload can be reached at over TCP")
@@ -87,6 +89,7 @@ func newRootCmd() *cobra.Command {
 type runConfig struct {
 	listenPort         string
 	metricsPort        string
+	statsFeedPort      string
 	workloadPort       string
 	adapterTypes       []string
 	workloadAddress    string
@@ -179,6 +182,18 @@ func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
 		}
 		if err := metricsServer.Serve(ctx, listener); err != nil {
 			return fmt.Errorf("serving metrics server: %w", err)
+		}
+		return nil
+	})
+
+	wg.Go(func() error {
+		log.InfoContext(ctx, "Starting stats feed server", "port", cfg.statsFeedPort)
+		listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", cfg.statsFeedPort))
+		if err != nil {
+			return fmt.Errorf("listening: %w", err)
+		}
+		if err := statsfeed.New(log.With("component", "statsfeed")).Serve(ctx, listener); err != nil {
+			return fmt.Errorf("serving stats feed server: %w", err)
 		}
 		return nil
 	})

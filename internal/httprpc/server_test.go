@@ -1,6 +1,7 @@
 package httprpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -183,6 +184,40 @@ func TestMakeHandlerRPCExecution(t *testing.T) {
 				require.NoError(json.Unmarshal(rec.Body.Bytes(), &errResp))
 				assert.Equal(tc.wantErrorResp, errResp)
 			}
+		})
+	}
+}
+
+func TestWithAccessLogLevel(t *testing.T) {
+	okFn := func(_ context.Context, req echoReq) (echoResp, error) { return echoResp{Echo: req.Value}, nil }
+
+	tests := map[string]struct {
+		options []HandlerOption
+		want    slog.Level
+	}{
+		"defaults to info": {want: slog.LevelInfo},
+		"lowered to debug": {options: []HandlerOption{WithAccessLogLevel(slog.LevelDebug)}, want: slog.LevelDebug},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			var logOutput bytes.Buffer
+			log := slog.New(slog.NewJSONHandler(&logOutput, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/test", strings.NewReader(`{"value":"hello"}`))
+			req.Header.Set("Content-Type", "application/json")
+			MakeHandler(log, okFn, tc.options...).ServeHTTP(httptest.NewRecorder(), req)
+
+			lines := strings.Split(strings.TrimSpace(logOutput.String()), "\n")
+			require.Len(t, lines, 1)
+
+			var record struct {
+				Level string `json:"level"`
+				Msg   string `json:"msg"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(lines[0]), &record))
+			require.Equal(t, "Served RPC request", record.Msg)
+			assert.Equal(t, tc.want.String(), record.Level)
 		})
 	}
 }

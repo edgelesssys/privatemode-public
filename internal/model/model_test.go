@@ -27,6 +27,10 @@ func TestResolve(t *testing.T) {
 			input:    "glm-5.2",
 			expected: "glm-5.3",
 		},
+		"glm flash latest to current": {
+			input:    "glm-flash-latest",
+			expected: "glm-5.3-flash",
+		},
 		"whisper short to full": {
 			input:    "whisper-large-v3",
 			expected: "openai/whisper-large-v3",

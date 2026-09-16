@@ -10,6 +10,7 @@ const (
 	DeepSeekOCR2         = "deepseek-ocr-2"
 	GLM53                = "glm-5.3"
 	GLM52                = "glm-5.2"
+	GLM53Flash           = "glm-5.3-flash"
 )
 
 const (
@@ -27,6 +28,7 @@ var modelMap = map[string]string{
 	"kimi-latest":      KimiK26,
 	"glm-latest":       GLM53,
 	GLM52:              GLM53,
+	"glm-flash-latest": GLM53Flash,
 	"whisper-large-v3": OpenAIWhisperLargeV3,
 	"gpt-oss-120b":     OpenAIGPTOSS120B,
 }

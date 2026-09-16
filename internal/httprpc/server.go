@@ -85,14 +85,35 @@ func (f *FuncError) toErrorResponse() ErrorResponse {
 	}
 }
 
+// HandlerOption applies an option to a handler created by [MakeHandler].
+type HandlerOption func(*handlerOpts)
+
+// handlerOpts holds the options of a handler created by [MakeHandler].
+type handlerOpts struct {
+	accessLogLevel slog.Level
+}
+
+// WithAccessLogLevel sets the level of the per-call "Served RPC request" line, which defaults to
+// [slog.LevelInfo].
+func WithAccessLogLevel(level slog.Level) HandlerOption {
+	return func(o *handlerOpts) {
+		o.accessLogLevel = level
+	}
+}
+
 // MakeHandler returns an [http.HandlerFunc] that decodes a JSON request of type Req, calls fn, and
 // encodes the response of type Resp as JSON.
 //
 // If fn returns a [*FuncError], it is used in the error response. [SentinelError] is a simple way
 // to return client-matchable errors.
 func MakeHandler[Req any, Resp any](
-	log *slog.Logger, fn func(ctx context.Context, req Req) (Resp, error),
+	log *slog.Logger, fn func(ctx context.Context, req Req) (Resp, error), options ...HandlerOption,
 ) http.HandlerFunc {
+	opts := handlerOpts{accessLogLevel: slog.LevelInfo}
+	for _, apply := range options {
+		apply(&opts)
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		requestID := requestid.New()
 		w.Header().Set(requestid.Header, requestID)
@@ -101,13 +122,13 @@ func MakeHandler[Req any, Resp any](
 
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
-			writeErrorRespAndLog(ctx, reqLog, w, http.StatusMethodNotAllowed, ErrMethodNotAllowed.toErrorResponse())
+			writeErrorRespAndLog(ctx, reqLog, opts, w, http.StatusMethodNotAllowed, ErrMethodNotAllowed.toErrorResponse())
 			return
 		}
 
 		ct := r.Header.Get("Content-Type")
 		if !isJSONContentType(ct) {
-			writeErrorRespAndLog(ctx, reqLog, w, http.StatusUnsupportedMediaType, ErrUnsupportedMediaType.toErrorResponse())
+			writeErrorRespAndLog(ctx, reqLog, opts, w, http.StatusUnsupportedMediaType, ErrUnsupportedMediaType.toErrorResponse())
 			return
 		}
 
@@ -117,10 +138,10 @@ func MakeHandler[Req any, Resp any](
 		buf, err := io.ReadAll(body)
 		if err != nil {
 			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-				writeErrorRespAndLog(ctx, reqLog, w, http.StatusRequestEntityTooLarge, ErrRequestEntityTooLarge.toErrorResponse())
+				writeErrorRespAndLog(ctx, reqLog, opts, w, http.StatusRequestEntityTooLarge, ErrRequestEntityTooLarge.toErrorResponse())
 				return
 			}
-			writeErrorRespAndLog(ctx, reqLog, w, http.StatusBadRequest, ErrReadBody.toErrorResponse())
+			writeErrorRespAndLog(ctx, reqLog, opts, w, http.StatusBadRequest, ErrReadBody.toErrorResponse())
 			return
 		}
 
@@ -128,13 +149,13 @@ func MakeHandler[Req any, Resp any](
 		dec := json.NewDecoder(bytes.NewReader(buf))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
-			writeErrorRespAndLog(ctx, reqLog, w, http.StatusBadRequest, ErrInvalidRequest.toErrorResponse())
+			writeErrorRespAndLog(ctx, reqLog, opts, w, http.StatusBadRequest, ErrInvalidRequest.toErrorResponse())
 			return
 		}
 
 		// Reject requests that send more than one JSON value.
 		if dec.More() {
-			writeErrorRespAndLog(ctx, reqLog, w, http.StatusBadRequest, ErrInvalidRequest.toErrorResponse())
+			writeErrorRespAndLog(ctx, reqLog, opts, w, http.StatusBadRequest, ErrInvalidRequest.toErrorResponse())
 			return
 		}
 
@@ -149,61 +170,61 @@ func MakeHandler[Req any, Resp any](
 					status = http.StatusBadRequest
 					reqLog.DebugContext(ctx, "RPC func returned client fault", "error", err, "errorCode", funcErr.Code)
 				}
-				writeErrorRespAndLog(ctx, reqLog, w, status, funcErr.toErrorResponse())
+				writeErrorRespAndLog(ctx, reqLog, opts, w, status, funcErr.toErrorResponse())
 				return
 			}
 			reqLog.ErrorContext(ctx, "RPC func returned unhandled error", "error", err)
-			writeErrorRespAndLog(ctx, reqLog, w, http.StatusInternalServerError, ErrInternalError.toErrorResponse())
+			writeErrorRespAndLog(ctx, reqLog, opts, w, http.StatusInternalServerError, ErrInternalError.toErrorResponse())
 			return
 		}
 
-		writeSuccessRespAndLog(ctx, reqLog, w, &resp)
+		writeSuccessRespAndLog(ctx, reqLog, opts, w, &resp)
 	}
 }
 
-func writeSuccessRespAndLog(ctx context.Context, log *slog.Logger, w http.ResponseWriter, resp any) {
+func writeSuccessRespAndLog(ctx context.Context, log *slog.Logger, opts handlerOpts, w http.ResponseWriter, resp any) {
 	respBuf, err := json.Marshal(resp)
 	if err != nil {
 		log.ErrorContext(ctx, "Marshaling response failed", "error", err)
-		writeErrorRespAndLog(ctx, log, w, http.StatusInternalServerError, ErrInternalError.toErrorResponse())
+		writeErrorRespAndLog(ctx, log, opts, w, http.StatusInternalServerError, ErrInternalError.toErrorResponse())
 		return
 	}
-	if !writeJSON(ctx, log, w, http.StatusOK, respBuf) {
+	if !writeJSON(ctx, log, opts, w, http.StatusOK, respBuf) {
 		return
 	}
-	log.InfoContext(
-		ctx, "Served RPC request", "outcome", "success", "rpcStatus", "ok",
+	log.Log(
+		ctx, opts.accessLogLevel, "Served RPC request", "outcome", "success", "rpcStatus", "ok",
 		"httpStatus", http.StatusOK,
 	)
 }
 
-func writeErrorRespAndLog(ctx context.Context, log *slog.Logger, w http.ResponseWriter, httpStatus int, resp ErrorResponse) {
+func writeErrorRespAndLog(ctx context.Context, log *slog.Logger, opts handlerOpts, w http.ResponseWriter, httpStatus int, resp ErrorResponse) {
 	respBuf, err := json.Marshal(&resp)
 	if err != nil {
 		log.ErrorContext(ctx, "Marshaling error response failed", "error", err)
 		respBuf = []byte(`{"message":"internal error","code":"httprpc.Internal"}`)
 		httpStatus = http.StatusInternalServerError
 	}
-	if !writeJSON(ctx, log, w, httpStatus, respBuf) {
+	if !writeJSON(ctx, log, opts, w, httpStatus, respBuf) {
 		return
 	}
 	outcome, rpcStatus := "success", "clientFaultError"
 	if resp.ServerFault {
 		outcome, rpcStatus = "failure", "serverFaultError"
 	}
-	log.InfoContext(
-		ctx, "Served RPC request", "outcome", outcome, "rpcStatus", rpcStatus,
+	log.Log(
+		ctx, opts.accessLogLevel, "Served RPC request", "outcome", outcome, "rpcStatus", rpcStatus,
 		"httpStatus", httpStatus, "errorCode", resp.Code,
 	)
 }
 
-func writeJSON(ctx context.Context, log *slog.Logger, w http.ResponseWriter, status int, body []byte) bool {
+func writeJSON(ctx context.Context, log *slog.Logger, opts handlerOpts, w http.ResponseWriter, status int, body []byte) bool {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
 		log.DebugContext(ctx, "Writing response failed", "error", err)
-		log.InfoContext(ctx, "Served RPC request", "outcome", "failure", "errorCode", ErrWriteResponse.code)
+		log.Log(ctx, opts.accessLogLevel, "Served RPC request", "outcome", "failure", "errorCode", ErrWriteResponse.code)
 		return false
 	}
 	return true

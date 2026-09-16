@@ -1,5 +1,5 @@
 diff --git a/vllm/entrypoints/speech_to_text/base/serving.py b/vllm/entrypoints/speech_to_text/base/serving.py
-index 3b505d625b..6701400ff0 100644
+index b1d3b72777..95afb2a643 100644
 --- a/vllm/entrypoints/speech_to_text/base/serving.py
 +++ b/vllm/entrypoints/speech_to_text/base/serving.py
 @@ -30,13 +30,13 @@ from vllm.entrypoints.serve.engine.typing import SpeechToTextRequest
@@ -18,7 +18,7 @@ index 3b505d625b..6701400ff0 100644
  from vllm.renderers.inputs.preprocess import parse_enc_dec_prompt, parse_model_prompt
  from vllm.sampling_params import BeamSearchParams, SamplingParams
  from vllm.tokenizers import get_tokenizer
-@@ -156,6 +156,185 @@ def decode_audio(
+@@ -173,6 +173,185 @@ def decode_audio(
          raise ValueError("Invalid or unsupported audio file.") from exc
  
  
@@ -204,7 +204,7 @@ index 3b505d625b..6701400ff0 100644
  class SpeechToTextBaseServing(GenerateBaseServing):
      """Base class for speech-to-text operations like transcription and
      translation."""
-@@ -367,8 +546,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -386,8 +565,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
  
              parsed_prompt: DictPrompt
              if request.response_format == "verbose_json":
@@ -214,7 +214,7 @@ index 3b505d625b..6701400ff0 100644
              else:
                  parsed_prompt = parse_model_prompt(self.model_config, prompt)
  
-@@ -378,8 +556,18 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -397,8 +575,18 @@ class SpeechToTextBaseServing(GenerateBaseServing):
  
          return engine_inputs, duration, chunk_start_offsets
  
@@ -235,7 +235,7 @@ index 3b505d625b..6701400ff0 100644
  
          if not (isinstance(dec_prompt, dict) and "prompt" in dec_prompt):
              raise VLLMValidationError(
-@@ -392,7 +580,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -411,7 +599,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
              "<|notimestamps|>", "<|0.00|>"
          )
  
@@ -244,7 +244,7 @@ index 3b505d625b..6701400ff0 100644
  
      @staticmethod
      def _get_decoder_prompt_len(engine_inputs: list[EngineInput]) -> int:
-@@ -434,6 +622,69 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -453,6 +641,69 @@ class SpeechToTextBaseServing(GenerateBaseServing):
          Note: No_speech_prob field is not supported
          in this implementation and will be None. See docs for details.
          """
@@ -315,7 +315,7 @@ index 3b505d625b..6701400ff0 100644
          init_token = self.tokenizer.encode("<|0.00|>", add_special_tokens=False)[0]
          if tokens[-1] == self.tokenizer.eos_token_id:
 diff --git a/vllm/model_executor/models/voxtral.py b/vllm/model_executor/models/voxtral.py
-index f15ec491af..afa5ca9347 100644
+index 5be82632f4..56198535d0 100644
 --- a/vllm/model_executor/models/voxtral.py
 +++ b/vllm/model_executor/models/voxtral.py
 @@ -312,6 +312,7 @@ class VoxtralForConditionalGeneration(

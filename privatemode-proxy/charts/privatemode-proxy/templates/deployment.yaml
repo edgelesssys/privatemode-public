@@ -48,6 +48,9 @@ spec:
             - "--apiEndpoint={{ .Values.config.apiEndpoint.apiEndpoint }}"
             {{- end}}
             - "--port={{ .Values.config.port }}"
+            {{- range .Values.config.corsAllowedOrigins }}
+            - {{ printf "--corsAllowedOrigins=%s" . | quote }}
+            {{- end }}
             {{- if .Values.config.workspace.enabled }}
             - "--workspace={{ .Values.config.workspace.mountPath }}"
             {{- end }}

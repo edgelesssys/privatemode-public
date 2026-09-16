@@ -38,6 +38,9 @@ const (
 	InferenceProxyServerPort = "8085"
 	// MetricsServerPort is the port on which our standalone metrics servers are exposed by default.
 	MetricsServerPort = "8185"
+	// StatsFeedServerPort is the port on which the inference-proxy receives the vLLM stat-logger
+	// feed by default.
+	StatsFeedServerPort = "8285"
 	// SecretServiceHealthPort is the port on which the Secret Service Health Server listens for health probes.
 	SecretServiceHealthPort = "8080"
 	// SecretServiceUserPort is the port on which the Secret Service listens on for client connection.

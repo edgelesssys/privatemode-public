@@ -1,5 +1,5 @@
 diff --git a/vllm/entrypoints/speech_to_text/base/serving.py b/vllm/entrypoints/speech_to_text/base/serving.py
-index 8065c13d43..3b505d625b 100644
+index e7b864f3b7..b1d3b72777 100644
 --- a/vllm/entrypoints/speech_to_text/base/serving.py
 +++ b/vllm/entrypoints/speech_to_text/base/serving.py
 @@ -10,7 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +12,7 @@ index 8065c13d43..3b505d625b 100644
  from fastapi import Request
  from transformers import PreTrainedTokenizerBase
  
-@@ -32,8 +34,7 @@ from vllm.inputs import EncoderDecoderInput, EngineInput
+@@ -32,14 +34,14 @@ from vllm.inputs import EncoderDecoderInput, EngineInput
  from vllm.logger import init_logger
  from vllm.logprobs import FlatLogprobs, Logprob
  from vllm.model_executor.models import SupportsTranscription
@@ -22,7 +22,14 @@ index 8065c13d43..3b505d625b 100644
  from vllm.outputs import RequestOutput
  from vllm.renderers.inputs import DictPrompt, EncoderDecoderDictPrompt
  from vllm.renderers.inputs.preprocess import parse_enc_dec_prompt, parse_model_prompt
-@@ -91,6 +92,70 @@ def asr_inter_chunk_separator(
+ from vllm.sampling_params import BeamSearchParams, SamplingParams
+ from vllm.tokenizers import get_tokenizer
+ from vllm.utils.async_utils import make_async_with_semaphore, merge_async_iterators
++from vllm.utils.mem_constants import MiB_bytes
+ 
+ from ..transcription.protocol import (
+     TranscriptionResponse,
+@@ -91,6 +93,86 @@ def asr_inter_chunk_separator(
      return "" if language and language.lower() in no_space_languages else " "
  
  
@@ -30,13 +37,15 @@ index 8065c13d43..3b505d625b 100644
 +    audio_data: bytes,
 +    sample_rate: int,
 +    max_duration_s: float | None = None,
++    max_decode_bytes: int | None = None,
 +) -> tuple[np.ndarray, int]:
 +    """Decode audio bytes with PyAV, average to mono and resample to
 +    ``sample_rate``.
 +
 +    Handles container formats (MP4, M4A, WebM) that ``soundfile`` cannot detect
 +    from a ``BytesIO`` stream. Raises ``ValueError`` on unsupported input, or if
-+    the decoded audio exceeds ``max_duration_s`` (decompression-bomb guard).
++    the decoded audio exceeds ``max_duration_s`` or ``max_decode_bytes``
++    (decompression-bomb guards).
 +    """
 +    try:
 +        with io.BytesIO(audio_data) as bytes_:
@@ -47,6 +56,7 @@ index 8065c13d43..3b505d625b 100644
 +                raise ValueError("Invalid or unsupported audio file.")
 +            samples: list[np.ndarray] = []
 +            total = 0
++            total_decode_bytes = 0
 +            for frame in container.decode(stream):
 +                frame_array = frame.to_ndarray()
 +
@@ -69,6 +79,19 @@ index 8065c13d43..3b505d625b 100644
 +                total += frame_array.shape[-1]
 +                if max_duration_s is not None and total / sr_native > max_duration_s:
 +                    raise ValueError("Maximum audio decode duration exceeded")
++
++                total_decode_bytes += frame_array.nbytes
++                if (
++                    max_decode_bytes is not None
++                    and total_decode_bytes > max_decode_bytes
++                ):
++                    raise ValueError(
++                        f"Audio decode exceeded "
++                        f"{max_decode_bytes / MiB_bytes:.0f} MiB memory "
++                        f"limit ({total_decode_bytes / MiB_bytes:.0f} MiB "
++                        f"decoded so far). Set VLLM_MAX_AUDIO_DECODE_BYTES to "
++                        f"increase this limit."
++                    )
 +
 +                samples.append(frame_array)
 +            if not samples:
@@ -93,7 +116,7 @@ index 8065c13d43..3b505d625b 100644
  class SpeechToTextBaseServing(GenerateBaseServing):
      """Base class for speech-to-text operations like transcription and
      translation."""
-@@ -168,23 +233,16 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -169,24 +251,17 @@ class SpeechToTextBaseServing(GenerateBaseServing):
          self,
          audio_data: bytes,
      ) -> tuple[list[np.ndarray], float]:
@@ -112,6 +135,7 @@ index 8065c13d43..3b505d625b 100644
 -                    sr=self.asr_config.sample_rate,
 -                    mono=True,
 -                    max_duration_s=self.max_audio_decode_duration_s,
+-                    max_decode_bytes=self.max_audio_decode_bytes,
 -                )
 -        except ValueError:
 -            raise
@@ -121,6 +145,7 @@ index 8065c13d43..3b505d625b 100644
 +            audio_data,
 +            int(self.asr_config.sample_rate),
 +            max_duration_s=self.max_audio_decode_duration_s,
++            max_decode_bytes=self.max_audio_decode_bytes,
 +        )
  
          duration = get_audio_duration(y=y, sr=sr)

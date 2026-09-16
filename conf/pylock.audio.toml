@@ -14,14 +14,14 @@ sha256 = "8a032e8d8ebc73dec079364b9b4a6837638a2d106e8472314e685ffbf163e700"
 
 [[packages]]
 name = "scipy"
-version = "1.18.0"
+version = "1.18.1"
 
 [[packages.wheels]]
-name = "scipy-1.18.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
-url = "https://files.pythonhosted.org/packages/dd/aa/1b939f6c67ed68635bb538e6752d3dacc02f66535182e939a89581a44e9c/scipy-1.18.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+name = "scipy-1.18.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/df/64/ff35eb9e54894cf471ff4716abd3c81eb0a0626869217ce3e6ba4ccf17d7/scipy-1.18.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
 
 [packages.wheels.hashes]
-sha256 = "1f55797419e16e7f30cf88ffb3113ce0467f00cfe3f70d5c281730b21769bfc2"
+sha256 = "f55fa87b6c612ecd6b058f167c53231b1d14e412efe361d3d6e38b3631c73218"
 
 [[packages]]
 name = "soundfile"

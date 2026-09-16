@@ -1,0 +1,27 @@
+[build-system]
+# setuptools chosen because already in the image and the package is installed with
+# `--no-build-isolation`.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "privatemode-stat-logger"
+version = "0.1.0"
+description = "vLLM stat-logger plugin forwarding serving events to the inference-proxy"
+requires-python = ">=3.10"
+# Installed with --offline: declared dependencies must already be present in the image,
+# i.e. vLLM dependencies.
+dependencies = [
+    "msgspec",
+    "aiohttp",
+    "prometheus-client",
+]
+
+[project.entry-points."vllm.stat_logger_plugins"]
+privatemode_stat_logger = "privatemode_stat_logger:PrivatemodeStatLogger"
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio"]
+
+[tool.setuptools]
+py-modules = ["privatemode_stat_logger"]

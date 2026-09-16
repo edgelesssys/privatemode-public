@@ -21,7 +21,7 @@ stdenv.mkDerivation (finalAttrs: {
     inherit (finalAttrs) pname version src;
     fetcherVersion = 4;
     sourceRoot = "${finalAttrs.src.name}/chat";
-    hash = "sha256-Ypno6sTvXAvfDWlwDdDp3xaySGDewVOW9+z6G4Wri+g=";
+    hash = "sha256-m5D8Me3Ei+J1k7dcxLCc/rQYYp9jLHNcwUYecwWI+Z4=";
   };
 
   nativeBuildInputs = [

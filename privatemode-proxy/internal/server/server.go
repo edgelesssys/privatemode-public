@@ -45,6 +45,7 @@ type Server struct {
 	nvidiaOCSPAllowUnknown       bool
 	nvidiaOCSPRevokedGracePeriod time.Duration
 	dumpRequestsDir              string
+	corsAllowedOrigins           []string
 }
 
 // Opts are the options for creating a new [Server].
@@ -58,6 +59,7 @@ type Opts struct {
 	NvidiaOCSPAllowUnknown       bool
 	NvidiaOCSPRevokedGracePeriod time.Duration
 	DumpRequestsDir              string
+	CORSAllowedOrigins           []string
 }
 
 type apiForwarder interface {
@@ -89,6 +91,7 @@ func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Se
 		nvidiaOCSPAllowUnknown:       opts.NvidiaOCSPAllowUnknown,
 		nvidiaOCSPRevokedGracePeriod: opts.NvidiaOCSPRevokedGracePeriod,
 		dumpRequestsDir:              opts.DumpRequestsDir,
+		corsAllowedOrigins:           opts.CORSAllowedOrigins,
 	}
 }
 
@@ -96,41 +99,76 @@ func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Se
 // If tlsConfig is nil, the server will start without TLS.
 func (s *Server) Serve(ctx context.Context, lis net.Listener, tlsConfig *tls.Config) error {
 	server := &http.Server{
-		Addr:      lis.Addr().String(),
-		Handler:   s.GetHandler(),
-		TLSConfig: tlsConfig,
-		ErrorLog:  logging.NewHTTPErrorLogger(s.log),
+		Addr:              lis.Addr().String(),
+		Handler:           s.GetHandler(),
+		TLSConfig:         tlsConfig,
+		ErrorLog:          logging.NewHTTPErrorLogger(s.log),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		IdleTimeout:       time.Minute,
+		// No WriteTimeout: inference responses may stream for a long time.
 	}
 	return process.HTTPServeContext(ctx, server, lis, s.log)
 }
 
 // GetHandler returns an HTTP handler that routes requests to the appropriate handler.
 func (s *Server) GetHandler() http.Handler {
+	// API routes take credentials. Unmatched routes (404/405) and readiness don't.
+	api := func(h http.HandlerFunc) http.Handler {
+		handler := passAuthToSecretManagerMiddleware(h, s.sm)
+		if strings.TrimSpace(s.dumpRequestsDir) != "" {
+			handler = middleware.DumpRequestAndResponse(handler, s.log, s.dumpRequestsDir)
+		}
+		// Bound body reads before dumping, secret management, or forwarding.
+		return limitRequestBody(handler)
+	}
 	mux := http.NewServeMux()
-	mux.HandleFunc(openai.ChatCompletionsEndpoint, s.chatRequestHandler)
-	mux.HandleFunc(openai.LegacyCompletionsEndpoint, s.chatRequestHandler)
-	mux.HandleFunc("/unstructured/", s.unstructuredHandler)
-	mux.HandleFunc(openai.ModelsEndpoint, s.forwardUnencrypted)
-	mux.HandleFunc(openai.EmbeddingsEndpoint, s.embeddingsHandler)
-	mux.HandleFunc(openai.TranscriptionsEndpoint, s.transcriptionsHandler)
-	mux.HandleFunc(anthropic.MessagesEndpoint, s.chatRequestHandler)
-	mux.HandleFunc("/readyz", s.readinessHandler)
+	mux.Handle("POST "+openai.ChatCompletionsEndpoint, api(s.chatRequestHandler))
+	mux.Handle("POST "+openai.LegacyCompletionsEndpoint, api(s.chatRequestHandler))
+	mux.Handle("POST /unstructured/", api(s.unstructuredHandler))
+	mux.Handle("GET "+openai.ModelsEndpoint, api(s.forwardUnencrypted))
+	mux.Handle("POST "+openai.EmbeddingsEndpoint, api(s.embeddingsHandler))
+	mux.Handle("POST "+openai.TranscriptionsEndpoint, api(s.transcriptionsHandler))
+	mux.Handle("POST "+anthropic.MessagesEndpoint, api(s.chatRequestHandler))
+	mux.HandleFunc("GET /readyz", s.readinessHandler)
 
 	// Apply middlewares below, handler holds the chain entrypoint
-	var handler http.Handler = mux
+	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mux.ServeHTTP(w, r)
+		logging.AddSummaryAttrs(r.Context(), "httpRoute", r.Pattern) // empty for 404/405
+	})
 
-	handler = passAuthToSecretManagerMiddleware(handler, s.sm)
-
-	// Only apply dumping middleware when a dump directory is configured.
-	if strings.TrimSpace(s.dumpRequestsDir) != "" {
-		handler = middleware.DumpRequestAndResponse(handler, s.log, s.dumpRequestsDir)
-	}
+	handler = cors(handler, mux, s.corsAllowedOrigins)
 
 	handler = middleware.LogRequestSummary(handler, s.log, true)
 
 	handler = addRequestID(handler)
 
 	return handler
+}
+
+func limitRequestBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		maxBytes := int64(constants.MaxFileSizeBytes)
+		msg := constants.MaxBodySizeExceededMsg
+		if strings.HasPrefix(r.URL.Path, "/unstructured/") {
+			maxBytes = constants.MaxUnstructuredBodySize
+			msg = constants.MaxUnstructuredBodySizeExceededMsg
+		}
+		if r.ContentLength > maxBytes {
+			forwarder.HTTPError(w, r, http.StatusRequestEntityTooLarge, "%s", msg)
+			return
+		}
+		if _, err := persist.ReadBody(w, r, maxBytes); err != nil {
+			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+				forwarder.HTTPError(w, r, http.StatusRequestEntityTooLarge, "%s", msg)
+			} else {
+				forwarder.HTTPError(w, r, http.StatusBadRequest, "failed to read request body")
+			}
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) readinessHandler(w http.ResponseWriter, _ *http.Request) {

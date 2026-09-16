@@ -33,11 +33,21 @@ const (
 	// SchemeHTTP protocol scheme.
 	SchemeHTTP ProtocolScheme = "http"
 
+	// StatusClientClosedRequest is the non-standard 499 "Client Closed Request" code
+	// (nginx convention). The caller is already gone, so the response is never read;
+	// the code exists to keep client aborts out of the 5xx metrics and logs.
+	StatusClientClosedRequest = 499
+
 	// copyBufferSize is the buffer size used for copying the response body.
 	// It is specifically chosen to be smaller than the default buffer used by Go,
 	// to ensure streaming responses are comparatively smooth to directly interacting with the server.
 	// Size was chosen through experimentation with vllm benchmarks.
 	copyBufferSize = 1024 * 8
+
+	// maxErrorBodyBytes limits buffered upstream error responses used for retry
+	// inspection. Larger bodies are replaced with a size error for the retry
+	// callback and produce a 502 if the callback declines to retry.
+	maxErrorBodyBytes = 1024 * 1024
 )
 
 // ProtocolScheme is the protocol scheme used for the forwarding.
@@ -148,7 +158,7 @@ func (f *Forwarder) Forward(
 				"Downstream request cancelled (connection lost) before request could be fully forwarded",
 				"error", err,
 			)
-			HTTPError(w, req, http.StatusInternalServerError, "forwarding request: %s", err)
+			HTTPError(w, req, StatusClientClosedRequest, "forwarding request: %s", err)
 			return
 		}
 		// Upstream failures report as gateway errors (502/504); 500 is for proxy-internal faults.
@@ -291,8 +301,13 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 	}
 
 	// Read response body for error message (but restore it for further processing)
-	bodyBytes, readErr := io.ReadAll(resp.Body)
+	bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes+1))
 	resp.Body.Close()
+	if len(bodyBytes) > maxErrorBodyBytes {
+		upErr := newTransportError(errors.New("upstream error response body too large"))
+		shouldRetry, retryErr := f.shouldRetry(req.Context(), retryCallback, upErr.Error(), resp.StatusCode, attempt)
+		return shouldRetry, nil, errors.Join(upErr, retryErr)
+	}
 	if readErr != nil {
 		bodyBytes = fmt.Appendf(nil, "failed to read response body: %s", readErr)
 	} else {

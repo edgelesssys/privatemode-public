@@ -1,8 +1,8 @@
 diff --git a/vllm/sampling_params.py b/vllm/sampling_params.py
-index 5dedbde372..97ab54e9f6 100644
+index 2f0af9e1b4..ada67c91a6 100644
 --- a/vllm/sampling_params.py
 +++ b/vllm/sampling_params.py
-@@ -763,6 +763,7 @@ class SamplingParams(
+@@ -782,6 +782,7 @@ class SamplingParams(
          self._validate_logit_bias(model_config)
          self._validate_logits_processors(model_config)
          self._validate_allowed_token_ids(tokenizer)
@@ -10,7 +10,7 @@ index 5dedbde372..97ab54e9f6 100644
          self._validate_spec_decode(speculative_config)
          self._validate_diffusion(model_config)
          self._validate_structured_outputs(
-@@ -851,6 +852,27 @@ class SamplingParams(
+@@ -870,6 +871,27 @@ class SamplingParams(
                  value=invalid_token_ids,
              )
  

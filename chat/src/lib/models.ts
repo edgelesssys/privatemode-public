@@ -85,4 +85,14 @@ export const modelConfig: Record<string, ModelInfo> = {
     supportsVision: false,
     maxWords: 70000,
   },
+  'glm-flash-latest': {
+    displayName: 'GLM-5.3-Flash',
+    subtitle: 'Reasoning model with a large context window',
+    systemPrompt: getSystemPrompt('GLM-5.3-Flash'),
+    thinkingMode: 'extended',
+    reasoningEffort: { normal: 'low', extended: 'max' },
+    supportsFileUploads: true,
+    supportsVision: true,
+    maxWords: 70000,
+  },
 };

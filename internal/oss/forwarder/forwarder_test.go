@@ -109,6 +109,39 @@ func TestForwardStreamingAborted(t *testing.T) {
 	assert.Equal(streamedChunk, resp.Body.String())
 }
 
+func TestForwardCancelledBeforeResponseReportsClientClosed(t *testing.T) {
+	assert := assert.New(t)
+
+	// Upstream never responds; the downstream client gives up first.
+	reqReceived := make(chan struct{})
+	release := make(chan struct{})
+	stubServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		close(reqReceived)
+		<-release
+	}))
+	defer stubServer.Close()
+	defer close(release)
+
+	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	defer cancel()
+	req = req.WithContext(ctx)
+	resp := httptest.NewRecorder()
+
+	go func() {
+		<-reqReceived
+		cancel()
+	}()
+
+	forwarder.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
+
+	// The client is gone, so nothing reads this. It must not land in the 5xx bucket.
+	assert.Equal(StatusClientClosedRequest, resp.Code)
+	assert.Less(resp.Code, http.StatusInternalServerError)
+}
+
 func TestForwardStreamingUpstreamAborts(t *testing.T) {
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -324,10 +357,14 @@ func TestForwardRetry(t *testing.T) {
 		shouldRetry      bool
 		expectedCode     int
 		expectedAttempts int
+		errorBody        string
 	}{
-		"no delay":   {0, true, http.StatusOK, 3},
-		"with delay": {10 * time.Millisecond, true, http.StatusOK, 3},
-		"no retry":   {0, false, http.StatusInternalServerError, 1},
+		"no delay":                            {0, true, http.StatusOK, 3, ""},
+		"with delay":                          {10 * time.Millisecond, true, http.StatusOK, 3, ""},
+		"no retry":                            {0, false, http.StatusInternalServerError, 1, ""},
+		"error body at limit":                 {0, true, http.StatusOK, 3, strings.Repeat("x", maxErrorBodyBytes)},
+		"error body over limit":               {0, true, http.StatusOK, 3, strings.Repeat("x", maxErrorBodyBytes+1)},
+		"error body over limit without retry": {0, false, http.StatusBadGateway, 1, strings.Repeat("x", maxErrorBodyBytes+1)},
 	}
 
 	for name, tc := range testCases {
@@ -343,6 +380,9 @@ func TestForwardRetry(t *testing.T) {
 				{500, "Internal Server Error"},
 				{500, "Still failing"},
 				{200, `{"success": true}`},
+			}
+			if tc.errorBody != "" {
+				responses[0].body = tc.errorBody
 			}
 
 			stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -361,15 +401,21 @@ func TestForwardRetry(t *testing.T) {
 
 			forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
+			callbackCount := 0
 			retryCallback := func(statusCode int, errMsg string, attempt int) (bool, time.Duration) {
-				if !tc.shouldRetry {
-					return false, 0
-				}
+				callbackCount++
 
 				// Verify we get the correct response body for each attempt
-				expectedBodies := []string{"Internal Server Error", "Still failing"}
+				expectedBodies := []string{responses[0].body, "Still failing"}
+				if len(tc.errorBody) > maxErrorBodyBytes {
+					expectedBodies[0] = "upstream error response body too large"
+				}
 				if attempt <= len(expectedBodies) {
-					assert.Contains(errMsg, expectedBodies[attempt-1], "Response body should match expected for attempt %d", attempt)
+					assert.Equal(expectedBodies[attempt-1], errMsg, "Response body should match expected for attempt %d", attempt)
+				}
+				assert.Equal(http.StatusInternalServerError, statusCode)
+				if !tc.shouldRetry {
+					return false, 0
 				}
 
 				shouldRetry := statusCode == 500 && attempt < 3
@@ -391,6 +437,11 @@ func TestForwardRetry(t *testing.T) {
 
 			assert.Equal(tc.expectedCode, resp.Code)
 			assert.Equal(tc.expectedAttempts, attemptCount, "Should have made exactly %d attempts", tc.expectedAttempts)
+			if tc.shouldRetry {
+				assert.Equal(2, callbackCount)
+			} else {
+				assert.Equal(1, callbackCount)
+			}
 
 			if tc.expectedCode == http.StatusOK {
 				assert.Equal(`{"success": true}`, resp.Body.String())

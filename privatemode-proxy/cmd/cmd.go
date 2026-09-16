@@ -18,6 +18,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/edgelesssys/continuum/internal/oss/tlsconfig"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/setup"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +30,7 @@ var (
 	disableAPIKeyFallback        bool
 	workspace                    string
 	apiEndpoint                  string
+	listenAddress                string
 	port                         string
 	manifestPath                 string
 	nvidiaOCSPAllowUnknown       bool
@@ -37,6 +39,7 @@ var (
 	tlsKeyPath                   string
 	insecureAPIConnection        bool
 	dumpRequests                 bool
+	corsAllowedOrigins           []string
 
 	// sharedPromptCache is used to share the cache between users.
 	// When true, all users of the proxy will share the same cache.
@@ -73,8 +76,12 @@ func New() *cobra.Command {
 		"Do not use the configured API key for forwarded requests.")
 	must(cmd.Flags().MarkHidden("disableAPIKeyFallback"))
 	cmd.Flags().StringVar(&apiEndpoint, "apiEndpoint", constants.APIEndpoint, "The endpoint for the Privatemode API")
+	cmd.Flags().StringVar(&listenAddress, "listen-address", "0.0.0.0",
+		"The IP address or hostname on which the proxy listens for incoming API requests.")
 	cmd.Flags().StringVar(&port, "port", "8080",
 		"The port on which the proxy listens for incoming API requests.")
+	cmd.Flags().StringSliceVar(&corsAllowedOrigins, "corsAllowedOrigins", nil,
+		"Allowed browser origins (comma-separated). Empty disables CORS; '*' allows any origin.")
 	cmd.Flags().StringVar(&workspace, "workspace", ".",
 		fmt.Sprintf("The path into which the binary writes files. This includes the manifest log data in the '%s' subdirectory.", constants.ManifestDir))
 	cmd.Flags().StringVar(&manifestPath, "manifestPath", "",
@@ -195,6 +202,7 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 		APIEndpoint:                  apiEndpoint,
 		APIKey:                       apiKey,
 		DisableAPIKeyFallback:        disableAPIKeyFallback,
+		CORSAllowedOrigins:           corsAllowedOrigins,
 		PromptCacheSalt:              cacheSalt,
 		NvidiaOCSPAllowUnknown:       nvidiaOCSPAllowUnknown,
 		NvidiaOCSPRevokedGracePeriod: time.Duration(nvidiaOCSPRevokedGracePeriod) * time.Hour,
@@ -213,9 +221,10 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 	}
 	const isApp = false
 
-	lis, err := net.Listen("tcp", net.JoinHostPort("", port))
+	listenEndpoint := net.JoinHostPort(listenAddress, port)
+	lis, err := net.Listen("tcp", listenEndpoint)
 	if err != nil {
-		return fmt.Errorf("listening on port %q: %w", port, err)
+		return fmt.Errorf("listening on %q: %w", listenEndpoint, err)
 	}
 	tlsConfig, err := getTLSConfig(tlsCertPath, tlsKeyPath)
 	if err != nil {
@@ -246,21 +255,7 @@ func getTLSConfig(tlsCertPath, tlsKeyPath string) (*tls.Config, error) {
 	if tlsCertPath == "" && tlsKeyPath == "" {
 		return nil, nil
 	}
-	return tlsFileReloadCfg(tlsCertPath, tlsKeyPath)
-}
-
-// tlsFileReloadCfg returns a [*tls.Config] that loads the certificate and key from the given paths for every connection. It validates the paths on creation.
-func tlsFileReloadCfg(tlsCertPath, tlsKeyPath string) (*tls.Config, error) {
-	getCert := func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-		cert, err := tls.LoadX509KeyPair(tlsCertPath, tlsKeyPath)
-		return &cert, err
-	}
-	if _, err := getCert(nil); err != nil {
-		return nil, err
-	}
-	return &tls.Config{
-		GetCertificate: getCert,
-	}, nil
+	return tlsconfig.New(tlsCertPath, tlsKeyPath)
 }
 
 func must(err error) {

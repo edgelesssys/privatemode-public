@@ -129,23 +129,31 @@ func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
 	case <-sm.credChan:
 	}
 
+	const initialBackoff = 5 * time.Second
+	const maxBackoff = 60 * time.Second
+	backoff := initialBackoff
 	for {
 		secret, err := sm.LatestSecret(ctx)
+		var wait time.Duration
 		if err != nil {
 			if ctx.Err() != nil {
 				log.InfoContext(ctx, "Context cancelled, stopping loop")
 				return nil //nolint:nilerr
 			}
-			log.ErrorContext(ctx, "Failed to updated secret", "error", err)
-			return err
+			log.ErrorContext(ctx, "Failed to update secret", "error", err, "backoff", backoff)
+			wait = backoff
+			backoff = min(backoff*2, maxBackoff)
+		} else {
+			log.InfoContext(ctx, "Secret updated successfully")
+			backoff = initialBackoff
+			wait = secret.ExpirationDate.Sub(sm.clock.Now())
 		}
-		log.InfoContext(ctx, "Secret updated successfully")
 
 		select {
 		case <-ctx.Done():
 			log.InfoContext(ctx, "Context cancelled, stopping loop")
 			return nil
-		case <-sm.clock.After(secret.ExpirationDate.Sub(sm.clock.Now())):
+		case <-sm.clock.After(wait):
 		}
 	}
 }
