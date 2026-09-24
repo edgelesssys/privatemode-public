@@ -18,6 +18,7 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
@@ -296,7 +297,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 			}(),
 			validateResponse: checkSuccessfulResponse,
 		},
-		"HTTPS image URL accepted": {
+		"HTTPS image URL rejected": {
 			clientRequest: func() string {
 				res, err := json.Marshal(openai.ChatRequest{
 					Model: defaultModel,
@@ -316,7 +317,10 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 				require.NoError(t, err)
 				return string(res)
 			}(),
-			validateResponse: checkSuccessfulResponse,
+			validateResponse: func(assert *assert.Assertions, responseRecorder *httptest.ResponseRecorder) {
+				assert.Equal(http.StatusInternalServerError, responseRecorder.Code)
+				assert.Contains(responseRecorder.Body.String(), mutators.ErrRemoteResourceURL.Error())
+			},
 		},
 		"data image URL accepted": {
 			clientRequest: func() string {
@@ -340,7 +344,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 			}(),
 			validateResponse: checkSuccessfulResponse,
 		},
-		"non-HTTPS image URL rejected": {
+		"HTTP image URL rejected": {
 			clientRequest: func() string {
 				res, err := json.Marshal(openai.ChatRequest{
 					Model: defaultModel,
@@ -362,7 +366,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 			}(),
 			validateResponse: func(assert *assert.Assertions, responseRecorder *httptest.ResponseRecorder) {
 				assert.Equal(http.StatusInternalServerError, responseRecorder.Code)
-				assert.Contains(responseRecorder.Body.String(), "non-HTTPS and non-data image URL \\\"http://example.com/image.jpg\\\" is insecure")
+				assert.Contains(responseRecorder.Body.String(), mutators.ErrRemoteResourceURL.Error())
 			},
 		},
 	}

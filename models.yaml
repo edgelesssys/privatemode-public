@@ -14,19 +14,10 @@ data:
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
       "file_hash_sha256": "d4ad28fca8e652d3af378fb7caa3fa87dd63b753951bca67a45db9b1000f8b0c",
-      "file_size_bytes": 2687344640
-    }
-  facebook-opt-125m: |-
-    {
-      "model_source": "https://huggingface.co/facebook/opt-125m",
-      "commit_hash": "27dcfa74d334bc871f3234de431e71c6eeba5dd6",
-      "excluded_files": "",
-      "root_hash": "08da1ef4dfc95438a13d964d565a341c0e5de32a5d65c28dcb1414a3a7c675dc",
-      "hash_offset": "753115136",
-      "erofs_version": "1.9",
-      "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "3120af8ed8a63429b96bb35abf74e0bffa280849ab4e01e312d85f889191262f",
-      "file_size_bytes": 759058432
+      "file_size_bytes": 2687344640,
+      "node_selectors": [
+        "nvidia.com/gpu.present=true"
+      ]
     }
   mistralai-voxtral-mini-3b-2507: |-
     {
@@ -38,7 +29,10 @@ data:
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
       "file_hash_sha256": "f6a655ccbcb231e789dfe33f84cbee813c35067000e47ce02d1ec04819da5751",
-      "file_size_bytes": 9437544448
+      "file_size_bytes": 9437544448,
+      "node_selectors": [
+        "nvidia.com/gpu.present=true"
+      ]
     }
   openai-gpt-oss-120b: |-
     {
@@ -50,7 +44,10 @@ data:
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
       "file_hash_sha256": "74cb2e9482e611d895c24b2b5e9187f3aa8002df8b2c7fda7ebacb924dc748e8",
-      "file_size_bytes": 65790877696
+      "file_size_bytes": 65790877696,
+      "node_selectors": [
+        "nvidia.com/gpu.present=true"
+      ]
     }
   openai-whisper-large-v3: |-
     {
@@ -62,7 +59,10 @@ data:
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
       "file_hash_sha256": "ac1b25abaa8c4dbdb5ba1065bbcbff1eedba9a24632277f1215a87d9467a35d3",
-      "file_size_bytes": 9338761216
+      "file_size_bytes": 9338761216,
+      "node_selectors": [
+        "nvidia.com/gpu.present=true"
+      ]
     }
   moonshotai-kimi-k2-6: |-
     {
@@ -74,19 +74,11 @@ data:
       "erofs_version": "1.9",
       "veritysetup_version": "2.8.4",
       "file_hash_sha256": "0d6c66927e4758f7d860b40fee4ca69146df9c87d001c34a89faff0b9588fc38",
-      "file_size_bytes": 599891709952
-    }
-  nvidia-kimi-k2-6-nvfp4: |-
-    {
-      "model_source": "https://huggingface.co/nvidia/Kimi-K2.6-NVFP4",
-      "commit_hash": "2fd3a800dedd098b8327eb49e93ebc75f85da19f",
-      "excluded_files": "",
-      "root_hash": "37edc6df557bed56c1f8e6191f6098fbf93a4b30a017cc1c3f931d61120c3049",
-      "hash_offset": "595219173376",
-      "erofs_version": "1.9",
-      "veritysetup_version": "2.8.6",
-      "file_hash_sha256": "f31d74aaebccea1fa99d88fbad598e1c11901fc75e8e8a566de904f4b8088b40",
-      "file_size_bytes": 599905951744
+      "file_size_bytes": 599891709952,
+      "node_selectors": [
+        "privatemode.edgeless.systems/gpu-type=b300",
+        "nvidia.com/gpu.B200=true"
+      ]
     }
   deepseek-ai-deepseek-ocr-2: |-
     {
@@ -98,19 +90,10 @@ data:
       "erofs_version": "1.9.2",
       "veritysetup_version": "2.8.6",
       "file_hash_sha256": "290626832a457426b221b4405d14c8a729ea339abed85b700df21266e524446c",
-      "file_size_bytes": 6842781696
-    }
-  nvidia-glm-5-2-nvfp4: |-
-    {
-      "model_source": "https://huggingface.co/nvidia/GLM-5.2-NVFP4",
-      "commit_hash": "aec724e8c7b8ee9db3b48c01c320f63f9cdaf8aa",
-      "excluded_files": "",
-      "root_hash": "303b752bd7f87b5d9721db9e8fbe3b4676bc0ac9641a8e22d8878c26fb00a098",
-      "hash_offset": "464874364928",
-      "erofs_version": "1.9.2",
-      "veritysetup_version": "2.8.6",
-      "file_hash_sha256": "f5837aa367118e995bd0ac8271db5c20c5ba10de2829d1adf5888f6a25559a6b",
-      "file_size_bytes": 468534808576
+      "file_size_bytes": 6842781696,
+      "node_selectors": [
+        "nvidia.com/gpu.present=true"
+      ]
     }
   libertaidai-glm-5-3-nvfp4: |-
     {
@@ -121,7 +104,11 @@ data:
       "hash_offset": "464864735232",
       "erofs_version": "1.9.4",
       "veritysetup_version": "2.8.6",
-      "file_size_bytes": 468525105152
+      "file_size_bytes": 468525105152,
+      "node_selectors": [
+        "privatemode.edgeless.systems/gpu-type=b300",
+        "nvidia.com/gpu.B200=true"
+      ]
     }
   zai-org-glm-5-3-flash: |-
     {
@@ -132,7 +119,11 @@ data:
       "hash_offset": "328366215168",
       "erofs_version": "1.9.4",
       "veritysetup_version": "2.8.6",
-      "file_size_bytes": 330951790592
+      "file_size_bytes": 330951790592,
+      "node_selectors": [
+        "privatemode.edgeless.systems/gpu-type=b300",
+        "nvidia.com/gpu.B200=true"
+      ]
     }
   qwen-qwen3-0-6b: |-
     {
@@ -143,7 +134,10 @@ data:
       "hash_offset": "1519214592",
       "erofs_version": "1.9.4",
       "veritysetup_version": "2.8.7",
-      "file_size_bytes": 1531187200
+      "file_size_bytes": 1531187200,
+      "node_selectors": [
+        "nvidia.com/gpu.present=true"
+      ]
     }
   paddlepaddle-paddleocr-vl-1-6: |-
     {
@@ -154,5 +148,8 @@ data:
       "hash_offset": "1930469376",
       "erofs_version": "1.9.4",
       "veritysetup_version": "2.8.7",
-      "file_size_bytes": 1945681920
+      "file_size_bytes": 1945681920,
+      "node_selectors": [
+        "nvidia.com/gpu.present=true"
+      ]
     }

@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -137,7 +138,7 @@ func TestServer(t *testing.T) {
 
 type fakeProber struct{ err error }
 
-func (p fakeProber) Err() error { return p.err }
+func (p fakeProber) CheckLiveness(context.Context) error { return p.err }
 
 type fakeHTTPClient struct {
 	status int

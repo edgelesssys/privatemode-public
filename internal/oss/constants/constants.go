@@ -125,10 +125,12 @@ const (
 	// ShardKeySecondBoundaryBlocks is the number of cache blocks between the first and second boundary.
 	ShardKeySecondBoundaryBlocks = 100_096 / CacheBlockSizeTokens
 	// ShardKeyThirdBoundaryBlocksPerChar is the number of blocks per character after the second boundary.
-	// 32 blocks * 16 tokens = 512 tokens.
-	ShardKeyThirdBoundaryBlocksPerChar = 32
-	// ShardKeyThirdBoundaryBlocks is the number of cache blocks after the second boundary.
-	ShardKeyThirdBoundaryBlocks = 1_000_000 / CacheBlockSizeTokens
+	// 64 blocks * 16 tokens = 1024 tokens. Keys from proxies < v1.57.0 encode 512 tokens per character
+	// here; the API Gateway then overestimates their cached prefix, which only degrades load balancing.
+	ShardKeyThirdBoundaryBlocksPerChar = 64
+	// ShardKeyThirdBoundaryBlocks is the number of cache blocks at the end of the third range,
+	// i.e., the largest context a shard key is generated for.
+	ShardKeyThirdBoundaryBlocks = 2_000_000 / CacheBlockSizeTokens
 
 	// InferenceSecretTTL is the time-to-live for inference secrets.
 	InferenceSecretTTL = time.Hour

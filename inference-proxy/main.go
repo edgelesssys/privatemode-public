@@ -18,6 +18,7 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/probe"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/server"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/statsfeed"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/traceforward"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/usagereporter"
 	"github.com/edgelesssys/continuum/internal/mtls"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
@@ -56,6 +57,8 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.workloadAddress, "workload-address", "", "host name or IP the workload can be reached at over TCP")
 	cmd.Flags().StringVar(&cfg.workloadMetricsURL, "workload-metrics", "", "URL of the workload metrics")
 	cmd.Flags().StringVar(&cfg.workloadReadyURL, "workload-ready", "", "URL of the workload to check readiness")
+	cmd.Flags().StringVar(&cfg.workloadReachabilityURL, "workload-reachability-url", "", "URL probed for workload reachability; suppresses liveness failures while unreachable")
+	cmd.Flags().StringVar(&cfg.workloadStartMarker, "workload-start-marker", "", "file the workload writes an opaque token to on every container start")
 	cmd.Flags().StringVar(&cfg.ssAddress, "secret-svc-address", "", "host name or IP for the secret service")
 	cmd.Flags().StringVar(&cfg.etcdMemberCert, "etcd-member-cert", filepath.Join(constants.EtcdBasePath(), "etcd.crt"), "path to the etcd member certificate")
 	cmd.Flags().StringVar(&cfg.etcdMemberKey, "etcd-member-key", filepath.Join(constants.EtcdBasePath(), "etcd.key"), "path to the etcd member key")
@@ -69,8 +72,11 @@ func newRootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.ucEndpoint, "usage-collector-endpoint", "", "host:port of the API gateway's usage collector RPC")
 	cmd.Flags().StringVar(&cfg.logLevel, logging.Flag, logging.DefaultFlagValue, logging.FlagInfo)
 	cmd.Flags().StringVar(&cfg.otlpEndpoint, tracing.EndpointFlag, "", tracing.EndpointFlagInfo)
+	cmd.Flags().StringVar(&cfg.traceListenPort, "trace-listen-port", "", "localhost port for forwarding workload OTLP/gRPC traces")
 
 	must(cmd.MarkFlagRequired("workload-address"))
+	must(cmd.MarkFlagRequired("workload-reachability-url"))
+	must(cmd.MarkFlagRequired("workload-start-marker"))
 	must(cmd.MarkFlagRequired("identity-cert-path"))
 	must(cmd.MarkFlagRequired("identity-key-path"))
 	must(cmd.MarkFlagRequired("identity-ca-path"))
@@ -87,35 +93,46 @@ func newRootCmd() *cobra.Command {
 }
 
 type runConfig struct {
-	listenPort         string
-	metricsPort        string
-	statsFeedPort      string
-	workloadPort       string
-	adapterTypes       []string
-	workloadAddress    string
-	workloadMetricsURL string
-	workloadReadyURL   string
-	ssAddress          string
-	etcdMemberCert     string
-	etcdMemberKey      string
-	etcdCA             string
-	identityCertPath   string
-	identityKeyPath    string
-	identityCAPath     string
-	workloadTasks      string
-	workloadModel      string
-	ocspStatusFile     string
-	ucEndpoint         string
-	logLevel           string
-	otlpEndpoint       string
+	listenPort              string
+	metricsPort             string
+	statsFeedPort           string
+	workloadPort            string
+	adapterTypes            []string
+	workloadAddress         string
+	workloadMetricsURL      string
+	workloadReadyURL        string
+	workloadReachabilityURL string
+	workloadStartMarker     string
+	ssAddress               string
+	etcdMemberCert          string
+	etcdMemberKey           string
+	etcdCA                  string
+	identityCertPath        string
+	identityKeyPath         string
+	identityCAPath          string
+	workloadTasks           string
+	workloadModel           string
+	ocspStatusFile          string
+	ucEndpoint              string
+	logLevel                string
+	otlpEndpoint            string
+	traceListenPort         string
 }
 
 func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
+	if cfg.traceListenPort != "" && cfg.otlpEndpoint == "" {
+		return errors.New("--trace-listen-port requires --otlp-endpoint")
+	}
+
 	for _, adapterType := range cfg.adapterTypes {
 		if !adapter.IsSupportedInferenceAPI(adapterType) {
 			return fmt.Errorf("unsupported adapter type: %v", adapterType)
 		}
 	}
+	if _, err := os.Stat(filepath.Dir(cfg.workloadStartMarker)); err != nil {
+		return fmt.Errorf("checking workload start marker directory: %w", err)
+	}
+
 	log.InfoContext(ctx, "Starting inference proxy", "port", cfg.listenPort, "workloadPort", cfg.workloadPort, "adapterTypes", cfg.adapterTypes, "workloadAddress", cfg.workloadAddress)
 
 	// The inference-proxy always sits behind the apigateway and never originates
@@ -164,7 +181,20 @@ func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
 
 	wg, ctx := errgroup.WithContext(ctx)
 
-	prober := probe.New(workloadBaseURL, cfg.workloadModel, tasks, log)
+	if cfg.traceListenPort != "" {
+		wg.Go(func() error {
+			listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", cfg.traceListenPort))
+			if err != nil {
+				return fmt.Errorf("listening for workload traces: %w", err)
+			}
+			if err := traceforward.NewServer(cfg.otlpEndpoint, log).Serve(ctx, listener); err != nil {
+				return fmt.Errorf("forwarding workload traces: %w", err)
+			}
+			return nil
+		})
+	}
+
+	prober := probe.New(workloadBaseURL, cfg.workloadReachabilityURL, cfg.workloadStartMarker, cfg.workloadModel, tasks, log)
 
 	metricsServer := metrics.NewServer(cfg.workloadMetricsURL, cfg.workloadReadyURL, prober, etcdWatcher.Ready, log)
 

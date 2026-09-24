@@ -28,16 +28,17 @@ func Do(ctx context.Context, client *http.Client, method, url string, reqBody []
 	if err != nil {
 		return nil, fmt.Errorf("doing request: %w", err)
 	}
+	defer resp.Body.Close()
 	respBody, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
 	if err != nil {
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, respBody)
+		return nil, fmt.Errorf("%w (status code: %d)", ErrUnauthorized, resp.StatusCode)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %v: %s", resp.Status, respBody)
+		// Callers log these errors; never include potentially sensitive response bodies.
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 	return respBody, nil
 }

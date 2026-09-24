@@ -9,6 +9,7 @@ package mutators
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -19,6 +20,9 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/persist"
 	"github.com/tidwall/gjson"
 )
+
+// ErrRemoteResourceURL indicates that a media URL uses a scheme other than data.
+var ErrRemoteResourceURL = errors.New("remote resource URLs are not allowed, use data URLs instead")
 
 // imageDataQueries locate image payloads (base64 data or URLs) in chat messages, across the
 // OpenAI and Anthropic formats. "#" + "@flatten" collect every image, so each is counted once.
@@ -161,6 +165,11 @@ func ModelHeaderInjector(extractor func(*http.Request) (string, error)) forwarde
 	}
 }
 
+// maxShardKeyTokens is the largest estimated token count a shard key is generated for. It is
+// twice the largest context window, as the estimate of JSON bytes per
+// [constants.ShardKeyCharsPerToken] overshoots the real token count.
+const maxShardKeyTokens = constants.ShardKeyThirdBoundaryBlocks * constants.CacheBlockSizeTokens
+
 // generateShardKey generates a shard key from a cache salt and content
 // string.
 func generateShardKey(cacheSalt string, content string) (string, error) {
@@ -170,14 +179,13 @@ func generateShardKey(cacheSalt string, content string) (string, error) {
 	// Estimate number of tokens from bytes
 	n := len(content) / constants.ShardKeyCharsPerToken
 
-	// Currently, only 1Mio tokens to limit the shard key size. Limiting factors are proxies,
-	// where nginx supports only 4kb. But currently, this only goes to the API Gateway such
-	// that we could also work with headers larger than 4kb. Envoy also supports more. But
-	// could still be a problem for client side proxies.
+	// The limit bounds the shard key size, ~2.7k chars at maxShardKeyTokens. We budget 4k for the
+	// header line: beyond ~3.4M tokens the key would exceed it, which may matter for client-side
+	// proxies (nginx's default large header buffer is 8k); the API Gateway's Envoy accepts more.
 	//
-	// For extending this beyond 1Mio token context size we should have a clear plan on how to
-	// support larger keys and/or compress a bit more for large context (e.g., > 100k tokens).
-	if n > 1_000_000 {
+	// For extending this further we should have a clear plan on how to support larger keys
+	// and/or compress a bit more for large context (e.g., > 100k tokens).
+	if n > maxShardKeyTokens {
 		return "", fmt.Errorf("context too large: ~%d tokens", n)
 	}
 
@@ -210,9 +218,9 @@ func generateShardKey(cacheSalt string, content string) (string, error) {
 		shardKeyStr += string("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[last6Bits])
 
 		// increase step size
-		// - step = 16 from 16...100k -> 62 chars
+		// - step = 16 from 16...1k -> 64 chars
 		// - step = 128 from 1k...100k -> 774 chars
-		// - step = 512 from 100k...1M -> 1758 chars
+		// - step = 1024 from 100k...2M -> 1855 chars
 		i += blockSize
 		switch i {
 		case constants.ShardKeyFirstBoundaryBlocks * constants.CacheBlockSizeTokens:

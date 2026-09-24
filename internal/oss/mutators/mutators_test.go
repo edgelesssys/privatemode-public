@@ -43,21 +43,23 @@ func TestGenerateShardKey(t *testing.T) {
 		"128->2, block size 16*4": {contentLength: 32 * 4, contentHashLength: 2, contentKey: "QK"},
 		"129->2, block size 16*4": {contentLength: 32*4 + 1, contentHashLength: 2, contentKey: "QK"},
 		// 3 blocks of 16 tokens
-		"191->2, block size 16*4":    {contentLength: 48*4 - 1, contentHashLength: 2, contentKey: "QK"},
-		"192->3, block size 16*4":    {contentLength: 48 * 4, contentHashLength: 3, contentKey: "QKx"},
-		"193->3, block size 16*4":    {contentLength: 48*4 + 1, contentHashLength: 3, contentKey: "QKx"},
-		"4095->63, block size 16*4":  {contentLength: 1024*4 - 1, contentHashLength: 63, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVlj"},
-		"4096->64, block size 128*4": {contentLength: 1024 * 4, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
-		"4097->64, block size 128*4": {contentLength: 1024*4 + 1, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
-		"4607->64, block size 128*4": {contentLength: (1024+128)*4 - 1, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
-		"4224->64, block size 128*4": {contentLength: (1024 + 128) * 4, contentHashLength: 65, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljTI"},
-		"100k-1, block size 128*4":   {contentLength: 100_096*4 - 1, contentHashLength: 64 + 773},
-		"100k, block size 512*4":     {contentLength: 100_096 * 4, contentHashLength: 64 + 774},
-		"100k+1, block size 512*4":   {contentLength: 100_096*4 + 1, contentHashLength: 64 + 774},
-		"1M-1, block size 512*4":     {contentLength: 1_000_000*4 - 1, contentHashLength: 64 + 774 + 1757},
-		"1M, block size 512*4":       {contentLength: 1_000_000 * 4, contentHashLength: 64 + 774 + 1757},
-		"1M+0.75, block size 512*4":  {contentLength: 1_000_000*4 + 3, contentHashLength: 64 + 774 + 1757},
-		"1M+1, error":                {contentLength: 1_000_000*4 + 4, contentHashLength: -1, expectError: true},
+		"191->2, block size 16*4":        {contentLength: 48*4 - 1, contentHashLength: 2, contentKey: "QK"},
+		"192->3, block size 16*4":        {contentLength: 48 * 4, contentHashLength: 3, contentKey: "QKx"},
+		"193->3, block size 16*4":        {contentLength: 48*4 + 1, contentHashLength: 3, contentKey: "QKx"},
+		"4095->63, block size 16*4":      {contentLength: 1024*4 - 1, contentHashLength: 63, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVlj"},
+		"4096->64, block size 128*4":     {contentLength: 1024 * 4, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
+		"4097->64, block size 128*4":     {contentLength: 1024*4 + 1, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
+		"4607->64, block size 128*4":     {contentLength: (1024+128)*4 - 1, contentHashLength: 64, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljT"},
+		"4608->65, block size 128*4":     {contentLength: (1024 + 128) * 4, contentHashLength: 65, contentKey: "QKxToFQ1MRRq7Cv3lYFdwK6SCGf2xm2Lb85NGe7Z+Zy8goI7wAWd/zYccoVSVljTI"},
+		"100k-1, block size 128*4":       {contentLength: 100_096*4 - 1, contentHashLength: 64 + 773},
+		"100k, block size 1024*4":        {contentLength: 100_096 * 4, contentHashLength: 64 + 774},
+		"100k+1, block size 1024*4":      {contentLength: 100_096*4 + 1, contentHashLength: 64 + 774},
+		"100k+1024-1, block size 1024*4": {contentLength: (100_096+1024)*4 - 1, contentHashLength: 64 + 774},
+		"100k+1024, block size 1024*4":   {contentLength: (100_096 + 1024) * 4, contentHashLength: 64 + 774 + 1},
+		"1M, block size 1024*4":          {contentLength: 1_000_000 * 4, contentHashLength: 64 + 774 + 878},
+		"2M, block size 1024*4":          {contentLength: 2_000_000 * 4, contentHashLength: 64 + 774 + 1855},
+		"2M+0.75, block size 1024*4":     {contentLength: 2_000_000*4 + 3, contentHashLength: 64 + 774 + 1855},
+		"2M+1, error":                    {contentLength: 2_000_000*4 + 4, contentHashLength: -1, expectError: true},
 	}
 
 	for name, tc := range testCases {
@@ -88,6 +90,15 @@ func TestGenerateShardKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGenerateShardKeyHeaderBudget checks that the longest key fits the 4k header line budget
+// we assume for client-side proxies.
+func TestGenerateShardKeyHeaderBudget(t *testing.T) {
+	content := string(bytes.Repeat([]byte("a"), maxShardKeyTokens*constants.ShardKeyCharsPerToken))
+	shardKey, err := generateShardKey("test-salt", content)
+	require.NoError(t, err)
+	assert.Less(t, len(constants.PrivatemodeShardKeyHeader+": "+shardKey), 4096)
 }
 
 // imageDataURL builds a base64 data URL with rawBytes of random image data.

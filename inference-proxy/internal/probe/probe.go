@@ -12,8 +12,9 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"slices"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
@@ -26,35 +27,62 @@ import (
 var heartbeatAudio []byte
 
 const (
-	probeInterval   = 1 * time.Minute
-	probeTimeout    = 10 * time.Minute
-	requestIDPrefix = "probe_"
+	probeInterval       = 1 * time.Minute
+	probeTimeout        = 10 * time.Minute
+	requestIDPrefix     = "probe_"
+	reachabilityTimeout = 2 * time.Second
+	timeoutUnreachable  = 1 * time.Hour
+	timeoutReachable    = 15 * time.Minute // must cover at least probeInterval + probeTimeout
 )
 
-type probeResult struct {
-	err error
+type workloadState struct {
+	reachable bool
+	// generation is the last observed content of the marker file, or empty if the marker has not
+	// been read successfully yet.
+	generation string
+	// lastProgressAt is the anchor for the timeouts. It is set by [New], a probe success, a
+	// workload container start, and the workload becoming reachable.
+	lastProgressAt time.Time
+	// lastErr is the last probe error, or nil if successful.
+	lastErr error
 }
 
 // Prober runs inference probes against the workload in a background loop.
 type Prober struct {
-	baseURL   string
-	tasks     []string
-	modelName string
-	client    httpClient
-	cacheSalt string
-	last      atomic.Pointer[probeResult]
-	log       *slog.Logger
+	baseURL         string
+	reachabilityURL string
+	readMarker      func() ([]byte, error)
+	tasks           []string
+	modelName       string
+	client          httpClient
+	cacheSalt       string
+	// mu guards workload.
+	mu       sync.Mutex
+	workload workloadState
+	log      *slog.Logger
 }
 
-// New creates a new workload [Prober]. Call [*Prober.Run] to start the probe loop.
-func New(baseURL string, modelName string, tasks []string, log *slog.Logger) *Prober {
+// New creates a new workload [Prober]. Call [*Prober.Run] to start the probe loop. reachabilityURL
+// must answer exactly while the workload serves. Probe errors on an unreachable workload are
+// suppressed. startMarkerPath is the file the workload container writes a fresh token to on every
+// start, letting the prober detect workload restarts.
+func New(
+	baseURL, reachabilityURL, startMarkerPath string,
+	modelName string, tasks []string,
+	log *slog.Logger,
+) *Prober {
 	return &Prober{
-		baseURL:   baseURL,
-		tasks:     tasks,
-		modelName: modelName,
-		client:    httputil.NewClient(),
-		log:       log,
-		cacheSalt: openai.RandomPromptCacheSalt(),
+		baseURL:         baseURL,
+		reachabilityURL: reachabilityURL,
+		readMarker:      func() ([]byte, error) { return os.ReadFile(startMarkerPath) },
+		tasks:           tasks,
+		modelName:       modelName,
+		client:          httputil.NewClient(),
+		log:             log,
+		cacheSalt:       openai.RandomPromptCacheSalt(),
+		workload: workloadState{
+			lastProgressAt: time.Now(), // arms [timeoutUnreachable] for startup
+		},
 	}
 }
 
@@ -72,22 +100,150 @@ func (p *Prober) Run(ctx context.Context) {
 	}
 }
 
-// Err returns the error from the last probe, or an error if no probe has run yet.
-func (p *Prober) Err() error {
-	r := p.last.Load()
-	if r == nil {
-		return errors.New("probe not yet run")
+// CheckLiveness reports whether the workload is alive. Probes reachability, so it must be
+// called with a request context. The workload must succeed a probe within [timeoutUnreachable]
+// while it is not reachable, and within [timeoutReachable] once it is reachable.
+func (p *Prober) CheckLiveness(ctx context.Context) error {
+	genErr := p.refreshGeneration(ctx) // error expected before the first workload container start
+
+	if err := p.refreshReachability(ctx); err != nil {
+		p.log.ErrorContext(ctx, "Failed setup for refreshing reachability", "error", err)
 	}
-	return r.err
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.logRefreshGenerationErrorWithLock(ctx, genErr)
+
+	timeout := timeoutReachable
+	if !p.workload.reachable {
+		timeout = timeoutUnreachable
+	}
+	if !time.Now().After(p.workload.lastProgressAt.Add(timeout)) {
+		return nil
+	}
+	return p.reportNotAliveWithLock(ctx, timeout)
+}
+
+// reportNotAliveWithLock builds a message why the workload is not alive, which is logged and
+// returned as an error. timeout is the limit the workload exceeded.
+func (p *Prober) reportNotAliveWithLock(ctx context.Context, timeout time.Duration) error {
+	generation := "none observed"
+	if p.workload.generation != "" {
+		generation = p.workload.generation
+	}
+	noProgressFor := time.Since(p.workload.lastProgressAt).Truncate(time.Second)
+
+	msg := fmt.Sprintf(
+		"no workload progress for %v, exceeding the limit of %v, start generation: %s",
+		noProgressFor, timeout, generation,
+	)
+	err := errors.New(msg)
+	if p.workload.lastErr != nil {
+		err = fmt.Errorf("%s, last probe error: %w", msg, p.workload.lastErr)
+	}
+
+	p.log.ErrorContext(ctx, "Workload liveness check failed, reporting it as not-alive for restart",
+		"workloadNoProgressFor", noProgressFor,
+		"workloadProgressTimeout", timeout,
+		"workloadReachable", p.workload.reachable,
+		"workloadGeneration", generation,
+		"workloadProbeError", p.workload.lastErr,
+	)
+	return err
+}
+
+// refreshGeneration reads the workload's container start marker and renews the timeouts whenever it
+// holds a token other than the one observed before. Returns an error on read failure.
+func (p *Prober) refreshGeneration(ctx context.Context) error {
+	marker, err := p.readMarker()
+	if err != nil {
+		return fmt.Errorf("reading marker: %w", err)
+	}
+	generation := string(bytes.TrimSpace(marker))
+	if generation == "" {
+		return errors.New("marker is empty")
+	}
+
+	p.mu.Lock()
+	started := p.workload.generation != generation
+	p.workload.generation = generation
+	if started {
+		p.workload.lastProgressAt = time.Now()
+	}
+	p.mu.Unlock()
+
+	if started {
+		p.log.InfoContext(ctx, "Workload started, renewing its timeouts", "workloadGeneration", generation)
+	}
+
+	return nil
+}
+
+func (p *Prober) logRefreshGenerationErrorWithLock(ctx context.Context, err error) {
+	if err == nil {
+		return
+	}
+	if p.workload.reachable {
+		p.log.ErrorContext(ctx, "Failed refreshing generation marker for reachable workload", "error", err)
+	} else {
+		p.log.InfoContext(ctx, "Failed refreshing generation marker", "error", err)
+	}
+}
+
+// refreshReachability calls the reachability URL and renews the timeouts when the workload just
+// became reachable. Returns an error only on setup failure, not reachability failure.
+func (p *Prober) refreshReachability(ctx context.Context) error {
+	reachabilityCtx, cancel := context.WithTimeout(ctx, reachabilityTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reachabilityCtx, http.MethodGet, p.reachabilityURL, http.NoBody)
+	if err != nil {
+		// No information about reachability, conservative fallback: not reachable
+		p.mu.Lock()
+		p.workload.reachable = false
+		p.mu.Unlock()
+		return err
+	}
+
+	resp, requestErr := p.client.Do(req)
+	if resp != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+	// Any response counts: vLLM registers its routes only once ready.
+	reachable := requestErr == nil
+
+	p.mu.Lock()
+	wasReachable := p.workload.reachable
+	p.workload.reachable = reachable
+	if reachable && !wasReachable {
+		p.workload.lastProgressAt = time.Now()
+	}
+	p.mu.Unlock()
+
+	log := p.log.With("workloadReachabilityURL", p.reachabilityURL)
+	if reachable && !wasReachable {
+		log.InfoContext(ctx, "Workload became reachable")
+	} else if !reachable && wasReachable {
+		log.WarnContext(ctx, "Workload became unreachable", "error", requestErr)
+	}
+	return nil
 }
 
 func (p *Prober) probe(ctx context.Context) {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	err := p.checkOnce(probeCtx)
-	p.last.Store(&probeResult{err: err})
+
+	p.mu.Lock()
+	p.workload.lastErr = err
+	if err == nil {
+		p.workload.lastProgressAt = time.Now()
+	}
+	p.mu.Unlock()
 	if err != nil {
-		p.log.ErrorContext(ctx, "Workload probe failed", "error", err)
+		p.log.WarnContext(ctx, "Workload probe failed", "error", err)
 	} else {
 		p.log.InfoContext(ctx, "Workload probe succeeded")
 	}

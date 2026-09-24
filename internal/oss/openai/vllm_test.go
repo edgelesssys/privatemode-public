@@ -6,6 +6,7 @@ package openai
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"mime/multipart"
@@ -15,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -49,7 +51,9 @@ func TestMediaContentValidator(t *testing.T) {
 					"image_url": map[string]string{"url": "https://example.com/image.jpg"},
 				},
 			}),
-			validateErr: func(err error) bool { return err == nil },
+			validateErr: func(err error) bool {
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
+			},
 		},
 		"image/http url": {
 			request: newRequest([]map[string]any{
@@ -59,7 +63,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "insecure")
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
 			},
 		},
 		"image/file url": {
@@ -70,7 +74,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "insecure")
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
 			},
 		},
 		"image/data url": {
@@ -94,7 +98,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "insecure")
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
 			},
 		},
 		"image/http url without type": {
@@ -104,7 +108,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "insecure")
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
 			},
 		},
 		"image/http url without type in concise schema": {
@@ -114,7 +118,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "insecure")
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
 			},
 		},
 		"video": {

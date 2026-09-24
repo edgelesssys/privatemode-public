@@ -2,19 +2,89 @@ package inference
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/adaptertest"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
+	"github.com/edgelesssys/continuum/internal/oss/usage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestForwardEncryptedRemoteResourceURLError(t *testing.T) {
+	const domainError = `{"error":{"message":"The URL must be from one of the allowed domains: ['/']. Input URL domain: example.com","type":"BadRequestError","param":null,"code":400},"request_id":"test"}`
+	rewrittenError := fmt.Sprintf(`{"error":{"message":"%s","type":"BadRequestError","param":null,"code":400},"request_id":"test"}`, remoteResourceURLError)
+	testCases := map[string]struct {
+		status   int
+		body     string
+		stream   bool
+		expected string
+	}{
+		"domain error": {
+			status: http.StatusBadRequest, body: domainError, expected: rewrittenError,
+		},
+		"domain error for streaming request": {
+			status: http.StatusBadRequest, body: domainError, stream: true, expected: rewrittenError,
+		},
+		"unrelated bad request": {
+			status: http.StatusBadRequest, body: `{"error":{"type":"BadRequestError","message":"Invalid model"}}`,
+		},
+		"different error type": {
+			status: http.StatusBadRequest, body: strings.Replace(domainError, "BadRequestError", "InternalServerError", 1),
+		},
+		"different status": {
+			status: http.StatusInternalServerError, body: domainError,
+		},
+		"successful response": {
+			status: http.StatusOK, body: domainError,
+		},
+		"malformed JSON": {
+			status: http.StatusBadRequest, body: domainError[:len(domainError)-1],
+		},
+		"non-string message": {
+			status: http.StatusBadRequest, body: `{"error":{"type":"BadRequestError","message":["URL must be from one of the allowed domains"]}}`,
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			log := slog.Default()
+			adapter := &Adapter{
+				EncForwarder: adaptertest.EncForwarder{Inner: forwarder.New(srv.Client(), srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)},
+				Log:          log,
+			}
+			body := `{"stream":false}`
+			if tc.stream {
+				body = `{"stream":true}`
+			}
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+			response := httptest.NewRecorder()
+			noUsage := func([]byte) (usage.Stats, error) { return usage.Stats{}, ErrNoUsage }
+			adapter.ForwardEncrypted(response, request, forwarder.NoRequestMutation, nil, nil, noUsage, noUsage)
+			assert.Equal(t, tc.status, response.Code)
+			assert.Equal(t, "application/json", response.Header().Get("Content-Type"))
+			if tc.expected != "" {
+				assert.JSONEq(t, tc.expected, response.Body.String())
+			} else {
+				assert.Equal(t, tc.body, response.Body.String())
+			}
+		})
+	}
+}
 
 func TestVerifyOCSP(t *testing.T) {
 	gpuPolicyFailure := "GPU attestation returned a GPU OCSP status that is not accepted by the client"

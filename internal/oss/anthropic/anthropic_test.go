@@ -6,12 +6,13 @@ package anthropic
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 	"testing"
 
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,7 +49,9 @@ func TestMediaContentValidator(t *testing.T) {
 					},
 				},
 			}),
-			validateErr: func(err error) bool { return err == nil },
+			validateErr: func(err error) bool {
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
+			},
 		},
 		"http url": {
 			request: newRequest([]map[string]any{
@@ -61,7 +64,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "insecure")
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
 			},
 		},
 		"file url": {
@@ -75,7 +78,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "insecure")
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
 			},
 		},
 		"data source": {
@@ -122,7 +125,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "insecure")
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
 			},
 		},
 		"tool_result/https url": {
@@ -141,7 +144,9 @@ func TestMediaContentValidator(t *testing.T) {
 					},
 				},
 			}),
-			validateErr: func(err error) bool { return err == nil },
+			validateErr: func(err error) bool {
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
+			},
 		},
 		"tool_result/http url": {
 			request: newRequest([]map[string]any{
@@ -160,7 +165,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "insecure")
+				return errors.Is(err, mutators.ErrRemoteResourceURL)
 			},
 		},
 	}

@@ -5,6 +5,7 @@ package forwarder
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -153,7 +154,9 @@ func TestForwardStreamingUpstreamAborts(t *testing.T) {
 	}))
 	defer stubServer.Close()
 
-	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+	var logs bytes.Buffer
+	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP,
+		slog.New(slog.NewJSONHandler(&logs, nil)))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
 	resp := httptest.NewRecorder()
@@ -161,6 +164,7 @@ func TestForwardStreamingUpstreamAborts(t *testing.T) {
 	assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
 		fwd.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
 	})
+	assert.Contains(t, logs.String(), `"error":"streaming response body: unexpected EOF"`)
 }
 
 func TestForwardNonStreaming(t *testing.T) {
@@ -351,6 +355,49 @@ func TestForwardMaxBodyBytes(t *testing.T) {
 	}
 }
 
+func TestForwardLogsOmitSensitiveInput(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		assert.Equal(t, "secret-query", req.URL.Query().Get("prompt"))
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, "upstream-error")
+	}))
+	defer upstream.Close()
+	for _, stage := range []string{"upstream", "mutation", "mapping"} {
+		t.Run(stage, func(t *testing.T) {
+			var logs bytes.Buffer
+			fwd := New(upstream.Client(), upstream.Listener.Addr().String(), SchemeHTTP,
+				slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
+				"/v1/chat/completions?prompt=secret-query", strings.NewReader("secret-prompt"))
+			resp := httptest.NewRecorder()
+			fwd.Forward(resp, req, func(*http.Request) error {
+				if stage == "mutation" {
+					return errors.New("secret-mutation-error")
+				}
+				return nil
+			}, func(resp *http.Response) (Response, error) {
+				if stage == "mapping" {
+					return nil, errors.New("secret-decrypted-response")
+				}
+				return PassthroughResponseMapper(resp)
+			}, WithRetryCallback(func(_ int, msg string, _ int) (bool, time.Duration) {
+				assert.Equal(t, "upstream-error", msg)
+				return false, 0
+			}))
+			assert.NotContains(t, logs.String(), "secret-")
+			assert.Contains(t, logs.String(), `"path":"/v1/chat/completions"`)
+			assert.NotContains(t, logs.String(), "upstream-error")
+			if stage != "mutation" {
+				assert.Contains(t, logs.String(), `"statusCode":400`)
+			}
+			if stage == "upstream" {
+				assert.Equal(t, http.StatusBadRequest, resp.Code)
+				assert.Equal(t, "upstream-error", resp.Body.String())
+			}
+		})
+	}
+}
+
 func TestForwardRetry(t *testing.T) {
 	testCases := map[string]struct {
 		delay            time.Duration
@@ -371,7 +418,7 @@ func TestForwardRetry(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			// Track attempts and responses
+			// Track attempts and responses, written on the server's goroutine
 			attemptCount := 0
 			responses := []struct {
 				statusCode int
@@ -388,8 +435,8 @@ func TestForwardRetry(t *testing.T) {
 			stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				if attemptCount < len(responses) {
 					response := responses[attemptCount]
-					w.WriteHeader(response.statusCode)
 					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(response.statusCode)
 					_, _ = w.Write([]byte(response.body))
 				} else {
 					w.WriteHeader(http.StatusInternalServerError)
@@ -435,6 +482,9 @@ func TestForwardRetry(t *testing.T) {
 			)
 			elapsed := time.Since(startTime)
 
+			// Wait for server's goroutines
+			stubServer.Close()
+
 			assert.Equal(tc.expectedCode, resp.Code)
 			assert.Equal(tc.expectedAttempts, attemptCount, "Should have made exactly %d attempts", tc.expectedAttempts)
 			if tc.shouldRetry {
@@ -462,6 +512,7 @@ func TestForwardRetry(t *testing.T) {
 func TestForwardDoesNotStripTraceparent(t *testing.T) {
 	const inbound = "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01"
 
+	// Written on the server's goroutine
 	var gotTraceparent string
 	stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotTraceparent = r.Header.Get("traceparent")
@@ -479,6 +530,9 @@ func TestForwardDoesNotStripTraceparent(t *testing.T) {
 	resp := httptest.NewRecorder()
 	fwd.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
 
+	// Wait for server's goroutines
+	stubServer.Close()
+
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.Equal(t, inbound, gotTraceparent)
 }
@@ -486,6 +540,7 @@ func TestForwardDoesNotStripTraceparent(t *testing.T) {
 func TestForwardDeletesHopHeaders(t *testing.T) {
 	assert := assert.New(t)
 
+	// Written on the server's goroutine
 	var got *http.Request
 	stubServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got = r
@@ -505,6 +560,9 @@ func TestForwardDeletesHopHeaders(t *testing.T) {
 
 	resp := httptest.NewRecorder()
 	fwd.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
+
+	// Wait for server's goroutines
+	stubServer.Close()
 
 	assert.Equal(http.StatusOK, resp.Code)
 	if !assert.NotNil(got) {

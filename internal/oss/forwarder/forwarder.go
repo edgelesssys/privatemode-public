@@ -128,7 +128,7 @@ func (f *Forwarder) Forward(
 	log := f.log.With(
 		"remoteAddress", req.RemoteAddr,
 		"method", req.Method,
-		"path", req.URL.RequestURI(), // full url not available here, so we use RequestURI
+		"path", req.URL.Path,
 	)
 
 	log.InfoContext(ctx, "Forwarding request")
@@ -156,7 +156,6 @@ func (f *Forwarder) Forward(
 			log.WarnContext(
 				ctx,
 				"Downstream request cancelled (connection lost) before request could be fully forwarded",
-				"error", err,
 			)
 			HTTPError(w, req, StatusClientClosedRequest, "forwarding request: %s", err)
 			return
@@ -167,7 +166,8 @@ func (f *Forwarder) Forward(
 		if errors.As(err, &upErr) {
 			status = upErr.status
 		}
-		log.ErrorContext(ctx, "Failed to forward request", "error", err, "status", status)
+		// Error details may contain plaintext input or upstream error text.
+		log.ErrorContext(ctx, "Failed to forward request", "status", status)
 		HTTPError(w, req, status, "forwarding request: %s", err)
 		return
 	}
@@ -181,7 +181,7 @@ func (f *Forwarder) Forward(
 	dsResp, err := responseMapper(resp)
 	if err != nil {
 		_ = resp.Body.Close()
-		log.ErrorContext(ctx, "Failed to map upstream response to downstream response", "error", err)
+		log.ErrorContext(ctx, "Failed to map upstream response to downstream response")
 		HTTPError(w, req, http.StatusInternalServerError, "mapping response: %s", err)
 		return
 	}
@@ -375,7 +375,6 @@ func (f *Forwarder) shouldRetry(
 
 	shouldRetry, delay := retryCallback(statusCode, errMsg, attempt)
 	f.log.WarnContext(ctx, "Request failed, checking retry conditions",
-		"message", errMsg,
 		"statusCode", statusCode,
 		"attempt", attempt,
 		"shouldRetry", shouldRetry,

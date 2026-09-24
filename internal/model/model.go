@@ -11,6 +11,7 @@ const (
 	GLM53                = "glm-5.3"
 	GLM52                = "glm-5.2"
 	GLM53Flash           = "glm-5.3-flash"
+	Qwen3_0_6b           = "qwen3-0.6b"
 )
 
 const (

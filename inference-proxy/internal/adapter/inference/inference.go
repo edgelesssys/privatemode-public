@@ -24,8 +24,12 @@ import (
 	"github.com/edgelesssys/continuum/internal/usagecollector"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"go.opentelemetry.io/otel"
 )
+
+const remoteResourceURLError = "Remote resource URLs are not supported. Provide the resource inline using a base64-encoded data URL."
 
 var ocspStatusMetrics = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "privatemode_nvidia_ocsp_status",
@@ -342,8 +346,29 @@ func (a *Adapter) mapPlaintextUnaryResponse(
 			return nil, fmt.Errorf("mutating response body: %w", err)
 		}
 	}
+	if dsResp.StatusCode == http.StatusBadRequest {
+		dsResp.Body, err = rewriteRemoteResourceURLError(dsResp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("parsing remote error: %w", err)
+		}
+	}
 
 	return dsResp, nil
+}
+
+// rewriteRemoteResourceURLError replaces vLLM's domain allowlist error with a user-facing message.
+//
+// This is only intended to catch cases unknown to us that trigger vLLM to try network requests.
+// For all known cases, add a dedicated content validator to block the request instead.
+func rewriteRemoteResourceURLError(data []byte) ([]byte, error) {
+	if !gjson.ValidBytes(data) || gjson.GetBytes(data, "error.type").String() != "BadRequestError" {
+		return data, nil
+	}
+	message := gjson.GetBytes(data, "error.message")
+	if message.Type != gjson.String || !strings.Contains(message.String(), "URL must be from one of the allowed domains") {
+		return data, nil
+	}
+	return sjson.SetBytes(data, "error.message", remoteResourceURLError)
 }
 
 func (a *Adapter) mapPlaintextStreamingResponse(

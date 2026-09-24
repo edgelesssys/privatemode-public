@@ -119,13 +119,14 @@ func (s *Server) workloadHealthHandler(url string) http.Handler {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		_, _ = io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		w.WriteHeader(resp.StatusCode)
 	})
 }
 
-func (s *Server) workloadLivenessHandler(w http.ResponseWriter, _ *http.Request) {
-	if err := s.prober.Err(); err != nil {
+func (s *Server) workloadLivenessHandler(w http.ResponseWriter, r *http.Request) {
+	if err := s.prober.CheckLiveness(r.Context()); err != nil {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
@@ -144,5 +145,5 @@ type httpClient interface {
 }
 
 type prober interface {
-	Err() error
+	CheckLiveness(ctx context.Context) error
 }

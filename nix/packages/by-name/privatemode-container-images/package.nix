@@ -40,6 +40,7 @@ let
     linuxPkgs.attestation-agent.image
     linuxPkgs.disk-mounter.image
     linuxPkgs.inference-proxy.image
+    linuxPkgs.kernel-log.image
     linuxPkgs.secret-service.image
   ];
 

@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
 	"github.com/tidwall/gjson"
 )
@@ -88,7 +89,7 @@ func (u Usage) ToUsageStats() usage.Stats {
 }
 
 // MediaContentValidator creates a [forwarder.RequestMutator] that enforces policy on media content
-// blocks in the request. Image URLs must use https or data schemes via [validateImageURL].
+// blocks in the request. Image URLs must use data scheme via [validateImageURL].
 func MediaContentValidator(log *slog.Logger) forwarder.RequestMutator {
 	validate := func(httpBody string) (mutatedRequest string, err error) {
 		// Skip empty body, e.g., for OPTIONS requests
@@ -137,8 +138,8 @@ func validateImageURL(rawURL string) error {
 		return fmt.Errorf("parsing image URL: %w", err)
 	}
 
-	if !strings.EqualFold(parsedURL.Scheme, "https") && !strings.EqualFold(parsedURL.Scheme, "data") {
-		return fmt.Errorf("non-HTTPS and non-data image URL %q is insecure", parsedURL.String())
+	if !strings.EqualFold(parsedURL.Scheme, "data") {
+		return mutators.ErrRemoteResourceURL
 	}
 	return nil
 }
