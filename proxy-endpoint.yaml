@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: privatemode-proxy
+  labels:
+    helm.sh/chart: privatemode-proxy-1.58.0
+    app.kubernetes.io/name: privatemode-proxy
+    app.kubernetes.io/instance: continuum-application-continuum-0a7a47
+    app.kubernetes.io/managed-by: Helm
+  namespace: continuum-0a7a47
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: privatemode-proxy
+      app.kubernetes.io/instance: continuum-application-continuum-0a7a47
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: privatemode-proxy
+        app.kubernetes.io/instance: continuum-application-continuum-0a7a47
+      annotations:
+        contrast.edgeless.systems/skip-initializer: "true"
+    spec:
+      runtimeClassName: "contrast-cc"
+      restartPolicy: Always
+      initContainers:
+        - args:
+            - |
+              apt-get update
+              apt-get install -y --no-install-recommends iptables
+              /usr/sbin/iptables-legacy -D INPUT -m conntrack ! --ctstate ESTABLISHED,RELATED -j DROP || [ "$?" -eq 1 ]
+          command:
+            - /bin/sh
+            - -ec
+          image: debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+          name: allow-ingress
+          securityContext:
+            capabilities:
+              add:
+                - NET_ADMIN
+      containers:
+        - name: privatemode-proxy
+          image: "ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.58.0@sha256:5e8f549169c4288c24c902eadc4c6ebfaaf05c06e5605449c34469257929b143"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          startupProbe:
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            successThreshold: 1
+            failureThreshold: 30
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: HTTPS
+          readinessProbe:
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 3
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: HTTPS
+          args:
+            - "--api-key=@/etc/apiKey/apiKey"
+            - "--api-key-fallback=never"
+            - "--api-endpoint=api.privatemode.ai:443"
+            - "--port=8080"
+            - "--tls-cert-path=/etc/tls/tls.crt"
+            - "--tls-key-path=/etc/tls/tls.key"
+            - "--disable-prompt-cache=false"
+            - "--prompt-cache-salt=api-key"
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/tls
+              readOnly: true
+            - name: apikey
+              mountPath: /etc/apiKey
+              readOnly: true
+          resources: {}
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: privatemode-proxy-tls
+        - name: apikey
+          secret:
+            secretName: privatemode-api-key
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      tolerations: []
+      affinity: {}

@@ -13,8 +13,19 @@ spec:
     metadata:
       labels:
         {{- include "privatemode-proxy.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
+      {{- with .Values.runtimeClassName }}
+      runtimeClassName: {{ . | quote }}
+      {{- end }}
       restartPolicy: {{ .Values.image.restartPolicy }}
+      {{- with .Values.initContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.image }}"
@@ -42,33 +53,46 @@ spec:
               scheme: {{ ternary "HTTPS" "HTTP" .Values.config.tls.enabled }}
           args:
             {{- if .Values.config.apiKey.enabled }}
-            - "--apiKey=@/etc/apiKey/apiKey"
+            - "--api-key=@/etc/apiKey/apiKey"
             {{- end}}
+            {{- with .Values.config.apiKey.fallback }}
+            - {{ printf "--api-key-fallback=%s" . | quote }}
+            {{- end }}
             {{- if .Values.config.apiEndpoint.enabled }}
-            - "--apiEndpoint={{ .Values.config.apiEndpoint.apiEndpoint }}"
+            - "--api-endpoint={{ .Values.config.apiEndpoint.apiEndpoint }}"
             {{- end}}
             - "--port={{ .Values.config.port }}"
             {{- range .Values.config.corsAllowedOrigins }}
-            - {{ printf "--corsAllowedOrigins=%s" . | quote }}
+            - {{ printf "--cors-allowed-origins=%s" . | quote }}
             {{- end }}
             {{- if .Values.config.workspace.enabled }}
             - "--workspace={{ .Values.config.workspace.mountPath }}"
             {{- end }}
             {{- if .Values.config.manifest.enabled }}
-            - "--manifestPath={{ .Values.config.manifest.mountPath }}"
+            - "--manifest-path={{ .Values.config.manifest.mountPath }}"
             {{- end }}
             {{- if .Values.config.tls.enabled }}
-            - "--tlsCertPath=/etc/tls/tls.crt"
-            - "--tlsKeyPath=/etc/tls/tls.key"
+            - "--tls-cert-path=/etc/tls/tls.crt"
+            - "--tls-key-path=/etc/tls/tls.key"
             {{- end }}
             {{- if .Values.config.insecureAPIConnection }}
-            - "--insecureAPIConnection=true"
+            - "--insecure-api-connection=true"
             {{- end }}
             {{- if .Values.config.sharedPromptCache.enabled }}
-            - "--sharedPromptCache=true"
-            {{- end }}
+            - "--disable-prompt-cache=false"
             {{- if .Values.config.sharedPromptCache.promptCacheSalt.enabled }}
-            - "--promptCacheSalt=@/etc/promptCacheSalt/promptCacheSalt"
+            - "--prompt-cache-salt=@/etc/promptCacheSalt/promptCacheSalt"
+            {{- else }}
+            - {{ printf "--prompt-cache-salt=%s" .Values.config.sharedPromptCache.saltSource | quote }}
+            {{- end }}
+            {{- else }}
+            {{- if .Values.config.sharedPromptCache.promptCacheSalt.enabled }}
+            {{- fail "config.sharedPromptCache.promptCacheSalt.enabled requires config.sharedPromptCache.enabled" }}
+            {{- end }}
+            - "--disable-prompt-cache=true"
+            {{- end }}
+            {{- with .Values.config.extraArgs }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           {{- if or .Values.config.customCA.enabled .Values.config.extraEnv }}
           env:
@@ -112,6 +136,9 @@ spec:
               subPath: {{ .Values.config.customCA.fileName }}
               readOnly: true
             {{- end }}
+            {{- with .Values.config.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
@@ -142,8 +169,16 @@ spec:
         {{- end }}
         {{- if .Values.config.customCA.enabled }}
         - name: custom-ca
+          {{- if .Values.config.customCA.configMapName }}
+          configMap:
+            name: {{ .Values.config.customCA.configMapName }}
+          {{- else }}
           secret:
-            secretName: {{ .Values.config.customCA.secretName }}
+            secretName: {{ required "config.customCA.enabled requires config.customCA.secretName or config.customCA.configMapName" .Values.config.customCA.secretName }}
+          {{- end }}
+        {{- end }}
+        {{- with .Values.config.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       nodeSelector:
         {{- toYaml .Values.nodeSelector | nindent 8 }}

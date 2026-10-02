@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/sse"
 )
@@ -162,13 +163,17 @@ func (c *Client) prepareAudioTranscriptionRequest(
 		return nil, fmt.Errorf("building request body: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+openai.TranscriptionsEndpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+constants.OpenAITranscriptionsEndpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header = cloneRequestHeader(requestOpts.Header)
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set(constants.PrivatemodeTargetModel, opts.Model)
+	err = mutators.ContentLengthTokensInjector(req)
+	if err != nil {
+		return nil, fmt.Errorf("mutating request: %w", err)
+	}
 	return req, nil
 }
 

@@ -64,22 +64,6 @@ data:
         "nvidia.com/gpu.present=true"
       ]
     }
-  moonshotai-kimi-k2-6: |-
-    {
-      "model_source": "https://huggingface.co/moonshotai/Kimi-K2.6",
-      "commit_hash": "5a49d036ab7472b7d5912ded487150ec1358c11d",
-      "excluded_files": "",
-      "root_hash": "35f3f6bdf6ab322657dfdec091986d102cb98c69155e45fb23750b99c86fd457",
-      "hash_offset": "595205042176",
-      "erofs_version": "1.9",
-      "veritysetup_version": "2.8.4",
-      "file_hash_sha256": "0d6c66927e4758f7d860b40fee4ca69146df9c87d001c34a89faff0b9588fc38",
-      "file_size_bytes": 599891709952,
-      "node_selectors": [
-        "privatemode.edgeless.systems/gpu-type=b300",
-        "nvidia.com/gpu.B200=true"
-      ]
-    }
   deepseek-ai-deepseek-ocr-2: |-
     {
       "model_source": "https://huggingface.co/deepseek-ai/DeepSeek-OCR-2",

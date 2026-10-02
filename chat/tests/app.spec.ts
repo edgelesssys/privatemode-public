@@ -377,7 +377,7 @@ test.describe('File upload', () => {
     page,
   }) => {
     await page.evaluate(() => {
-      localStorage.setItem('privatemode_selected_model', 'kimi-latest');
+      localStorage.setItem('privatemode_selected_model', 'glm-flash-latest');
     });
     await page.reload();
     await web.waitForAppReady(page);

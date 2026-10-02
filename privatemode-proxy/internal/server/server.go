@@ -6,7 +6,10 @@ package server
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +20,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/encbody"
@@ -31,13 +33,27 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/process"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
+	"github.com/tidwall/gjson"
+)
+
+// APIKeyFallback controls when the API key configured via the CLI flag replaces request authentication.
+type APIKeyFallback string
+
+const (
+	// APIKeyFallbackAlways uses the configured API key for every request.
+	APIKeyFallbackAlways APIKeyFallback = "always"
+	// APIKeyFallbackNever never puts the CLI-provided API key into requests.
+	APIKeyFallbackNever APIKeyFallback = "never"
+	// APIKeyFallbackIfPlaceholder replaces only the literal Bearer placeholder header.
+	APIKeyFallbackIfPlaceholder APIKeyFallback = "if-placeholder"
 )
 
 // Server implements the HTTP server for the API gateway.
 type Server struct {
 	apiKey                       *string
-	disableAPIKeyFallback        bool
+	apiKeyFallback               APIKeyFallback
 	defaultCacheSalt             string // if no salt is set, a random salt will be used
+	promptCacheSaltFromAPIKey    bool
 	forwarder                    apiForwarder
 	sm                           secretManager
 	log                          *slog.Logger
@@ -46,20 +62,27 @@ type Server struct {
 	nvidiaOCSPRevokedGracePeriod time.Duration
 	dumpRequestsDir              string
 	corsAllowedOrigins           []string
+	clientID                     string
+	modelsDocument               *ModelsDocument
 }
 
 // Opts are the options for creating a new [Server].
 type Opts struct {
 	APIEndpoint                  string
 	APIKey                       *string
-	DisableAPIKeyFallback        bool
+	APIKeyFallback               APIKeyFallback
 	ProtocolScheme               forwarder.ProtocolScheme
 	PromptCacheSalt              string
+	PromptCacheSaltFromAPIKey    bool
 	IsApp                        bool
 	NvidiaOCSPAllowUnknown       bool
 	NvidiaOCSPRevokedGracePeriod time.Duration
 	DumpRequestsDir              string
 	CORSAllowedOrigins           []string
+	// ClientID overrides the Privatemode-Client header value. Empty keeps the App/Proxy default.
+	ClientID string
+	// ModelsDocument, if set, is served at the models endpoint instead of forwarding the request.
+	ModelsDocument *ModelsDocument
 }
 
 type apiForwarder interface {
@@ -79,11 +102,15 @@ type secretManager interface {
 // New sets up a new Server.
 func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Server {
 	fwd := forwarder.New(client, opts.APIEndpoint, opts.ProtocolScheme, log)
+	if opts.APIKeyFallback == "" {
+		opts.APIKeyFallback = APIKeyFallbackAlways
+	}
 
 	return &Server{
 		apiKey:                       opts.APIKey,
-		disableAPIKeyFallback:        opts.DisableAPIKeyFallback,
+		apiKeyFallback:               opts.APIKeyFallback,
 		defaultCacheSalt:             opts.PromptCacheSalt,
+		promptCacheSaltFromAPIKey:    opts.PromptCacheSaltFromAPIKey,
 		forwarder:                    fwd,
 		sm:                           sm,
 		log:                          log,
@@ -92,6 +119,8 @@ func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Se
 		nvidiaOCSPRevokedGracePeriod: opts.NvidiaOCSPRevokedGracePeriod,
 		dumpRequestsDir:              opts.DumpRequestsDir,
 		corsAllowedOrigins:           opts.CORSAllowedOrigins,
+		clientID:                     opts.ClientID,
+		modelsDocument:               opts.ModelsDocument,
 	}
 }
 
@@ -123,13 +152,17 @@ func (s *Server) GetHandler() http.Handler {
 		return limitRequestBody(handler)
 	}
 	mux := http.NewServeMux()
-	mux.Handle("POST "+openai.ChatCompletionsEndpoint, api(s.chatRequestHandler))
-	mux.Handle("POST "+openai.LegacyCompletionsEndpoint, api(s.chatRequestHandler))
-	mux.Handle("POST /unstructured/", api(s.unstructuredHandler))
-	mux.Handle("GET "+openai.ModelsEndpoint, api(s.forwardUnencrypted))
-	mux.Handle("POST "+openai.EmbeddingsEndpoint, api(s.embeddingsHandler))
-	mux.Handle("POST "+openai.TranscriptionsEndpoint, api(s.transcriptionsHandler))
-	mux.Handle("POST "+anthropic.MessagesEndpoint, api(s.chatRequestHandler))
+	mux.Handle("POST "+constants.OpenAIChatCompletionsEndpoint, api(s.chatRequestHandler))
+	mux.Handle("POST "+constants.OpenAILegacyCompletionsEndpoint, api(s.chatRequestHandler))
+	mux.Handle("POST "+constants.UnstructuredEndpoint+"/", api(s.unstructuredHandler))
+	if s.modelsDocument != nil {
+		mux.Handle("GET "+constants.OpenAIModelsEndpoint, api(s.modelsDocument.ServeHTTP))
+	} else {
+		mux.Handle("GET "+constants.OpenAIModelsEndpoint, api(s.forwardUnencrypted))
+	}
+	mux.Handle("POST "+constants.OpenAIEmbeddingsEndpoint, api(s.embeddingsHandler))
+	mux.Handle("POST "+constants.OpenAITranscriptionsEndpoint, api(s.transcriptionsHandler))
+	mux.Handle("POST "+constants.AnthropicMessagesEndpoint, api(s.chatRequestHandler))
 	mux.HandleFunc("GET /readyz", s.readinessHandler)
 
 	// Apply middlewares below, handler holds the chain entrypoint
@@ -151,7 +184,7 @@ func limitRequestBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		maxBytes := int64(constants.MaxFileSizeBytes)
 		msg := constants.MaxBodySizeExceededMsg
-		if strings.HasPrefix(r.URL.Path, "/unstructured/") {
+		if strings.HasPrefix(r.URL.Path, constants.UnstructuredEndpoint+"/") {
 			maxBytes = constants.MaxUnstructuredBodySize
 			msg = constants.MaxUnstructuredBodySizeExceededMsg
 		}
@@ -239,6 +272,7 @@ func (s *Server) forwardEncrypted(
 			return fmt.Errorf("initializing encrypted exchange: %w", err)
 		}
 
+		s.setStaticRequestHeaders(req)
 		if err := requestMutator(req); err != nil {
 			return fmt.Errorf("applying endpoint-specific mutator: %w", err)
 		}
@@ -246,8 +280,6 @@ func (s *Server) forwardEncrypted(
 		if err := ce.EncryptRequest(req); err != nil {
 			return fmt.Errorf("encrypting request: %w", err)
 		}
-
-		s.setStaticRequestHeaders(req)
 
 		if err := s.setEncryptionHeaders(req, secret, requestID, attempt); err != nil {
 			return fmt.Errorf("setting headers on upstream request: %w", err)
@@ -286,35 +318,58 @@ func modelFromRequest(req *http.Request) (string, error) {
 
 	msg, err := unmarshalJSONBody[modelRequest](req)
 	if err != nil {
-		return "", fmt.Errorf("parsing request: %w", err)
+		return "", forwarder.NewError("parsing request", err, http.StatusBadRequest)
 	}
 	if msg.Model == "" {
-		return "", fmt.Errorf("no model specified in request")
+		return "", forwarder.NewError("validating request", errors.New("no model specified in request"), http.StatusBadRequest)
 	}
 
 	return msg.Model, nil
 }
 
 func (s *Server) chatRequestHandler(w http.ResponseWriter, r *http.Request) {
-	s.forwardEncrypted(
-		w, r,
-		forwarder.RequestMutatorChain(
-			mutators.ShardKeyInjector(s.defaultCacheSalt), // we don't want a shard key for random cache salts, so we inject before
+	s.forwardEncrypted(w, r, func(req *http.Request) error {
+		cacheSalt := s.defaultCacheSalt
+		if cacheSalt == "" && s.promptCacheSaltFromAPIKey {
+			body, err := persist.ReadBodyUnlimited(req)
+			if err != nil {
+				return err
+			}
+			if len(body) > 0 && gjson.GetBytes(body, "cache_salt").String() == "" {
+				cacheSalt = promptCacheSaltFromAPIKey(req.Header)
+			}
+		}
+		return forwarder.RequestMutatorChain(
+			mutators.ModelHeaderInjector(modelFromRequest),
+			mutators.ShardKeyInjector(cacheSalt), // inject before generating random salts to avoid sharding on them
 			openai.CacheSaltInjector(func() string {
-				if s.defaultCacheSalt == "" {
+				if cacheSalt == "" {
 					return openai.RandomPromptCacheSalt()
 				}
-				return s.defaultCacheSalt
+				return cacheSalt
 			}, s.log),
-			mutators.ModelHeaderInjector(modelFromRequest),
-		),
-	)
+		)(req)
+	})
+}
+
+func promptCacheSaltFromAPIKey(header http.Header) string {
+	apiKey, err := auth.GetAuth(auth.Bearer, header)
+	if err != nil || apiKey == "" {
+		// Leave random salt generation to the injector to avoid sharding on random salts.
+		return ""
+	}
+	mac := hmac.New(sha256.New, []byte(apiKey))
+	mac.Write([]byte("privatemode/prompt-cache-salt/v1"))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func (s *Server) embeddingsHandler(w http.ResponseWriter, r *http.Request) {
 	s.forwardEncrypted(
 		w, r,
-		mutators.ModelHeaderInjector(modelFromRequest),
+		forwarder.RequestMutatorChain(
+			mutators.ModelHeaderInjector(modelFromRequest),
+			mutators.ContentLengthTokensInjector,
+		),
 	)
 }
 
@@ -326,13 +381,13 @@ func (s *Server) transcriptionsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := clonedReq.ParseMultipartForm(constants.MaxFileSizeBytes); err != nil {
-			return "", fmt.Errorf("parsing multipart form: %w", err)
+			return "", forwarder.NewError("parsing multipart form", err, http.StatusBadRequest)
 		}
 		defer func() { _ = clonedReq.MultipartForm.RemoveAll() }()
 
 		modelName := clonedReq.PostFormValue("model")
 		if len(modelName) == 0 {
-			return "", fmt.Errorf("no model specified in request")
+			return "", forwarder.NewError("validating request", errors.New("no model specified in request"), http.StatusBadRequest)
 		}
 
 		return modelName, nil
@@ -340,14 +395,17 @@ func (s *Server) transcriptionsHandler(w http.ResponseWriter, r *http.Request) {
 
 	s.forwardEncrypted(
 		w, r,
-		mutators.ModelHeaderInjector(modelExtractor),
+		forwarder.RequestMutatorChain(
+			mutators.ModelHeaderInjector(modelExtractor),
+			mutators.ContentLengthTokensInjector,
+		),
 	)
 }
 
 func (s *Server) unstructuredHandler(w http.ResponseWriter, r *http.Request) {
 	s.forwardEncrypted(
 		w, r,
-		forwarder.NoRequestMutation,
+		mutators.ContentLengthTokensInjector,
 	)
 }
 
@@ -365,6 +423,9 @@ func (s *Server) forwardUnencrypted(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getClientHeader() string {
+	if s.clientID != "" {
+		return s.clientID
+	}
 	if s.isApp {
 		return constants.PrivatemodeClientApp
 	}
@@ -375,7 +436,8 @@ func (s *Server) getClientHeader() string {
 // setStaticRequestHeaders sets static headers for the request. These are the header values
 // that are guaranteed to be immutable over a request's lifetime.
 func (s *Server) setStaticRequestHeaders(r *http.Request) {
-	if s.apiKey != nil && !s.disableAPIKeyFallback {
+	if s.apiKey != nil && (s.apiKeyFallback == APIKeyFallbackAlways ||
+		(s.apiKeyFallback == APIKeyFallbackIfPlaceholder && r.Header.Get("Authorization") == "Bearer placeholder")) {
 		r.Header.Set("Authorization", fmt.Sprintf("%s %s", auth.Bearer, *s.apiKey))
 	}
 	r.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())

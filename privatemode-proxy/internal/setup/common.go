@@ -24,12 +24,15 @@ type Flags struct {
 	InsecureAPIConnection        bool
 	APIEndpoint                  string
 	APIKey                       *string
-	DisableAPIKeyFallback        bool
+	APIKeyFallback               server.APIKeyFallback
 	PromptCacheSalt              string
+	PromptCacheSaltFromAPIKey    bool
 	NvidiaOCSPAllowUnknown       bool
 	NvidiaOCSPRevokedGracePeriod time.Duration
 	DumpRequestsDir              string
 	CORSAllowedOrigins           []string
+	ClientID                     string
+	ModelsDocument               *server.ModelsDocument
 }
 
 // ContrastFlags holds the configuration for the Contrast deployment.
@@ -51,14 +54,17 @@ func NewServer(flags Flags, isApp bool, manager *secretmanager.SecretManager, lo
 	opts := server.Opts{
 		APIEndpoint:                  flags.APIEndpoint,
 		APIKey:                       flags.APIKey,
-		DisableAPIKeyFallback:        flags.DisableAPIKeyFallback,
+		APIKeyFallback:               flags.APIKeyFallback,
 		ProtocolScheme:               forwarder.SchemeHTTPS,
 		PromptCacheSalt:              flags.PromptCacheSalt,
+		PromptCacheSaltFromAPIKey:    flags.PromptCacheSaltFromAPIKey,
 		IsApp:                        isApp,
 		NvidiaOCSPAllowUnknown:       flags.NvidiaOCSPAllowUnknown,
 		NvidiaOCSPRevokedGracePeriod: flags.NvidiaOCSPRevokedGracePeriod,
 		DumpRequestsDir:              flags.DumpRequestsDir,
 		CORSAllowedOrigins:           flags.CORSAllowedOrigins,
+		ClientID:                     flags.ClientID,
+		ModelsDocument:               flags.ModelsDocument,
 	}
 
 	return server.New(client, manager, opts, log)

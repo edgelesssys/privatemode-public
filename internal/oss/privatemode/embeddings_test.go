@@ -10,7 +10,6 @@ import (
 
 	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
-	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,6 +22,9 @@ func TestPrepareEmbeddingsRequest(t *testing.T) {
 		"with additional headers": {
 			opts: RequestOptions{Header: http.Header{"X-Custom-Header": []string{"custom-value"}}},
 		},
+		"overrides supplied estimate": {
+			opts: RequestOptions{Header: http.Header{constants.PrivatemodeContentLengthTokensHeader: []string{"9999"}}},
+		},
 	}
 
 	for name, tc := range testCases {
@@ -34,9 +36,10 @@ func TestPrepareEmbeddingsRequest(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, http.MethodPost, req.Method)
-			assert.Equal(t, "https://example.com"+openai.EmbeddingsEndpoint, req.URL.String())
+			assert.Equal(t, "https://example.com"+constants.OpenAIEmbeddingsEndpoint, req.URL.String())
 			assert.Equal(t, "application/json", req.Header.Get("Content-Type"))
 			assert.Equal(t, "qwen3-embedding-4b", req.Header.Get(constants.PrivatemodeTargetModel))
+			assert.Equal(t, "4", req.Header.Get(constants.PrivatemodeContentLengthTokensHeader))
 			assert.Equal(t, tc.opts.Header.Get("X-Custom-Header"), req.Header.Get("X-Custom-Header"))
 			gotBody, err := io.ReadAll(req.Body)
 			require.NoError(t, err)

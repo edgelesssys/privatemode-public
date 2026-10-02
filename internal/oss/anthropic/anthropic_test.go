@@ -12,6 +12,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +30,7 @@ func TestMediaContentValidator(t *testing.T) {
 			panic(err)
 		}
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-			"https://foo.bar/v1/messages", bytes.NewReader(data))
+			"https://foo.bar"+constants.AnthropicMessagesEndpoint, bytes.NewReader(data))
 		if err != nil {
 			panic(err)
 		}
@@ -179,6 +181,11 @@ func TestMediaContentValidator(t *testing.T) {
 
 			err := mutator(tc.request)
 			require.True(tc.validateErr(err))
+			if err != nil {
+				require.Equal(http.StatusBadRequest, forwarder.StatusFromError(err))
+			} else {
+				require.Equal(http.StatusOK, forwarder.StatusFromError(err))
+			}
 		})
 	}
 }

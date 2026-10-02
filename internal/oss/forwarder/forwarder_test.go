@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -45,7 +46,7 @@ func TestForwardStreaming(t *testing.T) {
 
 	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	resp := httptest.NewRecorder()
 
 	forwarder.Forward(
@@ -84,7 +85,7 @@ func TestForwardStreamingAborted(t *testing.T) {
 
 	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	// Wrap req.Context() in a cancelable context
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
@@ -125,7 +126,7 @@ func TestForwardCancelledBeforeResponseReportsClientClosed(t *testing.T) {
 
 	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 	req = req.WithContext(ctx)
@@ -158,7 +159,7 @@ func TestForwardStreamingUpstreamAborts(t *testing.T) {
 	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP,
 		slog.New(slog.NewJSONHandler(&logs, nil)))
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	resp := httptest.NewRecorder()
 
 	assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
@@ -183,7 +184,7 @@ func TestForwardNonStreaming(t *testing.T) {
 
 	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	resp := httptest.NewRecorder()
 
 	forwarder.Forward(
@@ -213,7 +214,7 @@ func TestForwardMutationError(t *testing.T) {
 
 	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	resp := httptest.NewRecorder()
 
 	forwarder.Forward(
@@ -355,6 +356,30 @@ func TestForwardMaxBodyBytes(t *testing.T) {
 	}
 }
 
+func TestForwardMutationErrorStatus(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusInternalServerError} {
+		for _, retryEnabled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("status=%d/retry=%t", status, retryEnabled), func(t *testing.T) {
+				var retryCallback RetryCallback
+				if retryEnabled {
+					retryCallback = func(int, string, int) (bool, time.Duration) {
+						t.Error("mutation errors must not trigger retries")
+						return false, 0
+					}
+				}
+				fwd := New(nil, "upstream", SchemeHTTP, slog.Default())
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+				resp := httptest.NewRecorder()
+				fwd.Forward(resp, req, func(*http.Request) error {
+					return fmt.Errorf("wrapped: %w", NewError("mutation failed", errors.New("invalid input"), status))
+				}, PassthroughResponseMapper, WithRetryCallback(retryCallback))
+				assert.Equal(t, status, resp.Code)
+				assert.Contains(t, resp.Body.String(), "mutation failed")
+			})
+		}
+	}
+}
+
 func TestForwardLogsOmitSensitiveInput(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		assert.Equal(t, "secret-query", req.URL.Query().Get("prompt"))
@@ -368,7 +393,7 @@ func TestForwardLogsOmitSensitiveInput(t *testing.T) {
 			fwd := New(upstream.Client(), upstream.Listener.Addr().String(), SchemeHTTP,
 				slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
-				"/v1/chat/completions?prompt=secret-query", strings.NewReader("secret-prompt"))
+				constants.OpenAIChatCompletionsEndpoint+"?prompt=secret-query", strings.NewReader("secret-prompt"))
 			resp := httptest.NewRecorder()
 			fwd.Forward(resp, req, func(*http.Request) error {
 				if stage == "mutation" {
@@ -385,7 +410,7 @@ func TestForwardLogsOmitSensitiveInput(t *testing.T) {
 				return false, 0
 			}))
 			assert.NotContains(t, logs.String(), "secret-")
-			assert.Contains(t, logs.String(), `"path":"/v1/chat/completions"`)
+			assert.Contains(t, logs.String(), `"path":"`+constants.OpenAIChatCompletionsEndpoint+`"`)
 			assert.NotContains(t, logs.String(), "upstream-error")
 			if stage != "mutation" {
 				assert.Contains(t, logs.String(), `"statusCode":400`)
@@ -418,8 +443,10 @@ func TestForwardRetry(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			assert := assert.New(t)
 
-			// Track attempts and responses, written on the server's goroutine
-			attemptCount := 0
+			// Claimed at the start of each handler call: the forwarder stops reading an
+			// oversized error body early and retries, so the next attempt may reach the
+			// server before the previous handler call has returned.
+			var attemptCount atomic.Int32
 			responses := []struct {
 				statusCode int
 				body       string
@@ -433,8 +460,9 @@ func TestForwardRetry(t *testing.T) {
 			}
 
 			stubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				if attemptCount < len(responses) {
-					response := responses[attemptCount]
+				attempt := int(attemptCount.Add(1)) - 1
+				if attempt < len(responses) {
+					response := responses[attempt]
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(response.statusCode)
 					_, _ = w.Write([]byte(response.body))
@@ -442,7 +470,6 @@ func TestForwardRetry(t *testing.T) {
 					w.WriteHeader(http.StatusInternalServerError)
 					_, _ = w.Write([]byte("Unexpected attempt"))
 				}
-				attemptCount++
 			}))
 			defer stubServer.Close()
 
@@ -486,7 +513,7 @@ func TestForwardRetry(t *testing.T) {
 			stubServer.Close()
 
 			assert.Equal(tc.expectedCode, resp.Code)
-			assert.Equal(tc.expectedAttempts, attemptCount, "Should have made exactly %d attempts", tc.expectedAttempts)
+			assert.Equal(tc.expectedAttempts, int(attemptCount.Load()), "Should have made exactly %d attempts", tc.expectedAttempts)
 			if tc.shouldRetry {
 				assert.Equal(2, callbackCount)
 			} else {
@@ -525,7 +552,7 @@ func TestForwardDoesNotStripTraceparent(t *testing.T) {
 	// header survives the forwarder's hop-by-hop pruning.
 	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	req.Header.Set("traceparent", inbound)
 	resp := httptest.NewRecorder()
 	fwd.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
@@ -550,7 +577,7 @@ func TestForwardDeletesHopHeaders(t *testing.T) {
 	upstreamHost := stubServer.Listener.Addr().String()
 	fwd := New(http.DefaultClient, upstreamHost, SchemeHTTP, slog.Default())
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	req.Host = "endpoint.intranet.example.com"
 	req.Header.Set("Connection", "Keep-Alive, X-Connection-Scoped")
 	req.Header.Set("X-Connection-Scoped", "secret")
@@ -612,7 +639,7 @@ func TestForwardTransportErrorStatus(t *testing.T) {
 			})}
 			fwd := New(client, "upstream.invalid:443", SchemeHTTPS, slog.Default())
 
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 			resp := httptest.NewRecorder()
 			fwd.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
 

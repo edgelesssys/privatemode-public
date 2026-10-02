@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFetchManifest(t *testing.T) {
+func TestIntegrationFetchManifest(t *testing.T) {
 	require := require.New(t)
 
 	client := New(auth.Credential{}) // Manifest fetching should work without a credential

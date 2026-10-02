@@ -141,7 +141,7 @@ func TestForwardMessagesRequest(t *testing.T) {
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: fwd}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, anthropic.MessagesEndpoint, strings.NewReader(tc.clientRequest))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.AnthropicMessagesEndpoint, strings.NewReader(tc.clientRequest))
 			responseRecorder := httptest.NewRecorder()
 
 			adapter.forwardMessagesRequest(responseRecorder, request)
@@ -158,12 +158,12 @@ func TestRegisterRoutes(t *testing.T) {
 	}{
 		"POST messages": {
 			method:       http.MethodPost,
-			path:         "/v1/messages",
+			path:         constants.AnthropicMessagesEndpoint,
 			expectedCode: http.StatusOK,
 		},
 		"GET messages returns 501": {
 			method:       http.MethodGet,
-			path:         "/v1/messages",
+			path:         constants.AnthropicMessagesEndpoint,
 			expectedCode: http.StatusNotImplemented,
 		},
 		"unknown endpoint returns 501": {
@@ -298,7 +298,7 @@ func TestUsageExtraction(t *testing.T) {
 			require.NoError(t, err)
 
 			ctx := requestid.WithContext(t.Context(), "test-request-id")
-			request := httptest.NewRequestWithContext(ctx, http.MethodPost, anthropic.MessagesEndpoint, strings.NewReader(clientRequest))
+			request := httptest.NewRequestWithContext(ctx, http.MethodPost, constants.AnthropicMessagesEndpoint, strings.NewReader(clientRequest))
 			request.Header.Set(usagecollector.PrivatemodeUsageIDHeader, "test-usage-id")
 			responseRecorder := httptest.NewRecorder()
 

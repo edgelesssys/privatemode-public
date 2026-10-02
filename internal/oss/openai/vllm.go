@@ -17,6 +17,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -34,19 +35,6 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/usage"
 )
 
-const (
-	// ChatCompletionsEndpoint is the endpoint for chat completions.
-	ChatCompletionsEndpoint = "/v1/chat/completions"
-	// LegacyCompletionsEndpoint is the legacy endpoint for chat completions.
-	LegacyCompletionsEndpoint = "/v1/completions"
-	// ModelsEndpoint is the endpoint to list the currently available models.
-	ModelsEndpoint = "/v1/models"
-	// EmbeddingsEndpoint is the endpoint for embeddings.
-	EmbeddingsEndpoint = "/v1/embeddings"
-	// TranscriptionsEndpoint is the endpoint for audio transcriptions.
-	TranscriptionsEndpoint = "/v1/audio/transcriptions"
-)
-
 // StreamDone is the SSE data value that signals the end of a streaming
 // response in the OpenAI-compatible API (e.g. "data: [DONE]").
 var StreamDone = []byte("[DONE]")
@@ -58,14 +46,14 @@ func IsStreamDone(value []byte) bool {
 }
 
 // RandomPromptCacheSalt generates a random salt for prompt caching and
-// returns it as a base64-encoded string.
+// returns it as a URL-safe base64-encoded string, avoiding vLLM's forbidden characters.
 func RandomPromptCacheSalt() string {
 	salt := make([]byte, 32) // 256-bit salt
 	if _, err := rand.Read(salt); err != nil {
 		// As per [rand.Read], it never returns an error.
 		panic(fmt.Sprintf("generating random cache salt: %v", err))
 	}
-	return base64.StdEncoding.EncodeToString(salt)
+	return base64.URLEncoding.EncodeToString(salt)
 }
 
 // ChatRequest is the request structure for an OpenAI chat completion call.
@@ -299,7 +287,7 @@ func CacheSaltInjector(cacheSaltGenerator CacheSaltGenerator, log *slog.Logger) 
 		currentSalt := gjson.Get(httpBody, "cache_salt").String()
 		if currentSalt != "" {
 			if len(currentSalt) < 32 {
-				return "", fmt.Errorf("cache_salt must be at least 32 characters long")
+				return "", forwarder.NewError("validating request", errors.New("cache_salt must be at least 32 characters long"), http.StatusBadRequest)
 			}
 			return httpBody, nil
 		}
@@ -322,10 +310,10 @@ func CacheSaltValidator(log *slog.Logger) forwarder.RequestMutator {
 		}
 		cacheSalt := gjson.Get(httpBody, "cache_salt").String()
 		if cacheSalt == "" {
-			return "", fmt.Errorf("missing field 'cache_salt'")
+			return "", forwarder.NewError("validating request", errors.New("missing field 'cache_salt'"), http.StatusBadRequest)
 		}
 		if len(cacheSalt) < 32 {
-			return "", fmt.Errorf("cache_salt must be at least 32 characters long")
+			return "", forwarder.NewError("validating request", errors.New("cache_salt must be at least 32 characters long"), http.StatusBadRequest)
 		}
 		return httpBody, nil
 	}
@@ -357,7 +345,7 @@ func MediaContentValidator(log *slog.Logger) forwarder.RequestMutator {
 			`messages.#.content.#.image_url.url|@flatten`,
 			`messages.#.content.#.image_url|@flatten`,
 		}, validateImageURL); err != nil {
-			return "", fmt.Errorf("validating image URLs: %w", err)
+			return "", forwarder.NewError("validating image URLs", err, http.StatusBadRequest)
 		}
 
 		// Audio
@@ -367,7 +355,7 @@ func MediaContentValidator(log *slog.Logger) forwarder.RequestMutator {
 			`messages.#.content.#.audio_url.url|@flatten`,
 			`messages.#.content.#.audio_url|@flatten`,
 		}, validateAudioURL); err != nil {
-			return "", fmt.Errorf("validating audio URLs: %w", err)
+			return "", forwarder.NewError("validating audio URLs", err, http.StatusBadRequest)
 		}
 
 		// Videos
@@ -377,7 +365,7 @@ func MediaContentValidator(log *slog.Logger) forwarder.RequestMutator {
 			`messages.#.content.#.video_url.url|@flatten`,
 			`messages.#.content.#.video_url|@flatten`,
 		}, validateVideoURL); err != nil {
-			return "", fmt.Errorf("validating video URLs: %w", err)
+			return "", forwarder.NewError("validating video URLs", err, http.StatusBadRequest)
 		}
 
 		return httpBody, nil
@@ -430,7 +418,7 @@ func StreamUsageReportingInjector(log *slog.Logger) forwarder.RequestMutator {
 		log.DebugContext(context.Background(), "Enabling token tracking for request")
 
 		if !gjson.Valid(httpBody) {
-			return "", fmt.Errorf("request body is not valid json")
+			return "", forwarder.NewError("validating request", errors.New("request body is not valid json"), http.StatusBadRequest)
 		}
 
 		// stream_options is only relevant for streaming completions.

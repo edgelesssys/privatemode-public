@@ -160,8 +160,12 @@ export const de: Record<TranslationKey, string> = {
   'model.loading': 'Modelle werden geladen ...',
   'model.none': 'Keine Modelle verfügbar',
   'model.loadFailed': 'Modelle konnten nicht geladen werden',
-  'model.gptOssSubtitle': 'Reasoning-Modell für komplexe Aufgaben',
-  'model.kimiSubtitle': 'Reasoning-Modell mit großem Kontextfenster',
+  'model.gptOssSubtitle':
+    'Ein schnelles Modell von OpenAI mit guten Textfähigkeiten',
+  'model.glmSubtitle':
+    'Unser größtes Modell für deine anspruchsvollsten Aufgaben',
+  'model.glmFlashSubtitle':
+    'Ein schnelles Modell, das starke Allround-Fähigkeiten mit Bilderkennung kombiniert',
   'error.authSuffix':
     'Dein API-Schlüssel ist möglicherweise ungültig oder abgelaufen.',
   'error.updateApiKey': 'API-Schlüssel aktualisieren',

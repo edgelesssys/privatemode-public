@@ -150,8 +150,11 @@ export const en = {
   'model.loading': 'Loading models...',
   'model.none': 'No models available',
   'model.loadFailed': 'Failed to load models',
-  'model.gptOssSubtitle': 'Reasoning model suited for complex tasks',
-  'model.kimiSubtitle': 'Reasoning model with a large context window',
+  'model.gptOssSubtitle':
+    'A fast model from OpenAI with good text capabilities',
+  'model.glmSubtitle': 'Our largest model for your most ambitious tasks',
+  'model.glmFlashSubtitle':
+    'A fast model that combines strong all-round capabilities with vision',
   'error.authSuffix': 'Your API key may be invalid or expired.',
   'error.updateApiKey': 'Update your API key',
   'error.readImage': 'Failed to read image: {name}.',

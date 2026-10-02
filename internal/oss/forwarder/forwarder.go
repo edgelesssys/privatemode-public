@@ -160,12 +160,8 @@ func (f *Forwarder) Forward(
 			HTTPError(w, req, StatusClientClosedRequest, "forwarding request: %s", err)
 			return
 		}
-		// Upstream failures report as gateway errors (502/504); 500 is for proxy-internal faults.
-		status := http.StatusInternalServerError
-		var upErr *transportError
-		if errors.As(err, &upErr) {
-			status = upErr.status
-		}
+		// Use the mutator's status or a gateway status for upstream failures.
+		status := StatusFromError(err)
 		// Error details may contain plaintext input or upstream error text.
 		log.ErrorContext(ctx, "Failed to forward request", "status", status)
 		HTTPError(w, req, status, "forwarding request: %s", err)
@@ -304,9 +300,9 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 	bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes+1))
 	resp.Body.Close()
 	if len(bodyBytes) > maxErrorBodyBytes {
-		upErr := newTransportError(errors.New("upstream error response body too large"))
-		shouldRetry, retryErr := f.shouldRetry(req.Context(), retryCallback, upErr.Error(), resp.StatusCode, attempt)
-		return shouldRetry, nil, errors.Join(upErr, retryErr)
+		bodyErr := errors.New("upstream error response body too large")
+		shouldRetry, retryErr := f.shouldRetry(req.Context(), retryCallback, bodyErr.Error(), resp.StatusCode, attempt)
+		return shouldRetry, nil, errors.Join(newTransportError(bodyErr), retryErr)
 	}
 	if readErr != nil {
 		bodyBytes = fmt.Appendf(nil, "failed to read response body: %s", readErr)
@@ -318,24 +314,15 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 	return shouldRetry, resp, errors.Join(readErr, retryErr)
 }
 
-// transportError wraps a failure contacting the upstream, carrying the gateway status
-// (504 on timeout, else 502) to report downstream instead of a 500.
-type transportError struct {
-	status int
-	err    error
-}
-
-func newTransportError(err error) *transportError {
+// newTransportError maps upstream transport failures to gateway statuses.
+func newTransportError(err error) *Error {
 	status := http.StatusBadGateway
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		status = http.StatusGatewayTimeout
 	}
-	return &transportError{status: status, err: err}
+	return NewError("", err, status)
 }
-
-func (e *transportError) Error() string { return e.err.Error() }
-func (e *transportError) Unwrap() error { return e.err }
 
 // sendWithRetry handles the retry logic for forwarding requests.
 func (f *Forwarder) sendWithRetry(req *http.Request, requestMutator RequestMutator, retryCallback RetryCallback) (*http.Response, error) {

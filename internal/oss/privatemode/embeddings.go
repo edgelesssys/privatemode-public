@@ -11,8 +11,9 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/mutators"
-	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/persist"
 )
 
@@ -55,7 +56,7 @@ func (c *Client) prepareEmbeddingsRequest(
 	body []byte,
 	opts RequestOptions,
 ) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+openai.EmbeddingsEndpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+constants.OpenAIEmbeddingsEndpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -72,11 +73,16 @@ func (c *Client) prepareEmbeddingsRequest(
 			Model string `json:"model"`
 		}
 		if err := json.Unmarshal(body, &request); err != nil {
-			return "", fmt.Errorf("parsing embeddings request: %w", err)
+			return "", forwarder.NewError("parsing embeddings request", err, http.StatusBadRequest)
 		}
 		return request.Model, nil
 	}
-	if err := mutators.ModelHeaderInjector(modelExtractor)(req); err != nil {
+	mutator := forwarder.RequestMutatorChain(
+		mutators.ModelHeaderInjector(modelExtractor),
+		mutators.ContentLengthTokensInjector,
+	)
+	err = mutator(req)
+	if err != nil {
 		return nil, fmt.Errorf("mutating request: %w", err)
 	}
 	return req, nil

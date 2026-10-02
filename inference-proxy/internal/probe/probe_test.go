@@ -16,7 +16,7 @@ import (
 )
 
 func TestCheckLiveness(t *testing.T) {
-	const reachabilityURL = "http://127.0.0.1:8000/v1/models"
+	const reachabilityURL = "http://127.0.0.1:8000" + constants.OpenAIModelsEndpoint
 
 	reachable := fakeHTTPClient{status: http.StatusOK}
 	unreachable := fakeHTTPClient{err: assert.AnError}

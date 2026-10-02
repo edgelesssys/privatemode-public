@@ -319,7 +319,7 @@ func (c *Client) ListModels(ctx context.Context) ([]byte, error) {
 // ListModelsWithOptions fetches the list of available models from the API and
 // preserves the response headers.
 func (c *Client) ListModelsWithOptions(ctx context.Context, opts RequestOptions) (*Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBaseURL+"/v1/models", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBaseURL+constants.OpenAIModelsEndpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}

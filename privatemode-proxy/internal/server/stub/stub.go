@@ -20,15 +20,15 @@ import (
 // EchoHandler stubs our hosted backend (API Gateway + Inference Proxy) and echoes requests in the response.
 func EchoHandler(secrets map[string][]byte, log *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/chat/completions", openAIChatCompletionsHandler(secrets, log))
-	mux.HandleFunc("POST /v1/completions", openAIChatCompletionsHandler(secrets, log))
+	mux.HandleFunc("POST "+constants.OpenAIChatCompletionsEndpoint, openAIChatCompletionsHandler(secrets, log))
+	mux.HandleFunc("POST "+constants.OpenAILegacyCompletionsEndpoint, openAIChatCompletionsHandler(secrets, log))
 
 	// Handlers with empty responses: strictly speaking invalid, but enough for minimal tests
-	mux.HandleFunc("POST /v1/embeddings", encryptedStaticResponseHandler(secrets, []byte("{}")))
-	mux.HandleFunc("POST /v1/audio/transcriptions", encryptedStaticResponseHandler(secrets, []byte("{}")))
-	mux.HandleFunc("POST /v1/messages", encryptedStaticResponseHandler(secrets, []byte("{}")))
+	mux.HandleFunc("POST "+constants.OpenAIEmbeddingsEndpoint, encryptedStaticResponseHandler(secrets, []byte("{}")))
+	mux.HandleFunc("POST "+constants.OpenAITranscriptionsEndpoint, encryptedStaticResponseHandler(secrets, []byte("{}")))
+	mux.HandleFunc("POST "+constants.AnthropicMessagesEndpoint, encryptedStaticResponseHandler(secrets, []byte("{}")))
 
-	mux.HandleFunc("GET /v1/models", openAIModelsHandler())
+	mux.HandleFunc("GET "+constants.OpenAIModelsEndpoint, openAIModelsHandler())
 	return mux
 }
 

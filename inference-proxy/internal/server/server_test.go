@@ -78,7 +78,7 @@ func benchmarkServe(b *testing.B, apiType string) {
 
 	// Needs a short sleep so server is up before client starts.
 	time.Sleep(500 * time.Millisecond)
-	endpoint := fmt.Sprintf("http://%s/v1/chat/completions", proxyLis.Addr().String())
+	endpoint := fmt.Sprintf("http://%s"+constants.OpenAIChatCompletionsEndpoint, proxyLis.Addr().String())
 
 	b.Run("serve", func(b *testing.B) {
 		// Reset timer so setup code is excluded from benchmark.

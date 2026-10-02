@@ -18,9 +18,13 @@ import (
 // MutationFunc mutates data.
 // It is used by [WithRequestMutation] to mutate data read from an [*http.Request].
 // It may be called multiple times for a single request to mutate data.
+// Return a [Error] to specify the HTTP status on failure.
+// Other errors are reported as [http.StatusInternalServerError].
 type MutationFunc func(in string) (out string, err error)
 
 // RequestMutator mutates an [*http.Request].
+// Return a [Error] to specify the HTTP status on failure.
+// Other errors are reported as [http.StatusInternalServerError].
 type RequestMutator func(request *http.Request) error
 
 // RequestMutatorChain is a chain of [RequestMutator]s.
@@ -73,7 +77,7 @@ func WithFormRequestMutation(mutate func(*multipart.Form, *multipart.Writer) (bo
 
 		boundary, err := parseMultipartBoundaryFromContentType(r.Header.Get("Content-Type"))
 		if err != nil {
-			return fmt.Errorf("parsing Content-Type header: %w", err)
+			return NewError("parsing Content-Type header", err, http.StatusBadRequest)
 		}
 
 		reader := multipart.NewReader(bytes.NewReader(body), boundary)

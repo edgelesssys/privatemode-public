@@ -309,7 +309,7 @@ func buildGenerateRequest(ctx context.Context, baseURL, modelName, cacheSalt str
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+openai.ChatCompletionsEndpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+constants.OpenAIChatCompletionsEndpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +329,7 @@ func buildEmbedRequest(ctx context.Context, baseURL, modelName string) (*http.Re
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+openai.EmbeddingsEndpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+constants.OpenAIEmbeddingsEndpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +346,7 @@ func buildTranscribeRequest(ctx context.Context, baseURL, modelName string) (*ht
 	_, _ = fileForm.Write(heartbeatAudio)
 	_ = writer.Close()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+openai.TranscriptionsEndpoint, buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+constants.OpenAITranscriptionsEndpoint, buf)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +363,7 @@ func buildUnstructuredRequest(ctx context.Context, baseURL string) (*http.Reques
 	_ = writer.WriteField("strategy", "fast")
 	_ = writer.Close()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/general/v0/general", buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+constants.UnstructuredGeneralEndpoint, buf)
 	if err != nil {
 		return nil, err
 	}

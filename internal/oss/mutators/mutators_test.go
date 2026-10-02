@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -22,6 +23,54 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestContentLengthTokensInjector(t *testing.T) {
+	for name, tc := range map[string]struct {
+		endpoint  string
+		modelName string
+		body      string
+		want      string
+	}{
+		"empty":                               {endpoint: "/v1/chat/completions", body: `{}`, want: "0"},
+		"completion":                          {endpoint: "/v1/completions", body: `{"prompt":"abcdefgh","suffix":"ijkl"}`, want: "3"},
+		"round down":                          {endpoint: "/v1/completions", body: `{"prompt":"abcdefg"}`, want: "1"},
+		"system prompt":                       {endpoint: "/v1/messages", body: `{"system":"abcdefgh"}`, want: "2"},
+		"tools":                               {endpoint: "/v1/chat/completions", body: `{"tools":[{}]}`, want: "1"},
+		"messages":                            {endpoint: "/v1/chat/completions", body: `{"messages":[{"role":"user","content":"hello"}]}`, want: "8"},
+		"ignore metadata":                     {endpoint: "/v1/completions", body: `{"prompt":"abcdefgh","model":"some-model","cache_salt":"salt","max_tokens":100}`, want: "2"},
+		"embedding":                           {endpoint: "/v1/embeddings", body: `{"input":"abcdefgh"}`, want: "2"},
+		"embedding batch":                     {endpoint: "/v1/embeddings", body: `{"input":["abcd","efgh"]}`, want: "3"},
+		"completion ignores input":            {endpoint: "/v1/completions", body: `{"prompt":"abcdefgh","input":"ijklmnop"}`, want: "2"},
+		"chat ignores input":                  {endpoint: "/v1/chat/completions", body: `{"messages":[{"role":"user","content":"hello"}],"input":"ijklmnop"}`, want: "8"},
+		"messages ignores input":              {endpoint: "/v1/messages", body: `{"system":"abcdefgh","input":"ijklmnop"}`, want: "2"},
+		"embedding ignores completion fields": {endpoint: "/v1/embeddings", body: `{"input":"abcdefgh","prompt":"ijklmnop","suffix":"qrst","system":"uvwx","tools":[{}],"messages":[{}]}`, want: "2"},
+		"empty audio":                         {endpoint: "/v1/audio/transcriptions", want: "323"},
+		"short audio":                         {endpoint: "/v1/audio/transcriptions", body: "x", want: "348"},
+		"one second":                          {endpoint: "/v1/audio/transcriptions", body: strings.Repeat("x", 8*1024), want: "348"},
+		"partial second":                      {endpoint: "/v1/audio/transcriptions", body: strings.Repeat("x", 8*1024+1), want: "373"},
+		"empty whisper audio":                 {endpoint: "/v1/audio/transcriptions", modelName: "openai/whisper-large-v3", want: "0"},
+		"whisper audio":                       {endpoint: "/v1/audio/transcriptions", modelName: "openai/whisper-large-v3", body: "x", want: "100"},
+		"whisper alias":                       {endpoint: "/v1/audio/transcriptions", modelName: "whisper-large-v3", body: strings.Repeat("x", 8*1024), want: "100"},
+		"whisper partial second":              {endpoint: "/v1/audio/transcriptions", modelName: "whisper-large-v3", body: strings.Repeat("x", 8*1024+1), want: "200"},
+		"voxtral audio":                       {endpoint: "/v1/audio/transcriptions", modelName: "voxtral-mini-3b", body: "x", want: "348"},
+		"unknown audio model":                 {endpoint: "/v1/audio/transcriptions", modelName: "unknown", body: "x", want: "348"},
+		"unstructured":                        {endpoint: "/unstructured/general/v0/general", body: "document content", want: "0"},
+		"unstructured upstream":               {endpoint: "/general/v0/general", body: "document content", want: "0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.endpoint, strings.NewReader(tc.body))
+			r.ContentLength = -1
+			r.Header.Set(constants.PrivatemodeTargetModel, tc.modelName)
+			r.Header.Set(constants.PrivatemodeContentLengthTokensHeader, "9999")
+			require.NoError(t, ContentLengthTokensInjector(r))
+			assert.Equal(t, tc.want, r.Header.Get(constants.PrivatemodeContentLengthTokensHeader))
+			assert.Empty(t, r.Header.Get(constants.PrivatemodeShardKeyHeader))
+			body, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			assert.Equal(t, tc.body, string(body))
+		})
+	}
+}
 
 func TestGenerateShardKey(t *testing.T) {
 	cacheSalt := "test-salt"
@@ -156,7 +205,7 @@ func chatBodyWithImage(t *testing.T, cacheSalt, text, imageURL string) string {
 // request with the given body.
 func runInjector(t *testing.T, body string) *http.Request {
 	t.Helper()
-	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, strings.NewReader(body))
 	require.NoError(t, ShardKeyInjector("")(r))
 	return r
 }

@@ -14,10 +14,10 @@ import (
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
-	"github.com/edgelesssys/continuum/internal/model"
 	"github.com/edgelesssys/continuum/internal/oss/compat"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/model"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
 	"github.com/tidwall/gjson"
@@ -49,20 +49,20 @@ func New(workloadTasks []string, secrets inference.SecretGetter, ocspStatusFile 
 func (a *Adapter) RegisterRoutes(mux *http.ServeMux) {
 	// List models: https://platform.openai.com/docs/api-reference/models/list
 	// Not wrapped with OCSP verification - used for health checks
-	mux.HandleFunc("GET /v1/models", a.forwardModelsRequest)
-	mux.HandleFunc("GET /v1/models/{model}", a.forwardSpecificModelRequest) // Also handle model details endpoint
+	mux.HandleFunc("GET "+constants.OpenAIModelsEndpoint, a.forwardModelsRequest)
+	mux.HandleFunc("GET "+constants.OpenAIModelsEndpoint+"/{model}", a.forwardSpecificModelRequest) // Also handle model details endpoint
 
 	// Create chat completion: https://platform.openai.com/docs/api-reference/chat/create
-	mux.Handle("/v1/chat/completions", a.VerifyOCSP(http.HandlerFunc(a.forwardChatCompletionsRequest)))
+	mux.Handle(constants.OpenAIChatCompletionsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardChatCompletionsRequest)))
 
 	// Legacy chat completions endpoint: https://platform.openai.com/docs/api-reference/completions/create
 	// Reuse the same handler as for /v1/chat/completions since both endpoints require the same mutators.
-	mux.Handle(openai.LegacyCompletionsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardChatCompletionsRequest)))
+	mux.Handle(constants.OpenAILegacyCompletionsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardChatCompletionsRequest)))
 
 	// Create embeddings: https://platform.openai.com/docs/api-reference/embeddings/create
-	mux.Handle("POST /v1/embeddings", a.VerifyOCSP(http.HandlerFunc(a.forwardEmbeddingsRequest)))
+	mux.Handle("POST "+constants.OpenAIEmbeddingsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardEmbeddingsRequest)))
 
-	mux.Handle(openai.TranscriptionsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardTranscriptionsRequest)))
+	mux.Handle(constants.OpenAITranscriptionsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardTranscriptionsRequest)))
 }
 
 // HandlesCatchAll returns false because OpenAI adapter only handles specific endpoints.

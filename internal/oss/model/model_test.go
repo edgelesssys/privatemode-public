@@ -1,3 +1,6 @@
+// Copyright (c) Edgeless Systems GmbH
+// SPDX-License-Identifier: MIT
+
 package model
 
 import (
@@ -14,10 +17,6 @@ func TestResolve(t *testing.T) {
 		"gpt oss latest to current": {
 			input:    "gpt-oss-latest",
 			expected: "openai/gpt-oss-120b",
-		},
-		"kimi latest to current": {
-			input:    "kimi-latest",
-			expected: "kimi-k2.6",
 		},
 		"glm latest to current": {
 			input:    "glm-latest",

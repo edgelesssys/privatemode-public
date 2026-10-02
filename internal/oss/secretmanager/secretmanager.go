@@ -29,7 +29,7 @@ type SecretManager struct {
 	clock                  clock.Clock
 	credential             auth.Credential
 	dropCredOnUnauthorized bool
-	credChan               chan struct{} // signals the Loop that a credential has been set
+	credChan               chan struct{} // signals [*SecretManager.Run] that a credential has been set
 	credChanClosed         bool
 }
 
@@ -109,23 +109,23 @@ func (sm *SecretManager) SetCredential(cred auth.Credential) {
 	sm.setCredentialLocked(cred)
 }
 
-// setCredentialLocked stores cred and signals the Loop that a credential is available.
+// setCredentialLocked stores cred and signals [*SecretManager.Run] that a credential is available.
 // The caller must hold sm.mut.
 func (sm *SecretManager) setCredentialLocked(cred auth.Credential) {
 	sm.credential = cred
 	if !sm.credChanClosed && !cred.IsZero() {
 		sm.credChanClosed = true
-		close(sm.credChan) // signal the Loop that a credential has been set
+		close(sm.credChan) // signal [*SecretManager.Run]  that a credential has been set
 	}
 }
 
-// Loop keeps the secret up-to-date by periodically updating it.
-func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
+// Run keeps the secret up-to-date by periodically updating it.
+func (sm *SecretManager) Run(ctx context.Context, log *slog.Logger) {
 	// wait for a credential
 	select {
 	case <-ctx.Done():
-		log.InfoContext(ctx, "Context cancelled, stopping loop")
-		return nil
+		log.InfoContext(ctx, "Context cancelled, stopping...")
+		return
 	case <-sm.credChan:
 	}
 
@@ -133,12 +133,12 @@ func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
 	const maxBackoff = 60 * time.Second
 	backoff := initialBackoff
 	for {
-		secret, err := sm.LatestSecret(ctx)
 		var wait time.Duration
+		secret, err := sm.LatestSecret(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				log.InfoContext(ctx, "Context cancelled, stopping loop")
-				return nil //nolint:nilerr
+				log.InfoContext(ctx, "Context cancelled, stopping...")
+				return
 			}
 			log.ErrorContext(ctx, "Failed to update secret", "error", err, "backoff", backoff)
 			wait = backoff
@@ -151,8 +151,8 @@ func (sm *SecretManager) Loop(ctx context.Context, log *slog.Logger) error {
 
 		select {
 		case <-ctx.Done():
-			log.InfoContext(ctx, "Context cancelled, stopping loop")
-			return nil
+			log.InfoContext(ctx, "Context cancelled, stopping...")
+			return
 		case <-sm.clock.After(wait):
 		}
 	}

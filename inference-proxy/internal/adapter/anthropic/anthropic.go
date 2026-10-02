@@ -13,6 +13,7 @@ import (
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
@@ -44,7 +45,7 @@ func New(workloadTasks []string, secrets inference.SecretGetter, ocspStatusFile 
 // Each handler is wrapped with OCSP verification middleware.
 func (a *Adapter) RegisterRoutes(mux *http.ServeMux) {
 	// Create message: https://docs.anthropic.com/en/api/messages
-	mux.Handle("POST "+anthropic.MessagesEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardMessagesRequest)))
+	mux.Handle("POST "+constants.AnthropicMessagesEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardMessagesRequest)))
 }
 
 // HandlesCatchAll returns false because Anthropic adapter only handles specific endpoints.

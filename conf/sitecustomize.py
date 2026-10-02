@@ -5,8 +5,11 @@
 #    with torch allocator stats (reserved vs. allocated fragmentation) that
 #    nvidia-smi cannot see from outside the process, plus NVML utilization
 #    and power draw.
+# 3. Dumps the Python stacks of all workers before the EngineCore shuts them down.
 import builtins
+import faulthandler
 import json
+import logging
 import os
 import sys
 import threading
@@ -112,6 +115,97 @@ if _mem_poll_seconds:
         ).start()
     except Exception:
         pass
+
+
+def _stack_dump_request(engine_pid):
+    tmp = os.environ.get("TMPDIR", "/tmp")
+    return os.path.join(tmp, "vllm-stack-dump-%d" % engine_pid)
+
+
+def _stack_dump_loop():
+    # Runs only in spawned multiprocessing children (see the start below) and
+    # dumps only in vLLM workers (process name check below).
+    # Answers a request of the parent process (the EngineCore, below) with the
+    # stacks of all threads. A thread and a file, not a signal: in a deployed
+    # worker, SIGUSR1 with faulthandler printed nothing.
+    # Must not import anything here to avoid deadlocks on interpreter start.
+    request = _stack_dump_request(os.getppid())
+    dump = "%s.%d" % (request, os.getpid())
+    answered = None
+    while True:
+        time.sleep(0.5)
+        try:
+            requested = os.stat(request).st_mtime
+            if requested == answered:
+                continue
+            mp = sys.modules.get("multiprocessing")
+            if not (mp and mp.current_process().name.startswith("VllmWorker")):
+                continue
+            with open(dump + ".tmp", "w") as f:
+                faulthandler.dump_traceback(file=f, all_threads=True)
+            os.rename(dump + ".tmp", dump)
+            answered = requested
+        except Exception:
+            pass
+
+
+# multiprocessing's spawn start method runs its children with this flag
+if "--multiprocessing-fork" in sys.argv:
+    threading.Thread(target=_stack_dump_loop, daemon=True).start()
+
+_real_handle = logging.Logger.handle
+
+
+def _dump_workers_on_rpc_timeout(self, record):
+    # Monkeypatched wrapper for `logging.Logger.handle`.
+    # Requests the workers' stack dumps whenever a TimeoutError "RPC call to ...
+    # timed out" is logged. vLLM logs it with "EngineCore encountered a fatal
+    # error." before shutting the workers down.
+    try:
+        exc = record.exc_info[1] if record.exc_info else None
+        if isinstance(exc, TimeoutError) and str(exc).startswith("RPC call to"):
+            import multiprocessing
+
+            workers = sorted(
+                (
+                    p
+                    for p in multiprocessing.active_children()
+                    if p.name.startswith("VllmWorker")
+                ),
+                key=lambda p: p.name,
+            )
+            if not workers:
+                sys.stderr.write("worker stack dump: no VllmWorker child processes\n")
+            request = _stack_dump_request(os.getpid())
+            for p in workers:  # a late dump of an earlier round
+                try:
+                    os.remove("%s.%d" % (request, p.pid))
+                except OSError:
+                    pass
+            open(request, "w").close()
+            deadline = time.monotonic() + 5
+            for p in workers:
+                dump = "%s.%d" % (request, p.pid)
+                # look for the file even after the deadline: one silent worker
+                # must not cost the others their dumps
+                while not os.path.exists(dump) and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                try:
+                    with open(dump) as f:
+                        stacks = f.read()
+                    os.remove(dump)
+                except OSError:
+                    stacks = "no dump within 5 s\n"
+                sys.stderr.write(
+                    "worker stack dump: %s pid %d\n%s" % (p.name, p.pid, stacks)
+                )
+            os.remove(request)
+    except Exception as e:  # never break logging
+        sys.stderr.write("worker stack dump failed: %r\n" % e)
+    return _real_handle(self, record)
+
+
+logging.Logger.handle = _dump_workers_on_rpc_timeout
 
 _real_print = builtins.print
 

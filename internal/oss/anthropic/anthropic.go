@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -22,11 +23,6 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
 	"github.com/tidwall/gjson"
-)
-
-const (
-	// MessagesEndpoint is the endpoint for creating messages.
-	MessagesEndpoint = "/v1/messages"
 )
 
 // MessagesRequest is the request structure for an Anthropic messages call.
@@ -104,7 +100,7 @@ func MediaContentValidator(log *slog.Logger) forwarder.RequestMutator {
 			// Images embedded in tool result content:
 			`messages.#.content.#(type=="tool_result")#.content.#(type=="image")#.source.url|@flatten|@flatten`,
 		}, validateImageURL); err != nil {
-			return "", fmt.Errorf("validating image URLs: %w", err)
+			return "", forwarder.NewError("validating image URLs", err, http.StatusBadRequest)
 		}
 
 		// Images may also be passed as type base64 and this is allowed:

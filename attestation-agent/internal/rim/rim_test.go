@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFetchRIM(t *testing.T) {
+func TestIntegrationFetchRIM(t *testing.T) {
 	require := require.New(t)
 
 	client := New(&http.Client{}, "https://rim.attestation.nvidia.com/", slog.Default())

@@ -117,7 +117,7 @@ func (c *Client) prepareChatCompletionsRequest(
 	body []byte,
 	opts RequestOptions,
 ) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+"/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiBaseURL+constants.OpenAIChatCompletionsEndpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -134,14 +134,14 @@ func (c *Client) prepareChatCompletionsRequest(
 			Model string `json:"model"`
 		}
 		if err := json.Unmarshal(body, &request); err != nil {
-			return "", fmt.Errorf("parsing chat request: %w", err)
+			return "", forwarder.NewError("parsing chat request", err, http.StatusBadRequest)
 		}
 		return request.Model, nil
 	}
 	mutator := forwarder.RequestMutatorChain(
+		mutators.ModelHeaderInjector(chatModelExtractor),
 		mutators.ShardKeyInjector(c.promptCacheSalt),
 		openai.CacheSaltInjector(func() string { return c.promptCacheSalt }, c.log),
-		mutators.ModelHeaderInjector(chatModelExtractor),
 	)
 	if err := mutator(req); err != nil {
 		return nil, fmt.Errorf("mutating request: %w", err)

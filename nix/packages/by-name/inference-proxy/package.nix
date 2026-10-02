@@ -14,7 +14,6 @@ let
       "go.sum"
       "inference-proxy"
       "internal/httprpc"
-      "internal/model"
       "internal/mtls"
       "internal/oss"
       "internal/oss/compat"

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/logging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,7 +42,7 @@ func TestSummaryServedLog(t *testing.T) {
 				req := httptest.NewRequestWithContext(
 					t.Context(),
 					http.MethodPost,
-					"/v1/chat/completions?foo=bar",
+					constants.OpenAIChatCompletionsEndpoint+"?foo=bar",
 					strings.NewReader(reqBody),
 				)
 				req.RemoteAddr = "10.0.0.5:54321"
@@ -51,7 +52,7 @@ func TestSummaryServedLog(t *testing.T) {
 				assert.Equal(t, http.MethodPost, a["method"])
 				assert.Equal(t, "http", a["scheme"])
 				assert.Empty(t, a["host"]) // Temporarily no logging of `Host` header
-				assert.Equal(t, "/v1/chat/completions", a["path"])
+				assert.Equal(t, constants.OpenAIChatCompletionsEndpoint, a["path"])
 				assert.Equal(t, "foo=bar", a["query"])
 				assert.Equal(t, "HTTP/1.1", a["protocol"])
 				assert.Equal(t, "10.0.0.5", a["ip"])
@@ -90,11 +91,11 @@ func TestSummaryServedLog(t *testing.T) {
 		},
 		"attrs added via context appear on the log": {
 			handler: func(_ http.ResponseWriter, r *http.Request) {
-				logging.AddSummaryAttrs(r.Context(), "pattern", "POST /v1/chat/completions", "apiKey", "secret")
+				logging.AddSummaryAttrs(r.Context(), "pattern", "POST "+constants.OpenAIChatCompletionsEndpoint, "apiKey", "secret")
 			},
 			req: httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody),
 			assert: func(t *testing.T, a map[string]any) {
-				assert.Equal(t, "POST /v1/chat/completions", a["pattern"])
+				assert.Equal(t, "POST "+constants.OpenAIChatCompletionsEndpoint, a["pattern"])
 				assert.Equal(t, "secret", a["apiKey"])
 			},
 		},
@@ -121,7 +122,7 @@ func TestSummaryServedLogOnPanic(t *testing.T) {
 		panic(http.ErrAbortHandler)
 	}), slog.New(rec), false)
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/chat/completions", http.NoBody)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, constants.OpenAIChatCompletionsEndpoint, http.NoBody)
 
 	assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
 		handler.ServeHTTP(httptest.NewRecorder(), req)

@@ -1,6 +1,10 @@
 replicaCount: 1
+fullnameOverride: ''
+runtimeClassName: ''
+podAnnotations: {}
+initContainers: []
 image:
-  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.57.1-pre
+  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.58.1-pre
   pullPolicy: IfNotPresent
   restartPolicy: Always
 service:
@@ -41,6 +45,9 @@ config:
     enabled: true
     # Name of the Kubernetes Secret containing the API key under the key "apiKey".
     apiKeySecretName: 'privatemode-api-key'
+    # When to use the configured key for forwarded requests: never, always, or if-placeholder.
+    # Leave empty to use the proxy's default.
+    fallback: ''
   # API configuration
   apiEndpoint:
     enabled: false
@@ -66,16 +73,27 @@ config:
   # Custom CA bundle for outbound TLS inspection / MitM appliances
   customCA:
     enabled: false
+    # Name of the Kubernetes Secret containing the bundle under the key fileName.
     secretName: 'privatemode-proxy-custom-ca'
+    # Name of a ConfigMap containing the bundle under the key fileName; takes precedence over secretName.
+    configMapName: ''
     fileName: 'ca-bundle.crt'
   sharedPromptCache:
     enabled: false
+    # Salt source passed to --prompt-cache-salt when sharing is enabled.
+    # Ignored when a salt Secret is configured below.
+    saltSource: 'random'
     promptCacheSalt:
       enabled: false
       # Name of the Kubernetes Secret containing a random string of at least 32 bytes
       # under the key "promptCacheSalt".
       secretName: 'privatemode-proxy-prompt-cache-salt'
-  # Extra environment variables
-  extraEnv: []
   # Set to true to allow the proxy to accept self-signed certificates from the backend
   insecureAPIConnection: false
+  # Extra command-line arguments
+  extraArgs: []
+  # Extra environment variables
+  extraEnv: []
+  # Extra volumes and mounts for the proxy container
+  extraVolumes: []
+  extraVolumeMounts: []

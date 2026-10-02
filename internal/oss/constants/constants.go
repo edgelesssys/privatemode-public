@@ -16,6 +16,23 @@ var version = "0.0.0-dev"
 func Version() string { return version }
 
 const (
+	// OpenAIChatCompletionsEndpoint is the endpoint for OpenAI chat completions.
+	OpenAIChatCompletionsEndpoint = "/v1/chat/completions"
+	// OpenAILegacyCompletionsEndpoint is the endpoint for legacy OpenAI completions.
+	OpenAILegacyCompletionsEndpoint = "/v1/completions"
+	// OpenAIModelsEndpoint is the endpoint to list the currently available OpenAI-compatible models.
+	OpenAIModelsEndpoint = "/v1/models"
+	// OpenAIEmbeddingsEndpoint is the endpoint for OpenAI embeddings.
+	OpenAIEmbeddingsEndpoint = "/v1/embeddings"
+	// OpenAITranscriptionsEndpoint is the endpoint for OpenAI audio transcriptions.
+	OpenAITranscriptionsEndpoint = "/v1/audio/transcriptions"
+	// AnthropicMessagesEndpoint is the endpoint for creating Anthropic messages.
+	AnthropicMessagesEndpoint = "/v1/messages"
+	// UnstructuredEndpoint is the endpoint prefix for Unstructured document processing.
+	UnstructuredEndpoint = "/unstructured"
+	// UnstructuredGeneralEndpoint is the upstream endpoint for Unstructured document processing.
+	UnstructuredGeneralEndpoint = "/general/v0/general"
+
 	// WorkloadTaskGenerate is the vLLM task for text generation.
 	WorkloadTaskGenerate = "generate"
 	// WorkloadTaskToolCalling indicates models that support tool calling for the /v1/chat/completions API.

@@ -7,11 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"strconv"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
+	"github.com/edgelesssys/continuum/internal/oss/compat"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
+	"github.com/edgelesssys/continuum/internal/oss/oae"
+	"github.com/edgelesssys/continuum/internal/oss/persist"
 )
 
 // Forwarder forwards requests to the workload, either as plaintext or end-to-end encrypted.
@@ -104,12 +110,19 @@ func (e *encForwarder) ForwardEncrypted(
 		w, r,
 		func(r *http.Request) error {
 			var err error
-			exchange, err = encbody.InitializeServerExchange(secret, r)
-			if err != nil {
-				return fmt.Errorf("initializing server exchange: %w", err)
+			if exchange, err = encbody.InitializeServerExchange(secret, r); err != nil {
+				statusCode := http.StatusInternalServerError
+				if errors.Is(err, oae.ErrInvalidSharedSecret) || errors.Is(err, oae.ErrMalformedHeader) {
+					statusCode = http.StatusBadRequest
+				}
+				return forwarder.NewError("initializing server exchange", err, statusCode)
 			}
 			if err := exchange.DecryptRequest(r); err != nil {
-				return fmt.Errorf("decrypting request: %w", err)
+				return forwarder.NewError("decrypting request", err, http.StatusBadRequest)
+			}
+			err = validatePromptTokens(r)
+			if err != nil {
+				return fmt.Errorf("validating prompt tokens: %w", err)
 			}
 			if err := postDecryptMutator(r); err != nil {
 				return fmt.Errorf("mutating request post-decryption: %w", err)
@@ -124,6 +137,37 @@ func (e *encForwarder) ForwardEncrypted(
 			return encrypt(dsResp, exchange)
 		},
 	)
+}
+
+func validatePromptTokens(r *http.Request) error {
+	clientVersion := r.Header.Get(constants.PrivatemodeVersionHeader)
+	isCompletion := slices.Contains(
+		[]string{constants.OpenAIChatCompletionsEndpoint, constants.OpenAILegacyCompletionsEndpoint, constants.AnthropicMessagesEndpoint},
+		r.URL.Path,
+	)
+	// Completion clients first set the header in v1.47, other endpoints in v1.58
+	if !compat.AtLeastMajorMinor(clientVersion, 1, 47) ||
+		(!isCompletion && !compat.AtLeastMajorMinor(clientVersion, 1, 58)) {
+		return nil
+	}
+
+	reported, err := strconv.ParseInt(r.Header.Get(constants.PrivatemodeContentLengthTokensHeader), 10, 64)
+	if err != nil || reported < 0 {
+		return fmt.Errorf("%s must be a non-negative integer", constants.PrivatemodeContentLengthTokensHeader)
+	}
+	body, err := persist.ReadBodyUnlimited(r)
+	if err != nil {
+		return fmt.Errorf("reading request body: %w", err)
+	}
+	estimated, err := mutators.EstimateContentTokens(body, r.URL.Path, r.Header.Get(constants.PrivatemodeTargetModel))
+	if err != nil {
+		return fmt.Errorf("estimating content tokens: %w", err)
+	}
+	if reported != estimated {
+		return fmt.Errorf("%s does not match the estimated inference usage: reported %d, estimated %d",
+			constants.PrivatemodeContentLengthTokensHeader, reported, estimated)
+	}
+	return nil
 }
 
 func encrypt(resp forwarder.Response, exchange *encbody.ServerExchange) (forwarder.Response, error) {

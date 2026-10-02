@@ -1,6 +1,6 @@
 import type { Locale } from './i18n';
 
-export const DEFAULT_MODEL_ID = 'kimi-latest';
+export const DEFAULT_MODEL_ID = 'glm-flash-latest';
 
 // Effort levels accepted by the models that expose `reasoning_effort`. Each model
 // only honours a subset: gpt-oss takes low/medium/high, glm low/high/max.
@@ -52,29 +52,20 @@ Du basierst auf dem LLM ${modelName}.
 }
 
 export const modelConfig: Record<string, ModelInfo> = {
-  'openai/gpt-oss-120b': {
-    displayName: 'gpt-oss-120b',
-    subtitle: 'Reasoning model suited for complex tasks',
-    systemPrompt: getSystemPrompt('gpt-oss-120b'),
+  'glm-flash-latest': {
+    displayName: 'GLM-5.3-Flash',
+    subtitle:
+      'A fast model that combines strong all-round capabilities with vision',
+    systemPrompt: getSystemPrompt('GLM-5.3-Flash'),
     thinkingMode: 'extended',
-    reasoningEffort: { normal: 'low', extended: 'high' },
-    supportsFileUploads: true,
-    supportsVision: false,
-    maxWords: 70000,
-  },
-  'kimi-latest': {
-    displayName: 'Kimi K2.6',
-    subtitle: 'Reasoning model with a large context window',
-    systemPrompt: getSystemPrompt('Kimi K2.6'),
-    thinkingMode: 'toggle',
-    thinkingToggleParam: 'thinking',
+    reasoningEffort: { normal: 'low', extended: 'max' },
     supportsFileUploads: true,
     supportsVision: true,
     maxWords: 70000,
   },
   'glm-latest': {
     displayName: 'GLM-5.3',
-    subtitle: 'Reasoning model with a large context window',
+    subtitle: 'Our largest model for your most ambitious tasks',
     systemPrompt: getSystemPrompt('GLM-5.3'),
     // glm can't switch reasoning off: enable_thinking=false only empties
     // reasoning_content while the model keeps reasoning inline in the answer at
@@ -85,14 +76,14 @@ export const modelConfig: Record<string, ModelInfo> = {
     supportsVision: false,
     maxWords: 70000,
   },
-  'glm-flash-latest': {
-    displayName: 'GLM-5.3-Flash',
-    subtitle: 'Reasoning model with a large context window',
-    systemPrompt: getSystemPrompt('GLM-5.3-Flash'),
+  'openai/gpt-oss-120b': {
+    displayName: 'gpt-oss-120b',
+    subtitle: 'A fast model from OpenAI with good text capabilities',
+    systemPrompt: getSystemPrompt('gpt-oss-120b'),
     thinkingMode: 'extended',
-    reasoningEffort: { normal: 'low', extended: 'max' },
+    reasoningEffort: { normal: 'low', extended: 'high' },
     supportsFileUploads: true,
-    supportsVision: true,
+    supportsVision: false,
     maxWords: 70000,
   },
 };

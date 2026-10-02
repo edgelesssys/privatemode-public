@@ -17,6 +17,7 @@ import (
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/model"
 	"github.com/edgelesssys/continuum/internal/oss/persist"
 	"github.com/tidwall/gjson"
 )
@@ -38,32 +39,24 @@ var imageDataQueries = []string{
 	`#.content.#.content.#.source.url|@flatten|@flatten`,
 }
 
-// ShardKeyInjector returns a [forwarder.RequestMutator] that injects a
-// shard key header into the request. When defaultCacheSalt is empty, a
+// ShardKeyInjector returns a [forwarder.RequestMutator] that injects the estimated
+// usage and a shard key header into the request. When defaultCacheSalt is empty, a
 // random cache salt is assumed and no shard key is set unless the
 // request already contains one.
 func ShardKeyInjector(defaultCacheSalt string) forwarder.RequestMutator {
 	// Reads the cache salt and generates a shard key using sha256.
 	// Returns an error if there is no cache salt in the request body.
-	return func(r *http.Request) error {
+	return forwarder.RequestMutatorChain(ContentLengthTokensInjector, func(r *http.Request) error {
 		bodyBytes, err := persist.ReadBodyUnlimited(r)
 		if err != nil {
 			return fmt.Errorf("reading request body: %w", err)
 		}
 
-		httpBody := string(bodyBytes)
-		if len(httpBody) == 0 {
+		if len(bodyBytes) == 0 {
 			return nil
 		}
 
-		content := shardContent(httpBody)
-
-		// Always set the token count for load balancing, even when no shard key is generated
-		// (e.g. a random cache salt).
-		contentTokens := len(content) / constants.ShardKeyCharsPerToken
-		r.Header.Set(constants.PrivatemodeContentLengthTokensHeader, strconv.Itoa(contentTokens))
-
-		cacheSalt := gjson.Get(httpBody, "cache_salt").String()
+		cacheSalt := gjson.GetBytes(bodyBytes, "cache_salt").String()
 
 		// If there is no explicit cache salt, we use the default cache salt.
 		if cacheSalt == "" {
@@ -72,32 +65,86 @@ func ShardKeyInjector(defaultCacheSalt string) forwarder.RequestMutator {
 
 		// If there is no cache salt, we use default sharding without a shard key.
 		if cacheSalt != "" {
-			shardKey, err := generateShardKey(cacheSalt, content)
+			shardKey, err := generateShardKey(cacheSalt, shardContent(bodyBytes))
 			if err != nil {
-				return fmt.Errorf("generating shard key: %w", err)
+				return forwarder.NewError("generating shard key", err, http.StatusRequestEntityTooLarge)
 			}
 
 			r.Header.Set(constants.PrivatemodeShardKeyHeader, shardKey)
 		}
 
 		return nil
+	})
+}
+
+// ContentLengthTokensInjector sets the estimated inference usage header on a plaintext request.
+// The [constants.PrivatemodeTargetModel] header must be set before calling this mutator.
+func ContentLengthTokensInjector(r *http.Request) error {
+	body, err := persist.ReadBodyUnlimited(r)
+	if err != nil {
+		return fmt.Errorf("reading request body: %w", err)
 	}
+	estimate, err := EstimateContentTokens(body, r.URL.Path, r.Header.Get(constants.PrivatemodeTargetModel))
+	if err != nil {
+		return fmt.Errorf("estimating content tokens: %w", err)
+	}
+	r.Header.Set(constants.PrivatemodeContentLengthTokensHeader, strconv.FormatInt(estimate, 10))
+	return nil
+}
+
+// EstimateContentTokens estimates the tokens in a plaintext inference request.
+// Images are counted by their embedding size, matching the content used for sharding.
+// Audio duration is estimated in whole seconds and converted to model-specific prompt tokens.
+func EstimateContentTokens(httpBody []byte, endpoint, modelName string) (int64, error) {
+	switch endpoint {
+	case "/v1/audio/transcriptions":
+		return EstimateAudioTokens(int64(len(httpBody)), modelName), nil
+	case "/v1/embeddings":
+		return estimateEmbeddingTokens(httpBody), nil
+	case "/v1/chat/completions", "/v1/completions", "/v1/messages":
+		return int64(len(shardContent(httpBody))) / constants.ShardKeyCharsPerToken, nil
+	case "/unstructured", "/unstructured/general/v0/general", "/general/v0/general":
+		// The API gateway strips /unstructured before forwarding to the inference proxy.
+		return 0, nil
+	default:
+		return -1, fmt.Errorf("unknown endpoint: %s", endpoint)
+	}
+}
+
+// estimateEmbeddingTokens estimates tokens from only the input of an embeddings request.
+func estimateEmbeddingTokens(httpBody []byte) int64 {
+	input := gjson.GetBytes(httpBody, "input").String()
+	return int64(len(input)) / constants.ShardKeyCharsPerToken
+}
+
+// EstimateAudioTokens estimates prompt tokens from the total request body size.
+// Duration is estimated at 64 Kibit/s of compressed mono audio, rounding up to full seconds.
+func EstimateAudioTokens(bodySize int64, modelName string) int64 {
+	const audioBytesPerSecond = 64 * 1024 / 8
+	seconds := bodySize / audioBytesPerSecond
+	if bodySize%audioBytesPerSecond != 0 {
+		seconds++
+	}
+	if model.Resolve(modelName) == model.OpenAIWhisperLargeV3 {
+		return seconds * model.TokensPerAudioSecondWhisper
+	}
+	return seconds*model.TokensPerAudioSecondVoxtral + model.TokenOverheadVoxtral
 }
 
 // shardContent assembles the request content used for shard key generation and token
 // estimation. Image payloads are replaced by a hash sized to the image's embedding so the
 // resulting length reflects the number of tokens the model actually sees (see [replaceImages]).
-func shardContent(httpBody string) string {
+func shardContent(httpBody []byte) string {
 	// /chat/completions
-	tools := gjson.Get(httpBody, "tools").String()
-	messages := gjson.Get(httpBody, "messages").String()
+	tools := gjson.GetBytes(httpBody, "tools").String()
+	messages := gjson.GetBytes(httpBody, "messages").String()
 
 	// /completions
-	prompt := gjson.Get(httpBody, "prompt").String()
-	suffix := gjson.Get(httpBody, "suffix").String()
+	prompt := gjson.GetBytes(httpBody, "prompt").String()
+	suffix := gjson.GetBytes(httpBody, "suffix").String()
 
 	// /v1/messages sends the system prompt as its own field
-	systemPrompt := gjson.Get(httpBody, "system").String()
+	systemPrompt := gjson.GetBytes(httpBody, "system").String()
 
 	messages = replaceImages(messages)
 

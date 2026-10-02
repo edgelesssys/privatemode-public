@@ -23,6 +23,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/model"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
@@ -41,7 +42,7 @@ func TestReadinessBypassesBodyLimit(t *testing.T) {
 	// No secret manager or forwarder: probes must not reach either dependency.
 	s := &Server{log: slog.Default()}
 	handler := s.GetHandler()
-	for path, method := range map[string]string{"/readyz": http.MethodGet, openai.ChatCompletionsEndpoint: http.MethodPost} {
+	for path, method := range map[string]string{"/readyz": http.MethodGet, constants.OpenAIChatCompletionsEndpoint: http.MethodPost} {
 		req := httptest.NewRequestWithContext(t.Context(), method, path, nil)
 		req.ContentLength = int64(constants.MaxFileSizeBytes) + 1
 		resp := httptest.NewRecorder()
@@ -57,18 +58,89 @@ func TestReadinessBypassesBodyLimit(t *testing.T) {
 func TestChatCompletionsPromptEncryption(t *testing.T) {
 	apiKey := testAPIKey
 	testCases := map[string]struct {
-		clientVersion         string
-		proxyAPIKey           *string
-		disableAPIKeyFallback bool
-		prompt                any
-		requestCacheSalt      string
-		proxyCacheSalt        string
-		expectStatusCode      int
-		expectedHeaders       map[string]string
-		expectedBody          string
-		requestMutator        func(*http.Request)
-		isApp                 bool
+		clientVersion    string
+		proxyAPIKey      *string
+		apiKeyFallback   APIKeyFallback
+		prompt           any
+		requestCacheSalt string
+		proxyCacheSalt   string
+		deriveCacheSalt  bool
+		derivedCacheSalt string
+		backendAPIKey    string
+		expectStatusCode int
+		expectedHeaders  map[string]string
+		expectedBody     string
+		requestMutator   func(*http.Request)
+		isApp            bool
 	}{
+		"derive from configured key overriding incoming key": {
+			proxyAPIKey:      &apiKey,
+			deriveCacheSalt:  true,
+			derivedCacheSalt: "4d670e9654dcf0b8d178e28657c282d8d1fb9f2193c48038df0b9a50ef84e6a6",
+			prompt:           "Hello",
+			expectStatusCode: http.StatusOK,
+			requestMutator:   func(req *http.Request) { req.Header.Set("Authorization", "Bearer otherkey") },
+		},
+		"derive from request key with fallback disabled": {
+			proxyAPIKey:      &apiKey,
+			apiKeyFallback:   APIKeyFallbackNever,
+			deriveCacheSalt:  true,
+			backendAPIKey:    "otherkey",
+			derivedCacheSalt: "d005b30034cb443d537ad9d76bf7272b340776525a5610e20d3bed4412c3df8e",
+			prompt:           "Hello",
+			expectStatusCode: http.StatusOK,
+			requestMutator:   func(req *http.Request) { req.Header.Set("Authorization", "Bearer otherkey") },
+		},
+		"derive from request key without configured key": {
+			deriveCacheSalt:  true,
+			derivedCacheSalt: "4d670e9654dcf0b8d178e28657c282d8d1fb9f2193c48038df0b9a50ef84e6a6",
+			prompt:           "Hello",
+			expectStatusCode: http.StatusOK,
+			requestMutator:   func(req *http.Request) { req.Header.Set("Authorization", "Bearer testkey") },
+		},
+		"request salt overrides derived and configured salts": {
+			proxyAPIKey:      &apiKey,
+			deriveCacheSalt:  true,
+			proxyCacheSalt:   "p1234567890123456789012345678912",
+			requestCacheSalt: "r1234567890123456789012345678912",
+			prompt:           "Hello",
+			expectStatusCode: http.StatusOK,
+		},
+		"configured salt overrides derivation": {
+			proxyAPIKey:      &apiKey,
+			deriveCacheSalt:  true,
+			proxyCacheSalt:   "p1234567890123456789012345678912",
+			prompt:           "Hello",
+			expectStatusCode: http.StatusOK,
+		},
+		"missing key reaches backend authentication": {
+			deriveCacheSalt:  true,
+			prompt:           "Hello",
+			expectStatusCode: http.StatusUnauthorized,
+			expectedBody:     makeErrorMsg("no auth found: expected Authorization header with 'Bearer <auth>'"),
+		},
+		"explicit salt skips derivation without key": {
+			deriveCacheSalt:  true,
+			requestCacheSalt: "r1234567890123456789012345678912",
+			prompt:           "Hello",
+			expectStatusCode: http.StatusUnauthorized,
+			expectedBody:     makeErrorMsg("no auth found: expected Authorization header with 'Bearer <auth>'"),
+		},
+		"invalid explicit salt is not replaced by derivation": {
+			proxyAPIKey:      &apiKey,
+			deriveCacheSalt:  true,
+			requestCacheSalt: "short",
+			prompt:           "Hello",
+			expectStatusCode: http.StatusBadRequest,
+			expectedBody:     "cache_salt must be at least 32 characters long",
+		},
+		"empty key reaches backend authentication": {
+			proxyAPIKey:      toPtr(""),
+			deriveCacheSalt:  true,
+			prompt:           "Hello",
+			expectStatusCode: http.StatusUnauthorized,
+			expectedBody:     makeErrorMsg("invalid API key: invalid API key"),
+		},
 		"with privatemode-proxy API key": {
 			proxyAPIKey:      &apiKey,
 			prompt:           "Hello",
@@ -93,20 +165,39 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 			},
 		},
 		"with disabled API key fallback and request API key": {
-			proxyAPIKey:           &apiKey,
-			disableAPIKeyFallback: true,
-			expectStatusCode:      http.StatusOK,
-			prompt:                "Hello",
+			proxyAPIKey:      &apiKey,
+			apiKeyFallback:   APIKeyFallbackNever,
+			expectStatusCode: http.StatusOK,
+			prompt:           "Hello",
 			requestMutator: func(req *http.Request) {
 				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", testAPIKey))
 			},
 		},
 		"with disabled API key fallback and no request API key": {
-			proxyAPIKey:           &apiKey,
-			disableAPIKeyFallback: true,
-			expectStatusCode:      http.StatusUnauthorized,
-			prompt:                "Hello",
-			expectedBody:          makeErrorMsg("no auth found: expected Authorization header with 'Bearer <auth>'"),
+			proxyAPIKey:      &apiKey,
+			apiKeyFallback:   APIKeyFallbackNever,
+			expectStatusCode: http.StatusUnauthorized,
+			prompt:           "Hello",
+			expectedBody:     makeErrorMsg("no auth found: expected Authorization header with 'Bearer <auth>'"),
+		},
+		"derive from configured key replacing placeholder": {
+			proxyAPIKey:      &apiKey,
+			apiKeyFallback:   APIKeyFallbackIfPlaceholder,
+			deriveCacheSalt:  true,
+			derivedCacheSalt: "4d670e9654dcf0b8d178e28657c282d8d1fb9f2193c48038df0b9a50ef84e6a6",
+			prompt:           "Hello",
+			expectStatusCode: http.StatusOK,
+			requestMutator:   func(req *http.Request) { req.Header.Set("Authorization", "Bearer placeholder") },
+		},
+		"derive from request key preserved by placeholder fallback": {
+			proxyAPIKey:      &apiKey,
+			apiKeyFallback:   APIKeyFallbackIfPlaceholder,
+			deriveCacheSalt:  true,
+			backendAPIKey:    "otherkey",
+			derivedCacheSalt: "d005b30034cb443d537ad9d76bf7272b340776525a5610e20d3bed4412c3df8e",
+			prompt:           "Hello",
+			expectStatusCode: http.StatusOK,
+			requestMutator:   func(req *http.Request) { req.Header.Set("Authorization", "Bearer otherkey") },
 		},
 		"without cache salt key": {
 			proxyAPIKey:      &apiKey,
@@ -121,7 +212,7 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 		},
 		"with invalid request cache salt": {
 			proxyAPIKey:      &apiKey,
-			expectStatusCode: http.StatusInternalServerError, // TODO(dr75): fix http status codes in forwarders
+			expectStatusCode: http.StatusBadRequest,
 			prompt:           "Hello",
 			requestCacheSalt: "too short",
 		},
@@ -158,13 +249,16 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 			if tc.clientVersion == "" {
 				tc.clientVersion = defaultClientVersion
 			}
+			if tc.backendAPIKey == "" {
+				tc.backendAPIKey = testAPIKey
+			}
 			stubAuthBackendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				token := r.Header.Get("Authorization")
 				if token == "" {
 					forwarder.HTTPError(w, r, http.StatusUnauthorized, "no auth found: expected Authorization header with 'Bearer <auth>'")
 					return
 				}
-				if token != fmt.Sprintf("Bearer %s", testAPIKey) {
+				if token != fmt.Sprintf("Bearer %s", tc.backendAPIKey) {
 					forwarder.HTTPError(w, r, http.StatusUnauthorized, "invalid API key: invalid API key")
 					return
 				}
@@ -187,7 +281,10 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 			defer stubAuthBackendServer.Close()
 
 			sut := newTestServer(tc.proxyAPIKey, secret, stubAuthBackendServer.Listener.Addr().String(), tc.proxyCacheSalt, tc.isApp)
-			sut.disableAPIKeyFallback = tc.disableAPIKeyFallback
+			if tc.apiKeyFallback != "" {
+				sut.apiKeyFallback = tc.apiKeyFallback
+			}
+			sut.promptCacheSaltFromAPIKey = tc.deriveCacheSalt
 
 			// Act
 			req := prepareChatRequest(t.Context(), require, &tc.prompt, nil, tc.requestCacheSalt)
@@ -212,6 +309,9 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 				assert.NotEmpty(cacheSaltHeader)
 
 				expectedCacheSalt := tc.proxyCacheSalt
+				if expectedCacheSalt == "" {
+					expectedCacheSalt = tc.derivedCacheSalt
+				}
 
 				// cache salt is actually used; request cache salt takes precedence
 				if tc.requestCacheSalt != "" {
@@ -241,6 +341,75 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 
 			for key, value := range tc.expectedHeaders {
 				assert.Equal(value, resp.Header().Get(key))
+			}
+		})
+	}
+}
+
+func TestPromptCacheWithoutAPIKey(t *testing.T) {
+	for _, authorization := range []string{"", "Bearer ", "Basic credentials"} {
+		t.Run(authorization, func(t *testing.T) {
+			require := require.New(t)
+			secret := secretmanager.Secret{ID: "123", Data: bytes.Repeat([]byte{0x42}, 32)}
+			// Accept requests without API-key authentication to inspect their encrypted salts.
+			backend := httptest.NewServer(stub.EchoHandler(secret.Map(), slog.Default()))
+			defer backend.Close()
+			sut := newTestServer(nil, secret, backend.Listener.Addr().String(), "", false)
+			sut.promptCacheSaltFromAPIKey = true
+			var previousSalt string
+			for range 2 {
+				req := prepareChatRequest(t.Context(), require, "Hello", nil, "")
+				req.Header.Set("Authorization", authorization)
+				resp := httptest.NewRecorder()
+				sut.GetHandler().ServeHTTP(resp, req)
+				require.Equal(http.StatusOK, resp.Code, resp.Body.String())
+				salt := resp.Header().Get("Request-Cache-Salt")
+				require.GreaterOrEqual(len(salt), 32)
+				require.NotEqual(previousSalt, salt)
+				require.Empty(resp.Header().Get("Request-Shard-Key"))
+				previousSalt = salt
+			}
+		})
+	}
+}
+
+func TestPromptCacheSaltReuse(t *testing.T) {
+	const proxySalt = "proxy0123456789012345678901234567"
+	const requestSalt = "request01234567890123456789012345"
+	for _, tc := range []struct {
+		name        string
+		proxySalt   string
+		requestSalt string
+		wantSalt    string
+	}{
+		{name: "shared", proxySalt: proxySalt, wantSalt: proxySalt},
+		{name: "shared with override", proxySalt: proxySalt, requestSalt: requestSalt, wantSalt: requestSalt},
+		{name: "disabled"},
+		{name: "disabled with override", requestSalt: requestSalt, wantSalt: requestSalt},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require := require.New(t)
+			secret := secretmanager.Secret{ID: "123", Data: bytes.Repeat([]byte{0x42}, 32)}
+			backend := httptest.NewServer(stub.EchoHandler(secret.Map(), slog.Default()))
+			defer backend.Close()
+			sut := newTestServer(toPtr(testAPIKey), secret, backend.Listener.Addr().String(), tc.proxySalt, false)
+			var previousSalt string
+			for range 2 {
+				req := prepareChatRequest(t.Context(), require, "Hello", nil, tc.requestSalt)
+				resp := httptest.NewRecorder()
+				sut.GetHandler().ServeHTTP(resp, req)
+				require.Equal(http.StatusOK, resp.Code, resp.Body.String())
+				salt := resp.Header().Get("Request-Cache-Salt")
+				require.GreaterOrEqual(len(salt), 32)
+				if tc.wantSalt == "" {
+					require.NotEqual(previousSalt, salt)
+					require.Empty(resp.Header().Get("Request-Shard-Key"))
+				} else {
+					require.Equal(tc.wantSalt, salt)
+					hash := sha256.Sum256([]byte(tc.wantSalt))
+					require.Equal(hex.EncodeToString(hash[:8]), resp.Header().Get("Request-Shard-Key"))
+				}
+				previousSalt = salt
 			}
 		})
 	}
@@ -282,6 +451,7 @@ func TestInvalidSecretRetry(t *testing.T) {
 
 	sut := Server{
 		apiKey:                       &apiKey,
+		apiKeyFallback:               APIKeyFallbackAlways,
 		defaultCacheSalt:             "",
 		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secretInvalid, secretValid}},
 		forwarder:                    forwarder.New(http.DefaultClient, stubAuthBackendServer.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default()),
@@ -513,15 +683,19 @@ func TestUnstructuredEncrypted(t *testing.T) {
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			stub := fullEncryptionStubServer(secret, tc.handler)
+			stub := fullEncryptionStubServer(secret, func(r *http.Request) (map[string]string, error) {
+				assert.Equal(t, "0", r.Header.Get(constants.PrivatemodeContentLengthTokensHeader))
+				return tc.handler(r)
+			})
 			t.Cleanup(func() { stub.Close() })
 
 			sut := newTestServer(nil, secret, stub.Listener.Addr().String(), "", false)
 
 			body, contentType := tc.buildBody(t)
 
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/unstructured/general/v0/general", body)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.UnstructuredEndpoint+constants.UnstructuredGeneralEndpoint, body)
 			req.Header.Set("Content-Type", contentType)
+			req.Header.Set(constants.PrivatemodeContentLengthTokensHeader, "9999")
 
 			resp := httptest.NewRecorder()
 			sut.GetHandler().ServeHTTP(resp, req)
@@ -613,17 +787,19 @@ func TestSetDynamicHeaders(t *testing.T) {
 	}
 }
 
-func TestTargetModelHeader(t *testing.T) {
+func TestInferenceHeaders(t *testing.T) {
 	// Random string to check verbatim inclusion in header
 	randomModel := "Cu1pS7yT"
 
 	testCases := map[string]struct {
 		buildRequest  func(t *testing.T, require *require.Assertions) *http.Request
 		expectedModel string
+		expectedUsage string
 	}{
 		"chat completions": {
+			expectedUsage: "8",
 			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
-				return prepareJSONRequest(t.Context(), require, openai.ChatCompletionsEndpoint, openai.ChatRequest{
+				return prepareJSONRequest(t.Context(), require, constants.OpenAIChatCompletionsEndpoint, openai.ChatRequest{
 					Model: randomModel,
 					Messages: []openai.Message{
 						{
@@ -636,8 +812,9 @@ func TestTargetModelHeader(t *testing.T) {
 			expectedModel: randomModel,
 		},
 		"legacy (chat) completions": {
+			expectedUsage: "8",
 			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
-				return prepareJSONRequest(t.Context(), require, openai.LegacyCompletionsEndpoint, openai.ChatRequest{
+				return prepareJSONRequest(t.Context(), require, constants.OpenAILegacyCompletionsEndpoint, openai.ChatRequest{
 					Model: randomModel,
 					Messages: []openai.Message{
 						{
@@ -650,8 +827,9 @@ func TestTargetModelHeader(t *testing.T) {
 			expectedModel: randomModel,
 		},
 		"embeddings": {
+			expectedUsage: "2",
 			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
-				return prepareJSONRequest(t.Context(), require, openai.EmbeddingsEndpoint, openai.EmbeddingsRequest{
+				return prepareJSONRequest(t.Context(), require, constants.OpenAIEmbeddingsEndpoint, openai.EmbeddingsRequest{
 					Model: randomModel,
 					Input: []string{"Hello"},
 				})
@@ -659,9 +837,10 @@ func TestTargetModelHeader(t *testing.T) {
 			expectedModel: randomModel,
 		},
 		"transcriptions": {
+			expectedUsage: "12900",
 			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
-				return prepareMultiPartRequest(t.Context(), require, openai.TranscriptionsEndpoint, func(writer *multipart.Writer) error {
-					if err := writer.WriteField("model", randomModel); err != nil {
+				return prepareMultiPartRequest(t.Context(), require, constants.OpenAITranscriptionsEndpoint, func(writer *multipart.Writer) error {
+					if err := writer.WriteField("model", model.OpenAIWhisperLargeV3); err != nil {
 						return err
 					}
 
@@ -669,7 +848,9 @@ func TestTargetModelHeader(t *testing.T) {
 					if err != nil {
 						return err
 					}
-					fakeMP3 := []byte{0x49, 0x44, 0x33, 0x03, 0x00, 0x00} // Start of MP3 header
+					// A full MiB of audio plus multipart metadata rounds up to 129 seconds, or 12900 Whisper tokens.
+					fakeMP3 := make([]byte, 1024*1024)
+					copy(fakeMP3, []byte{0x49, 0x44, 0x33, 0x03, 0x00, 0x00})
 					if _, err := part.Write(fakeMP3); err != nil {
 						return err
 					}
@@ -677,11 +858,12 @@ func TestTargetModelHeader(t *testing.T) {
 					return nil
 				})
 			},
-			expectedModel: randomModel,
+			expectedModel: model.OpenAIWhisperLargeV3,
 		},
 		"anthropic messages": {
+			expectedUsage: "8",
 			buildRequest: func(t *testing.T, require *require.Assertions) *http.Request {
-				return prepareJSONRequest(t.Context(), require, anthropic.MessagesEndpoint, anthropic.MessagesRequest{
+				return prepareJSONRequest(t.Context(), require, constants.AnthropicMessagesEndpoint, anthropic.MessagesRequest{
 					Model: randomModel,
 					Messages: []anthropic.Message{
 						{
@@ -707,6 +889,7 @@ func TestTargetModelHeader(t *testing.T) {
 
 			stubBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(tc.expectedModel, r.Header.Get(constants.PrivatemodeTargetModel))
+				assert.Equal(tc.expectedUsage, r.Header.Get(constants.PrivatemodeContentLengthTokensHeader))
 
 				stub.EchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
 			}))
@@ -716,10 +899,76 @@ func TestTargetModelHeader(t *testing.T) {
 			sut := newTestServer(&apiKey, secret, stubBackend.Listener.Addr().String(), "", false)
 
 			req := tc.buildRequest(t, require)
+			req.Header.Set(constants.PrivatemodeContentLengthTokensHeader, "9999")
 
 			resp := httptest.NewRecorder()
 			sut.GetHandler().ServeHTTP(resp, req)
 			assert.Equal(http.StatusOK, resp.Code)
+		})
+	}
+}
+
+func TestAPIKeyFallback(t *testing.T) {
+	for name, mode := range map[string]APIKeyFallback{
+		"omitted": "",
+		"always":  APIKeyFallbackAlways, "never": APIKeyFallbackNever, "if-placeholder": APIKeyFallbackIfPlaceholder,
+	} {
+		for _, configuredKey := range []*string{nil, toPtr("configured-key")} {
+			for _, header := range []string{
+				"", "Bearer placeholder", "Bearer client-key", "Bearer Placeholder",
+				"Bearer placeholder-suffix", "Bearer ", "Basic placeholder", "placeholder",
+			} {
+				t.Run(fmt.Sprintf("%s/configured=%t/%s", name, configuredKey != nil, header), func(t *testing.T) {
+					sut := New(http.DefaultClient, nil, Opts{APIKey: configuredKey, APIKeyFallback: mode}, slog.Default())
+					req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/v1/models", nil)
+					if header != "" {
+						req.Header.Set("Authorization", header)
+					}
+					sut.setStaticRequestHeaders(req)
+
+					want := header
+					if configuredKey != nil {
+						switch name {
+						case "omitted", "always":
+							want = "Bearer configured-key"
+						case "if-placeholder":
+							if header == "Bearer placeholder" {
+								want = "Bearer configured-key"
+							}
+						}
+					}
+					assert.Equal(t, want, req.Header.Get("Authorization"))
+					if want == "" {
+						assert.NotContains(t, req.Header, "Authorization")
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestClientHeader(t *testing.T) {
+	testCases := map[string]struct {
+		isApp    bool
+		clientID string
+		want     string
+	}{
+		"proxy default":      {want: constants.PrivatemodeClientProxy},
+		"app default":        {isApp: true, want: constants.PrivatemodeClientApp},
+		"clientID overrides": {clientID: "OpenRouter", want: "OpenRouter"},
+		"clientID beats app": {isApp: true, clientID: "OpenRouter", want: "OpenRouter"},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			secret := secretmanager.Secret{ID: "123", Data: bytes.Repeat([]byte{0x42}, 32)}
+			sut := newTestServer(nil, secret, "192.0.2.1:8080", "", tc.isApp)
+			sut.clientID = tc.clientID
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", http.NoBody)
+			sut.setStaticRequestHeaders(req)
+
+			assert.Equal(t, tc.want, req.Header.Get(constants.PrivatemodeClientHeader))
 		})
 	}
 }
@@ -742,6 +991,7 @@ func TestReadinessHandler(t *testing.T) {
 func newTestServer(apiKey *string, secret secretmanager.Secret, backendAddr string, defaultCacheSalt string, isApp bool) *Server {
 	return &Server{
 		apiKey:                       apiKey,
+		apiKeyFallback:               APIKeyFallbackAlways,
 		defaultCacheSalt:             defaultCacheSalt,
 		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secret}},
 		forwarder:                    forwarder.New(http.DefaultClient, backendAddr, forwarder.SchemeHTTP, slog.Default()),
@@ -793,7 +1043,7 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 }
 
 func prepareChatRequest(ctx context.Context, require *require.Assertions, content any, tools []any, cacheSalt string) *http.Request {
-	return prepareJSONRequest(ctx, require, openai.ChatCompletionsEndpoint, openai.ChatRequest{
+	return prepareJSONRequest(ctx, require, constants.OpenAIChatCompletionsEndpoint, openai.ChatRequest{
 		Model: "gpt-oss-120b",
 		Messages: []openai.Message{
 			{

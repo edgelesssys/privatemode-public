@@ -127,7 +127,8 @@
 
   function getModelSubtitle(modelId: string): string | undefined {
     if (modelId === 'openai/gpt-oss-120b') return $t('model.gptOssSubtitle');
-    if (modelId === 'kimi-latest') return $t('model.kimiSubtitle');
+    if (modelId === 'glm-latest') return $t('model.glmSubtitle');
+    if (modelId === 'glm-flash-latest') return $t('model.glmFlashSubtitle');
     return modelConfig[modelId]?.subtitle;
   }
 

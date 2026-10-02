@@ -13,7 +13,7 @@
   "license": "MIT",
   "author": "Edgeless Systems GmbH",
   "type": "module",
-  "packageManager": "pnpm@12.4.1",
+  "packageManager": "pnpm@12.8.1",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -41,14 +41,14 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@types/node": "25.9.6",
-    "@vitest/browser-playwright": "5.0.0",
-    "eslint": "10.10.0",
+    "@types/node": "25.9.8",
+    "@vitest/browser-playwright": "5.0.2",
+    "eslint": "10.11.0",
     "globals": "17.12.0",
-    "openai": "7.15.0",
+    "openai": "7.23.0",
     "playwright": "1.63.0",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.70.0",
-    "vitest": "5.0.0"
+    "typescript-eslint": "8.71.0",
+    "vitest": "5.0.2"
   }
 }

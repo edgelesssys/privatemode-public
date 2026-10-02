@@ -1,3 +1,6 @@
+// Copyright (c) Edgeless Systems GmbH
+// SPDX-License-Identifier: MIT
+
 // Package model provides utilities for handling models.
 package model
 
@@ -5,7 +8,6 @@ package model
 const (
 	OpenAIWhisperLargeV3 = "openai/whisper-large-v3"
 	OpenAIGPTOSS120B     = "openai/gpt-oss-120b"
-	KimiK26              = "kimi-k2.6"
 	VoxtralMini3b        = "voxtral-mini-3b"
 	DeepSeekOCR2         = "deepseek-ocr-2"
 	GLM53                = "glm-5.3"
@@ -26,7 +28,6 @@ const (
 // modelMap maps model aliases to their billing names.
 var modelMap = map[string]string{
 	"gpt-oss-latest":   OpenAIGPTOSS120B,
-	"kimi-latest":      KimiK26,
 	"glm-latest":       GLM53,
 	GLM52:              GLM53,
 	"glm-flash-latest": GLM53Flash,

@@ -5,21 +5,73 @@ package openai
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRandomPromptCacheSalt(t *testing.T) {
+	seen := make(map[string]bool)
+	for range 100 {
+		salt := RandomPromptCacheSalt()
+		// vLLM v0.30 rejects '@', '/', '\\', NUL, and salts longer than 128 characters.
+		require.False(t, strings.ContainsAny(salt, "@/\\\x00"))
+		require.LessOrEqual(t, len(salt), 128)
+		decoded, err := base64.URLEncoding.DecodeString(salt)
+		require.NoError(t, err)
+		require.Len(t, decoded, 32) // Preserve all 256 random bits.
+		require.False(t, seen[salt], "salts must be fresh for each call")
+		seen[salt] = true
+	}
+}
+
+func TestRequestMutationValidationStatus(t *testing.T) {
+	log := slog.Default()
+	testCases := map[string]struct {
+		mutator forwarder.RequestMutator
+		body    string
+	}{
+		"cache salt injector rejects short salt": {
+			mutator: CacheSaltInjector(RandomPromptCacheSalt, log),
+			body:    `{"cache_salt":"short"}`,
+		},
+		"cache salt validator rejects missing salt": {
+			mutator: CacheSaltValidator(log),
+			body:    `{}`,
+		},
+		"cache salt validator rejects short salt": {
+			mutator: CacheSaltValidator(log),
+			body:    `{"cache_salt":"short"}`,
+		},
+		"stream options injector rejects invalid JSON": {
+			mutator: StreamUsageReportingInjector(log),
+			body:    `{"stream":true`,
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(tc.body))
+			resp := httptest.NewRecorder()
+			fwd := forwarder.New(nil, "upstream", forwarder.SchemeHTTP, log)
+			fwd.Forward(resp, req, tc.mutator, forwarder.PassthroughResponseMapper)
+			assert.Equal(t, http.StatusBadRequest, resp.Code)
+		})
+	}
+}
 
 func TestMediaContentValidator(t *testing.T) {
 	newRequest := func(content []map[string]any) *http.Request {
@@ -33,7 +85,7 @@ func TestMediaContentValidator(t *testing.T) {
 			panic(err)
 		}
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-			"https://foo.bar/v1/chat/completions", bytes.NewReader(data))
+			"https://foo.bar"+constants.OpenAIChatCompletionsEndpoint, bytes.NewReader(data))
 		if err != nil {
 			panic(err)
 		}
@@ -175,6 +227,11 @@ func TestMediaContentValidator(t *testing.T) {
 
 			err := mutator(tc.request)
 			require.True(tc.validateErr(err))
+			if err != nil {
+				require.Equal(http.StatusBadRequest, forwarder.StatusFromError(err))
+			} else {
+				require.Equal(http.StatusOK, forwarder.StatusFromError(err))
+			}
 		})
 	}
 }
@@ -232,7 +289,7 @@ func TestStreamUsageReportingInjector(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	url := "http://192.0.2.1" + ChatCompletionsEndpoint
+	url := "http://192.0.2.1" + constants.OpenAIChatCompletionsEndpoint
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
@@ -286,7 +343,7 @@ func TestStreamUsageReportingInjectorExtraFields(t *testing.T) {
 	}`
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-		"http://192.0.2.1"+ChatCompletionsEndpoint, bytes.NewReader([]byte(body)))
+		"http://192.0.2.1"+constants.OpenAIChatCompletionsEndpoint, bytes.NewReader([]byte(body)))
 	require.NoError(err)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -363,7 +420,7 @@ func TestAudioStreamUsageReportingInjector(t *testing.T) {
 			contentType := writer.FormDataContentType()
 
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-				"http://192.0.2.1"+TranscriptionsEndpoint, body)
+				"http://192.0.2.1"+constants.OpenAITranscriptionsEndpoint, body)
 			require.NoError(err)
 			req.Header.Set("Content-Type", contentType)
 
@@ -376,7 +433,7 @@ func TestAudioStreamUsageReportingInjector(t *testing.T) {
 
 			// Create a new request so we can parse the multipart form again
 			reqAfter, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-				"http://192.0.2.1"+TranscriptionsEndpoint, bytes.NewReader(bodyAfter))
+				"http://192.0.2.1"+constants.OpenAITranscriptionsEndpoint, bytes.NewReader(bodyAfter))
 			require.NoError(err)
 			reqAfter.Header.Set("Content-Type", req.Header.Get("Content-Type"))
 			require.NoError(reqAfter.ParseMultipartForm(constants.MaxFileSizeBytes))

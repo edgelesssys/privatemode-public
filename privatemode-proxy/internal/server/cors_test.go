@@ -32,18 +32,18 @@ func TestCORSAndMethods(t *testing.T) {
 		allowOrigin   string
 		allow         string
 	}{
-		"disabled":             {nil, "OPTIONS", "/v1/chat/completions", origin, "POST", 405, "", "POST"},
-		"allowed preflight":    {[]string{origin}, "OPTIONS", "/v1/chat/completions", origin, "POST", 204, origin, ""},
-		"wildcard":             {[]string{"*"}, "OPTIONS", "/v1/messages", origin, "POST", 204, "*", ""},
-		"disallowed preflight": {[]string{origin}, "OPTIONS", "/v1/chat/completions", "https://other.example", "POST", 405, "", "POST"},
+		"disabled":             {nil, "OPTIONS", constants.OpenAIChatCompletionsEndpoint, origin, "POST", 405, "", "POST"},
+		"allowed preflight":    {[]string{origin}, "OPTIONS", constants.OpenAIChatCompletionsEndpoint, origin, "POST", 204, origin, ""},
+		"wildcard":             {[]string{"*"}, "OPTIONS", constants.AnthropicMessagesEndpoint, origin, "POST", 204, "*", ""},
+		"disallowed preflight": {[]string{origin}, "OPTIONS", constants.OpenAIChatCompletionsEndpoint, "https://other.example", "POST", 405, "", "POST"},
 		"disallowed origin":    {[]string{origin}, "GET", "/readyz", "https://other.example", "", 204, "", ""},
-		"wrong chat method":    {[]string{origin}, "GET", "/v1/chat/completions", origin, "", 405, origin, "POST"},
-		"wrong models method":  {[]string{origin}, "POST", "/v1/models", origin, "", 405, origin, "GET, HEAD"},
+		"wrong chat method":    {[]string{origin}, "GET", constants.OpenAIChatCompletionsEndpoint, origin, "", 405, origin, "POST"},
+		"wrong models method":  {[]string{origin}, "POST", constants.OpenAIModelsEndpoint, origin, "", 405, origin, "GET, HEAD"},
 		"no origin":            {[]string{origin}, "GET", "/readyz", "", "", 204, "", ""},
 		"unknown path":         {[]string{origin}, "POST", "/unknown", origin, "", 404, origin, ""},
-		"wrong preflight":      {[]string{origin}, "OPTIONS", "/v1/chat/completions", origin, "DELETE", 405, origin, "POST"},
+		"wrong preflight":      {[]string{origin}, "OPTIONS", constants.OpenAIChatCompletionsEndpoint, origin, "DELETE", 405, origin, "POST"},
 		"unknown preflight":    {[]string{origin}, "OPTIONS", "/unknown", origin, "POST", 404, origin, ""},
-		"not a preflight":      {[]string{origin}, "OPTIONS", "/v1/chat/completions", origin, "", 405, origin, "POST"},
+		"not a preflight":      {[]string{origin}, "OPTIONS", constants.OpenAIChatCompletionsEndpoint, origin, "", 405, origin, "POST"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// A nil secret manager/forwarder catches accidental calls on these paths.
@@ -133,7 +133,7 @@ func TestCORSStreamingOverridesUpstream(t *testing.T) {
 			defer proxy.Close()
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, proxy.URL+"/v1/models", nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, proxy.URL+constants.OpenAIModelsEndpoint, nil)
 			require.NoError(t, err)
 			req.Header.Set("Origin", origin)
 			resp, err := proxy.Client().Do(req)
@@ -141,7 +141,7 @@ func TestCORSStreamingOverridesUpstream(t *testing.T) {
 			line, err := bufio.NewReader(resp.Body).ReadString('\n')
 			assert.NoError(t, err)
 			assert.Equal(t, "data: first\n", line, "first event must arrive before upstream completes")
-			for path, wantStatus := range map[string]int{"/v1/models": http.StatusOK, "/readyz": http.StatusNoContent} {
+			for path, wantStatus := range map[string]int{constants.OpenAIModelsEndpoint: http.StatusOK, "/readyz": http.StatusNoContent} {
 				probe, err := http.NewRequestWithContext(ctx, http.MethodGet, proxy.URL+path, nil)
 				require.NoError(t, err)
 				probe.Header.Set("Origin", origin)

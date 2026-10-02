@@ -62,7 +62,7 @@ func TestForwardModelsRequest(t *testing.T) {
 	}{
 		"list models": {
 			workloadTasks: []string{constants.WorkloadTaskGenerate},
-			path:          "/v1/models",
+			path:          constants.OpenAIModelsEndpoint,
 			serverResponse: func() string {
 				res, err := json.Marshal(openai.ModelsResponse{
 					Object: "list",
@@ -93,7 +93,7 @@ func TestForwardModelsRequest(t *testing.T) {
 		},
 		"list models with multiple tasks": {
 			workloadTasks: []string{constants.WorkloadTaskGenerate, "custom-task"},
-			path:          "/v1/models",
+			path:          constants.OpenAIModelsEndpoint,
 			serverResponse: func() string {
 				res, err := json.Marshal(openai.ModelsResponse{
 					Object: "list",
@@ -133,7 +133,7 @@ func TestForwardModelsRequest(t *testing.T) {
 		},
 		"list models upstream error passes through": {
 			workloadTasks:  []string{constants.WorkloadTaskGenerate},
-			path:           "/v1/models",
+			path:           constants.OpenAIModelsEndpoint,
 			serverResponse: `{"error":"Internal Server Error"}`,
 			wantResponse:   `{"error":"Internal Server Error"}`,
 			serverStatus:   http.StatusInternalServerError,
@@ -186,7 +186,7 @@ func TestForwardSpecificModelRequest(t *testing.T) {
 	}{
 		"retrieve model": {
 			workloadTasks: []string{constants.WorkloadTaskGenerate},
-			path:          fmt.Sprintf("/v1/models/%s", defaultModel),
+			path:          fmt.Sprintf(constants.OpenAIModelsEndpoint+"/%s", defaultModel),
 			serverResponse: func() string {
 				res, err := json.Marshal(openai.Model{
 					ID:     defaultModel,
@@ -207,7 +207,7 @@ func TestForwardSpecificModelRequest(t *testing.T) {
 		},
 		"retrieve model with multiple tasks": {
 			workloadTasks: []string{constants.WorkloadTaskGenerate, constants.WorkloadTaskToolCalling},
-			path:          fmt.Sprintf("/v1/models/%s", defaultModel),
+			path:          fmt.Sprintf(constants.OpenAIModelsEndpoint+"/%s", defaultModel),
 			serverResponse: func() string {
 				res, err := json.Marshal(openai.Model{
 					ID:     defaultModel,
@@ -228,7 +228,7 @@ func TestForwardSpecificModelRequest(t *testing.T) {
 		},
 		"retrieve model upstream error passes through": {
 			workloadTasks:  []string{constants.WorkloadTaskGenerate},
-			path:           fmt.Sprintf("/v1/models/%s", defaultModel),
+			path:           fmt.Sprintf(constants.OpenAIModelsEndpoint+"/%s", defaultModel),
 			serverResponse: `{"error":"Model not found"}`,
 			serverStatus:   http.StatusNotFound,
 			wantResponse:   `{"error":"Model not found"}`,
@@ -318,7 +318,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 				return string(res)
 			}(),
 			validateResponse: func(assert *assert.Assertions, responseRecorder *httptest.ResponseRecorder) {
-				assert.Equal(http.StatusInternalServerError, responseRecorder.Code)
+				assert.Equal(http.StatusBadRequest, responseRecorder.Code)
 				assert.Contains(responseRecorder.Body.String(), mutators.ErrRemoteResourceURL.Error())
 			},
 		},
@@ -365,7 +365,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 				return string(res)
 			}(),
 			validateResponse: func(assert *assert.Assertions, responseRecorder *httptest.ResponseRecorder) {
-				assert.Equal(http.StatusInternalServerError, responseRecorder.Code)
+				assert.Equal(http.StatusBadRequest, responseRecorder.Code)
 				assert.Contains(responseRecorder.Body.String(), mutators.ErrRemoteResourceURL.Error())
 			},
 		},
@@ -391,7 +391,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: forwarder}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(tc.clientRequest))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, strings.NewReader(tc.clientRequest))
 			responseRecorder := httptest.NewRecorder()
 
 			adapter.forwardChatCompletionsRequest(responseRecorder, request)
@@ -452,7 +452,7 @@ func TestForwardChatCompletionsRequestDuplicatesReasoningContent(t *testing.T) {
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: forwarder}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"some-model","messages":[{"role":"user","content":"hello"}],"cache_salt":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, strings.NewReader(`{"model":"some-model","messages":[{"role":"user","content":"hello"}],"cache_salt":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
 			responseRecorder := httptest.NewRecorder()
 
 			adapter.forwardChatCompletionsRequest(responseRecorder, request)
@@ -488,13 +488,13 @@ func TestModelsEndpointExcludedFromOCSP(t *testing.T) {
 	a.RegisterRoutes(mux)
 
 	// Models endpoint should succeed despite bad OCSP status (not wrapped with OCSP middleware)
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, openai.ModelsEndpoint, http.NoBody)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, constants.OpenAIModelsEndpoint, http.NoBody)
 	responseRecorder := httptest.NewRecorder()
 	mux.ServeHTTP(responseRecorder, request)
 	assert.Equal(http.StatusOK, responseRecorder.Code)
 
 	// Other endpoints should fail with bad OCSP status (wrapped with OCSP middleware)
-	request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, openai.ChatCompletionsEndpoint, http.NoBody)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, http.NoBody)
 	responseRecorder = httptest.NewRecorder()
 	mux.ServeHTTP(responseRecorder, request)
 	assert.Equal(http.StatusInternalServerError, responseRecorder.Code)
@@ -604,7 +604,7 @@ func TestUsageExtraction(t *testing.T) {
 			require.NoError(t, err)
 
 			ctx := requestid.WithContext(t.Context(), "test-request-id")
-			request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/chat/completions", strings.NewReader(clientRequest))
+			request := httptest.NewRequestWithContext(ctx, http.MethodPost, constants.OpenAIChatCompletionsEndpoint, strings.NewReader(clientRequest))
 			request.Header.Set(usagecollector.PrivatemodeUsageIDHeader, "test-usage-id")
 			responseRecorder := httptest.NewRecorder()
 
@@ -697,7 +697,7 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 			require.NoError(t, writer.Close())
 
 			ctx := requestid.WithContext(t.Context(), "test-request-id")
-			request := httptest.NewRequestWithContext(ctx, http.MethodPost, openai.TranscriptionsEndpoint, &body)
+			request := httptest.NewRequestWithContext(ctx, http.MethodPost, constants.OpenAITranscriptionsEndpoint, &body)
 			request.Header.Set("Content-Type", writer.FormDataContentType())
 			request.Header.Set(usagecollector.PrivatemodeUsageIDHeader, "test-usage-id")
 			responseRecorder := httptest.NewRecorder()
@@ -786,7 +786,7 @@ func TestTranscriptionDurationCompat(t *testing.T) {
 			require.NoError(t, writer.Close())
 
 			ctx := requestid.WithContext(t.Context(), "test-request-id")
-			request := httptest.NewRequestWithContext(ctx, http.MethodPost, openai.TranscriptionsEndpoint, &body)
+			request := httptest.NewRequestWithContext(ctx, http.MethodPost, constants.OpenAITranscriptionsEndpoint, &body)
 			request.Header.Set("Content-Type", writer.FormDataContentType())
 			request.Header.Set(constants.PrivatemodeVersionHeader, tc.clientVersion)
 			responseRecorder := httptest.NewRecorder()

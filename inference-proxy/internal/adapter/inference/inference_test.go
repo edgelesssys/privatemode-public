@@ -71,7 +71,7 @@ func TestForwardEncryptedRemoteResourceURLError(t *testing.T) {
 			if tc.stream {
 				body = `{"stream":true}`
 			}
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, strings.NewReader(body))
 			response := httptest.NewRecorder()
 			noUsage := func([]byte) (usage.Stats, error) { return usage.Stats{}, ErrNoUsage }
 			adapter.ForwardEncrypted(response, request, forwarder.NoRequestMutation, nil, nil, noUsage, noUsage)

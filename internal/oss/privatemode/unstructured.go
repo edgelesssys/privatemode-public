@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/textproto"
 	"strconv"
+
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 )
 
 // UnstructuredFile represents a file to be sent to the unstructured
@@ -89,12 +91,13 @@ func (c *Client) Unstructured(ctx context.Context, files []UnstructuredFile, opt
 		return nil, fmt.Errorf("building request body: %w", err)
 	}
 
-	reqURL := c.apiBaseURL + "/unstructured/general/v0/general"
+	reqURL := c.apiBaseURL + constants.UnstructuredEndpoint + constants.UnstructuredGeneralEndpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 	req.Header.Set("Content-Type", contentType)
+	req.Header.Set(constants.PrivatemodeContentLengthTokensHeader, "0") // Unstructured doesn't use tokens, default to 0
 
 	resp, err := c.doEncryptedAPIRequest(req)
 	if err != nil {

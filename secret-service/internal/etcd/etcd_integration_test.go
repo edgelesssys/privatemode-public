@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestEtcd(t *testing.T) {
+func TestIntegrationEtcd(t *testing.T) {
 	assert := assert.New(t)
 	require := require.New(t)
 

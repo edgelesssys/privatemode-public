@@ -54,6 +54,14 @@ func TestWithRequestMutation(t *testing.T) {
 			wantErr:     true,
 			contentType: "text/plain",
 		},
+		"validation error": {
+			mutator: stubMutator{
+				mutateErr: NewError("validation failed", errors.New("invalid input"), http.StatusBadRequest),
+			},
+			requestBody: "some data",
+			wantErr:     true,
+			contentType: "text/plain",
+		},
 	}
 
 	for name, tc := range testCases {
@@ -70,16 +78,35 @@ func TestWithRequestMutation(t *testing.T) {
 
 			err := mutate(request)
 			if tc.wantErr {
-				assert.Error(err)
+				assert.ErrorIs(err, tc.mutator.mutateErr)
+				assert.Equal(StatusFromError(tc.mutator.mutateErr), StatusFromError(err))
 				return
 			}
 
 			assert.NoError(err)
+			assert.Equal(http.StatusOK, StatusFromError(err))
 			body, err := io.ReadAll(request.Body)
 			assert.NoError(err)
 			assert.Equal(tc.expectedResponse, string(body))
 		})
 	}
+}
+
+func TestRequestMutatorChainError(t *testing.T) {
+	wantErr := errors.New("invalid request")
+	mutator := RequestMutatorChain(
+		NoRequestMutation,
+		func(*http.Request) error {
+			return NewError("validation failed", wantErr, http.StatusBadRequest)
+		},
+		func(*http.Request) error {
+			t.Error("mutator called after an error")
+			return nil
+		},
+	)
+	err := mutator(&http.Request{})
+	assert.Equal(t, http.StatusBadRequest, StatusFromError(err))
+	assert.ErrorIs(t, err, wantErr)
 }
 
 type stubMutator struct {
