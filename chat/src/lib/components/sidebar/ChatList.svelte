@@ -1,8 +1,8 @@
 <script lang="ts">
   import ChatListItem from './ChatListItem.svelte';
-  import { chatStore } from '$lib/chatStore';
-  import type { Chat } from '$lib/chatStore';
-  import { t } from '$lib/i18n';
+  import { chatStore } from '#lib/chatStore.js';
+  import type { Chat } from '#lib/chatStore.js';
+  import { t } from '#lib/i18n.js';
 
   export let currentChatId: string | null;
   export let collapsed: boolean;

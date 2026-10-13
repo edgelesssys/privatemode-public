@@ -57,7 +57,10 @@
         }
         // pkgs;
 
-        devShells = import ./nix/devShells/devshell.nix { inherit pkgs; };
+        devShells = import ./nix/devShells/devshell.nix {
+          inherit pkgs;
+          treefmtWrapper = treefmtEval.config.build.wrapper;
+        };
 
         formatter = treefmtEval.config.build.wrapper;
 

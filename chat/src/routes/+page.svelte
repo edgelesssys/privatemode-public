@@ -1,14 +1,14 @@
 <script lang="ts">
-  import ChatInput from '$lib/components/chat/ChatInput.svelte';
-  import ChatPanel from '$lib/components/chat/ChatPanel.svelte';
-  import { chatStore } from '$lib/chatStore';
-  import type { Message } from '$lib/chatStore';
+  import ChatInput from '#lib/components/chat/ChatInput.svelte';
+  import ChatPanel from '#lib/components/chat/ChatPanel.svelte';
+  import { chatStore } from '#lib/chatStore.js';
+  import type { Message } from '#lib/chatStore.js';
   import {
     privatemodeClient,
     clientVerifying,
     clientError,
-  } from '$lib/clientStore';
-  import { t } from '$lib/i18n';
+  } from '#lib/clientStore.js';
+  import { t } from '#lib/i18n.js';
 
   let currentChatId: string | null = $state(null);
   let slowConnection = $state(false);

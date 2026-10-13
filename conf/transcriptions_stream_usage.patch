@@ -1,0 +1,46 @@
+diff --git a/vllm/entrypoints/speech_to_text/base/serving.py b/vllm/entrypoints/speech_to_text/base/serving.py
+index 27310ddeee51d1e2901f29acb7a2b81a77ceba4e..4731b0883f2f0982b7b662944ffa6ab42a755f03 100644
+--- a/vllm/entrypoints/speech_to_text/base/serving.py
++++ b/vllm/entrypoints/speech_to_text/base/serving.py
+@@ -1122,10 +1122,12 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+                         object=chunk_object_type,
+                         created=created_time,
+                         choices=[choice_data],
+                         model=model_name,
+                     )
++                    if isinstance(chunk, TranscriptionStreamResponse):
++                        chunk.duration = audio_duration_s
+
+                     # handle usage stats if requested & if continuous
+                     if include_continuous_usage:
+                         chunk.usage = UsageInfo(
+                             prompt_tokens=num_prompt_tokens,
+@@ -1151,10 +1153,12 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+                     created=created_time,
+                     choices=[],
+                     model=model_name,
+                     usage=final_usage,
+                 )
++                if isinstance(final_usage_chunk, TranscriptionStreamResponse):
++                    final_usage_chunk.duration = audio_duration_s
+                 final_usage_data = final_usage_chunk.model_dump_json(
+                     exclude_unset=True, exclude_none=True
+                 )
+                 yield f"data: {final_usage_data}\n\n"
+
+diff --git a/vllm/entrypoints/speech_to_text/transcription/protocol.py b/vllm/entrypoints/speech_to_text/transcription/protocol.py
+index 86799b4e7a836b2f45652772c7a5e58cc1df9570..a759a1fc60ffe5eef965681ec7b9896c0cf5816c 100644
+--- a/vllm/entrypoints/speech_to_text/transcription/protocol.py
++++ b/vllm/entrypoints/speech_to_text/transcription/protocol.py
+@@ -44,10 +44,11 @@ class TranscriptionStreamResponse(OpenAIBaseModel):
+     id: str = Field(default_factory=lambda: f"trsc-{random_uuid()}")
+     object: Literal["transcription.chunk"] = "transcription.chunk"
+     created: int = Field(default_factory=lambda: int(time.time()))
+     model: str
+     choices: list[TranscriptionResponseStreamChoice]
++    duration: float | None = None
+     usage: UsageInfo | None = Field(default=None)
+
+
+ class TranscriptionRequest(OpenAIBaseModel):
+     # Ordered by official OpenAI API documentation

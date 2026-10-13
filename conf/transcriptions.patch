@@ -1,5 +1,5 @@
 diff --git a/vllm/entrypoints/speech_to_text/base/serving.py b/vllm/entrypoints/speech_to_text/base/serving.py
-index e7b864f3b7..b1d3b72777 100644
+index 34b7e9c249..a52aa7b80f 100644
 --- a/vllm/entrypoints/speech_to_text/base/serving.py
 +++ b/vllm/entrypoints/speech_to_text/base/serving.py
 @@ -10,7 +10,9 @@ from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +12,7 @@ index e7b864f3b7..b1d3b72777 100644
  from fastapi import Request
  from transformers import PreTrainedTokenizerBase
  
-@@ -32,14 +34,14 @@ from vllm.inputs import EncoderDecoderInput, EngineInput
+@@ -31,14 +33,14 @@ from vllm.inputs import EncoderDecoderInput, EngineInput
  from vllm.logger import init_logger
  from vllm.logprobs import FlatLogprobs, Logprob
  from vllm.model_executor.models import SupportsTranscription
@@ -29,7 +29,7 @@ index e7b864f3b7..b1d3b72777 100644
  
  from ..transcription.protocol import (
      TranscriptionResponse,
-@@ -91,6 +93,86 @@ def asr_inter_chunk_separator(
+@@ -90,6 +92,86 @@ def asr_inter_chunk_separator(
      return "" if language and language.lower() in no_space_languages else " "
  
  
@@ -116,7 +116,7 @@ index e7b864f3b7..b1d3b72777 100644
  class SpeechToTextBaseServing(GenerateBaseServing):
      """Base class for speech-to-text operations like transcription and
      translation."""
-@@ -169,24 +251,17 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -167,24 +249,17 @@ class SpeechToTextBaseServing(GenerateBaseServing):
          self,
          audio_data: bytes,
      ) -> tuple[list[np.ndarray], float]:

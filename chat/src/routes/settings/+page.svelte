@@ -1,23 +1,23 @@
 <script lang="ts">
-  import { chatStore } from '$lib/chatStore';
+  import { chatStore } from '#lib/chatStore.js';
   import { ArrowLeft, Trash2, Monitor, Sun, Moon } from 'lucide-svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { themePreference } from '$lib/themeStore';
-  import type { ThemePreference } from '$lib/themeStore';
-  import { localePreference, t, type LocalePreference } from '$lib/i18n';
+  import { themePreference } from '#lib/themeStore.js';
+  import type { ThemePreference } from '#lib/themeStore.js';
+  import { localePreference, t, type LocalePreference } from '#lib/i18n.js';
   import {
     models as modelsStore,
     modelsError,
     modelsLoaded,
     modelsLoading,
-  } from '$lib/clientStore';
+  } from '#lib/clientStore.js';
   import {
     getAvailableTranscriptionModels,
     transcriptionModelConfig,
     transcriptionModel,
-  } from '$lib/transcriptionStore';
-  import type { TranscriptionModelID } from '$lib/transcriptionStore';
+  } from '#lib/transcriptionStore.js';
+  import type { TranscriptionModelID } from '#lib/transcriptionStore.js';
   import { onMount } from 'svelte';
 
   let showDeleteConfirm = $state(false);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from '$lib/i18n';
+  import { t } from '#lib/i18n.js';
 </script>
 
 <div

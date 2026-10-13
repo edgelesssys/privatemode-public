@@ -351,7 +351,9 @@ func cloneRequestHeader(header http.Header) http.Header {
 func (c *Client) doAPIRequest(req *http.Request) (*http.Response, error) {
 	c.cred.Apply(req.Header)
 	req.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
-	req.Header.Set(constants.PrivatemodeClientHeader, constants.PrivatemodeClientSDK)
+	if req.Header.Get(constants.PrivatemodeClientHeader) == "" {
+		req.Header.Set(constants.PrivatemodeClientHeader, constants.PrivatemodeClientSDK)
+	}
 	req.Header.Set(constants.PrivatemodeSecretIDHeader, c.currentSecret.ID)
 	req.Header.Set(requestid.UserHeader, "sdk_"+requestid.New())
 

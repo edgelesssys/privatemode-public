@@ -649,26 +649,51 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 		"streaming whisper": {
 			contentType: "text/event-stream",
 			serverResponse: strings.Join([]string{
-				`data: {"model":"openai/whisper-large-v3","choices":[{"delta":{"content":"Hello"}}],"usage":{"prompt_tokens":4000,"completion_tokens":1,"total_tokens":4001}}`,
+				`data: {"model":"openai/whisper-large-v3","choices":[{"delta":{"content":"Hello"}}],"duration":42.3,"usage":{"prompt_tokens":4000,"completion_tokens":1,"total_tokens":4001}}`,
 				`data: [DONE]`,
 			}, "\n\n") + "\n\n",
-			wantUsage: usage.Stats{AudioSeconds: 40},
+			wantUsage: usage.Stats{AudioSeconds: 43},
 		},
 		"streaming voxtral": {
 			contentType: "text/event-stream",
 			serverResponse: strings.Join([]string{
-				`data: {"model":"voxtral-mini-3b","choices":[{"delta":{"content":"Hello"}}],"usage":{"prompt_tokens":1073,"completion_tokens":1,"total_tokens":1074}}`,
+				`data: {"model":"voxtral-mini-3b","choices":[{"delta":{"content":"Hello"}}],"duration":30.4,"usage":{"prompt_tokens":1073,"completion_tokens":1,"total_tokens":1074}}`,
 				`data: [DONE]`,
 			}, "\n\n") + "\n\n",
-			wantUsage: usage.Stats{AudioSeconds: 30},
+			wantUsage: usage.Stats{AudioSeconds: 31},
 		},
-		"streaming unknown model uses voxtral fallback": {
+		"streaming unknown model uses reported duration": {
 			contentType: "text/event-stream",
 			serverResponse: strings.Join([]string{
-				`data: {"model":"some-unknown-model","choices":[{"delta":{"content":"Hello"}}],"usage":{"prompt_tokens":1073,"completion_tokens":1,"total_tokens":1074}}`,
+				`data: {"model":"some-unknown-model","choices":[{"delta":{"content":"Hello"}}],"duration":25.4,"usage":{"prompt_tokens":1073,"completion_tokens":1,"total_tokens":1074}}`,
 				`data: [DONE]`,
 			}, "\n\n") + "\n\n",
-			wantUsage: usage.Stats{AudioSeconds: 30},
+			wantUsage: usage.Stats{AudioSeconds: 26},
+		},
+		"streaming with duration before final usage": {
+			contentType: "text/event-stream",
+			serverResponse: strings.Join([]string{
+				`data: {"choices":[{"delta":{"content":"Hello"}}],"duration":25.4,"usage":null}`,
+				`data: [DONE]`,
+			}, "\n\n") + "\n\n",
+			wantUsage: usage.Stats{AudioSeconds: 26},
+		},
+		"streaming continuous and final usage count duration once": {
+			contentType: "text/event-stream",
+			serverResponse: strings.Join([]string{
+				`data: {"choices":[{"delta":{"content":"Hello"}}],"duration":25.4,"usage":{"prompt_tokens":1073,"completion_tokens":1,"total_tokens":1074}}`,
+				`data: {"choices":[{"delta":{"content":" world"}}],"duration":25.4,"usage":{"prompt_tokens":1073,"completion_tokens":2,"total_tokens":1075}}`,
+				`data: {"choices":[],"duration":25.4,"usage":{"prompt_tokens":1073,"completion_tokens":2,"total_tokens":1075}}`,
+				`data: [DONE]`,
+			}, "\n\n") + "\n\n",
+			wantUsage: usage.Stats{AudioSeconds: 26},
+		},
+		"streaming tokens without duration": {
+			contentType: "text/event-stream",
+			serverResponse: strings.Join([]string{
+				`data: {"model":"openai/whisper-large-v3","choices":[],"usage":{"prompt_tokens":4000,"completion_tokens":1,"total_tokens":4001}}`,
+				`data: [DONE]`,
+			}, "\n\n") + "\n\n",
 		},
 	}
 
@@ -710,6 +735,21 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 				report, ok := reporter.LatestReport()
 				return ok && report.Stats == tc.wantUsage
 			}, time.Second, 10*time.Millisecond)
+		})
+	}
+}
+
+func TestExtractTranscriptionUsageWithoutDuration(t *testing.T) {
+	for name, body := range map[string]string{
+		"missing duration":  `{ "text": "hello" }`,
+		"tokens only":       `{"usage":{"type":"tokens","prompt_tokens":4000,"completion_tokens":1,"total_tokens":4001}}`,
+		"zero duration":     `{"duration":0,"usage":{"seconds":0,"prompt_tokens":4000}}`,
+		"negative duration": `{"duration":-1,"usage":{"seconds":-2,"prompt_tokens":4000}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			stats, err := extractTranscriptionUsage([]byte(body))
+			assert.ErrorIs(t, err, inference.ErrNoUsage)
+			assert.Zero(t, stats)
 		})
 	}
 }

@@ -3,22 +3,22 @@ kind: Deployment
 metadata:
   name: privatemode-proxy
   labels:
-    helm.sh/chart: privatemode-proxy-1.58.0
+    helm.sh/chart: privatemode-proxy-1.59.0
     app.kubernetes.io/name: privatemode-proxy
-    app.kubernetes.io/instance: continuum-application-continuum-0a7a47
+    app.kubernetes.io/instance: continuum-application-continuum-7a3b43
     app.kubernetes.io/managed-by: Helm
-  namespace: continuum-0a7a47
+  namespace: continuum-7a3b43
 spec:
   replicas: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: privatemode-proxy
-      app.kubernetes.io/instance: continuum-application-continuum-0a7a47
+      app.kubernetes.io/instance: continuum-application-continuum-7a3b43
   template:
     metadata:
       labels:
         app.kubernetes.io/name: privatemode-proxy
-        app.kubernetes.io/instance: continuum-application-continuum-0a7a47
+        app.kubernetes.io/instance: continuum-application-continuum-7a3b43
       annotations:
         contrast.edgeless.systems/skip-initializer: "true"
     spec:
@@ -33,7 +33,7 @@ spec:
           command:
             - /bin/sh
             - -ec
-          image: debian:trixie-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
+          image: debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
           name: allow-ingress
           securityContext:
             capabilities:
@@ -41,7 +41,7 @@ spec:
                 - NET_ADMIN
       containers:
         - name: privatemode-proxy
-          image: "ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.58.0@sha256:5e8f549169c4288c24c902eadc4c6ebfaaf05c06e5605449c34469257929b143"
+          image: "ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.59.0@sha256:3cd4da0ee6ceee91ca84dde4e3e3f0e94e8b354d7c1d46987e4331a5c2f8bcff"
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -69,6 +69,7 @@ spec:
             - "--api-key-fallback=never"
             - "--api-endpoint=api.privatemode.ai:443"
             - "--port=8080"
+            - "--cors-allowed-origins=*"
             - "--tls-cert-path=/etc/tls/tls.crt"
             - "--tls-key-path=/etc/tls/tls.key"
             - "--disable-prompt-cache=false"

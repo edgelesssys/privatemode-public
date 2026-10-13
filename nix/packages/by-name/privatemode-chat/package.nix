@@ -2,7 +2,7 @@
   lib,
   stdenv,
   nodejs,
-  pnpm_11,
+  pnpm_12,
   pnpmConfigHook,
   fetchPnpmDeps,
   sdk,
@@ -18,16 +18,22 @@ stdenv.mkDerivation (finalAttrs: {
   pnpmRoot = "chat";
 
   pnpmDeps = fetchPnpmDeps {
-    inherit (finalAttrs) pname version src;
+    inherit (finalAttrs) pname version;
+    src = lib.continuumRepoRootSrc [
+      "chat/.npmrc"
+      "chat/package.json"
+      "chat/pnpm-lock.yaml"
+      "chat/pnpm-workspace.yaml"
+    ];
     fetcherVersion = 4;
     sourceRoot = "${finalAttrs.src.name}/chat";
-    hash = "sha256-qTgPPMc4YB2c6RmpcHGZ7Wt6gLwgvQmT1Ja5tw9apEI=";
+    hash = "sha256-KVDhoh5zrPUZUeZD2sbRdG3COeZExPEd01ecwFfmmrQ=";
   };
 
   nativeBuildInputs = [
     nodejs
     pnpmConfigHook
-    pnpm_11
+    pnpm_12
   ];
 
   buildPhase = ''

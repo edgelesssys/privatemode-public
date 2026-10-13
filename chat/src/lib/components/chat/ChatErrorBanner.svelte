@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { chatStore } from '$lib/chatStore';
-  import type { Message } from '$lib/chatStore';
-  import { t } from '$lib/i18n';
+  import { chatStore } from '#lib/chatStore.js';
+  import type { Message } from '#lib/chatStore.js';
+  import { t } from '#lib/i18n.js';
 
   export let chatModelUnavailable: boolean;
   export let unavailableModelId: string | undefined;

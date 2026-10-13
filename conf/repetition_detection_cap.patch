@@ -1,8 +1,8 @@
 diff --git a/vllm/config/model.py b/vllm/config/model.py
-index ab2d49b91a..9b558662c0 100644
+index 15d046de76..efdedc064e 100644
 --- a/vllm/config/model.py
 +++ b/vllm/config/model.py
-@@ -247,6 +247,12 @@ class ModelConfig:
+@@ -256,6 +256,12 @@ class ModelConfig:
      specified in `SamplingParams`. The default value comes the default for the
      OpenAI Chat Completions API. -1 means no cap, i.e. all (output_length *
      vocab_size) logprobs are allowed to be returned and it may cause OOM."""
@@ -16,20 +16,20 @@ index ab2d49b91a..9b558662c0 100644
      """Indicates the content returned in the logprobs and prompt_logprobs.
      Supported mode:
 diff --git a/vllm/engine/arg_utils.py b/vllm/engine/arg_utils.py
-index 44ee837c6f..ebf41e0561 100644
+index d641b1fbab..6ca014bb96 100644
 --- a/vllm/engine/arg_utils.py
 +++ b/vllm/engine/arg_utils.py
-@@ -538,6 +538,9 @@ class EngineArgs:
-     long_prefill_token_threshold: int = SchedulerConfig.long_prefill_token_threshold
-     max_num_seqs: int | None = None
+@@ -598,6 +598,9 @@ class EngineArgs:
+     max_num_queued_reqs: int | None = None
+     max_num_queued_tokens: int | None = None
      max_logprobs: int = ModelConfig.max_logprobs
 +    max_repetition_detection_pattern_size: int = (
 +        ModelConfig.max_repetition_detection_pattern_size
 +    )
      logprobs_mode: LogprobsMode = ModelConfig.logprobs_mode
      use_fp64_gumbel: bool = ModelConfig.use_fp64_gumbel
-     disable_log_stats: bool = False
-@@ -879,6 +882,10 @@ class EngineArgs:
+     enable_trace_replay: bool = ModelConfig.enable_trace_replay
+@@ -967,6 +970,10 @@ class EngineArgs:
              **model_kwargs["return_sampling_mask"],
          )
          model_group.add_argument("--max-logprobs", **model_kwargs["max_logprobs"])
@@ -40,8 +40,8 @@ index 44ee837c6f..ebf41e0561 100644
          model_group.add_argument("--logprobs-mode", **model_kwargs["logprobs_mode"])
          model_group.add_argument("--use-fp64-gumbel", **model_kwargs["use_fp64_gumbel"])
          model_group.add_argument(
-@@ -1751,6 +1758,9 @@ class EngineArgs:
-             enable_return_routed_experts=self.enable_return_routed_experts,
+@@ -1941,6 +1948,9 @@ class EngineArgs:
+             enforce_eager=self.enforce_eager,
              return_sampling_mask=self.return_sampling_mask,
              max_logprobs=self.max_logprobs,
 +            max_repetition_detection_pattern_size=(
@@ -49,12 +49,12 @@ index 44ee837c6f..ebf41e0561 100644
 +            ),
              logprobs_mode=self.logprobs_mode,
              use_fp64_gumbel=self.use_fp64_gumbel,
-             disable_sliding_window=self.disable_sliding_window,
+             enable_trace_replay=self.enable_trace_replay,
 diff --git a/vllm/sampling_params.py b/vllm/sampling_params.py
-index ada67c91a6..8951055752 100644
+index 15657997ab..0d32dfd97a 100644
 --- a/vllm/sampling_params.py
 +++ b/vllm/sampling_params.py
-@@ -158,6 +158,10 @@ class StructuredOutputsParams:
+@@ -154,6 +154,10 @@ class StructuredOutputsParams:
          )
  
  
@@ -65,7 +65,7 @@ index ada67c91a6..8951055752 100644
  @dataclass
  class RepetitionDetectionParams:
      """Parameters for detecting repetitive N-gram patterns in output tokens."""
-@@ -187,6 +191,22 @@ class RepetitionDetectionParams:
+@@ -183,6 +187,22 @@ class RepetitionDetectionParams:
                  "with min_pattern_size <= max_pattern_size. "
                  "Set both to 0 to disable repetitive pattern detection."
              )
@@ -88,7 +88,7 @@ index ada67c91a6..8951055752 100644
          if self.max_pattern_size > 0 and self.min_count < 2:
              raise VLLMValidationError(
                  "min_count must be >= 2 to detect repetitive patterns "
-@@ -788,6 +808,7 @@ class SamplingParams(
+@@ -852,6 +872,7 @@ class SamplingParams(
          self._validate_structured_outputs(
              model_config, structured_outputs_config, tokenizer
          )
@@ -96,9 +96,9 @@ index ada67c91a6..8951055752 100644
  
      def _validate_logprobs(self, model_config: ModelConfig) -> None:
          max_logprobs = model_config.max_logprobs
-@@ -925,6 +946,47 @@ class SamplingParams(
-                     value=invalid_token_ids,
-                 )
+@@ -1100,6 +1121,47 @@ class SamplingParams(
+                 value=invalid_token_ids,
+             )
  
 +    def _validate_repetition_detection(self, model_config: ModelConfig) -> None:
 +        rd = self.repetition_detection
@@ -145,7 +145,7 @@ index ada67c91a6..8951055752 100644
          self,
          speculative_config: SpeculativeConfig | None,
 diff --git a/vllm/v1/core/sched/utils.py b/vllm/v1/core/sched/utils.py
-index c7cb6b9436..b9f52b51ff 100644
+index 045dacaa98..d09c7029e2 100644
 --- a/vllm/v1/core/sched/utils.py
 +++ b/vllm/v1/core/sched/utils.py
 @@ -3,7 +3,10 @@
@@ -160,7 +160,7 @@ index c7cb6b9436..b9f52b51ff 100644
  from vllm.v1.request import Request, RequestStatus
  
  
-@@ -46,6 +49,13 @@ def check_sequence_repetition(
+@@ -49,6 +52,13 @@ def check_sequence_repetition(
      if max_pattern_size <= 0 or min_count < 2 or min_pattern_size > max_pattern_size:
          return False
  

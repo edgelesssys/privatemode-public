@@ -2,7 +2,7 @@
   lib,
   stdenv,
   nodejs,
-  pnpm_11,
+  pnpm_12,
   pnpmConfigHook,
   fetchPnpmDeps,
   sdk,
@@ -17,16 +17,21 @@ stdenv.mkDerivation (finalAttrs: {
   pnpmRoot = "sdk/js";
 
   pnpmDeps = fetchPnpmDeps {
-    inherit (finalAttrs) pname version src;
+    inherit (finalAttrs) pname version;
+    src = lib.continuumRepoRootSrc [
+      "sdk/js/package.json"
+      "sdk/js/pnpm-lock.yaml"
+      "sdk/js/pnpm-workspace.yaml"
+    ];
     fetcherVersion = 4;
     sourceRoot = "${finalAttrs.src.name}/sdk/js";
-    hash = "sha256-AOfT1FsgZpeb+0P0IQkRGB/9u96teAnKbW+zbeBDtcs=";
+    hash = "sha256-eGK4p6WiyvDIXJmW0Q5p1aS3L+7MMGuuPHTgOGy+YYI=";
   };
 
   nativeBuildInputs = [
     nodejs
     pnpmConfigHook
-    pnpm_11
+    pnpm_12
   ];
 
   buildPhase = ''

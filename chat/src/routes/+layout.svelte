@@ -1,11 +1,11 @@
 <script lang="ts">
-  import Sidebar from '$lib/components/sidebar/Sidebar.svelte';
-  import Toast from '$lib/components/common/Toast.svelte';
+  import Sidebar from '#lib/components/sidebar/Sidebar.svelte';
+  import Toast from '#lib/components/common/Toast.svelte';
   import { Menu } from 'lucide-svelte';
-  import { chatStore } from '$lib/chatStore';
-  import { initTheme } from '$lib/themeStore';
-  import { initLocale, t } from '$lib/i18n';
-  import { initializeClient } from '$lib/clientStore';
+  import { chatStore } from '#lib/chatStore.js';
+  import { initTheme } from '#lib/themeStore.js';
+  import { initLocale, t } from '#lib/i18n.js';
+  import { initializeClient } from '#lib/clientStore.js';
   import {
     initializeAuth,
     isLimitedMode,
@@ -13,11 +13,11 @@
     authIdentity,
     signIn,
     clerkLoaded,
-  } from '$lib/authStore';
+  } from '#lib/authStore.js';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import '@fontsource-variable/inter/wght.css';
-  import '$lib/styles/theme.css';
+  import '#lib/styles/theme.css';
   let { children } = $props();
 
   onMount(() => {

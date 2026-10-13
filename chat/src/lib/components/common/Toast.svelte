@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { toasts } from '$lib/toastStore';
+  import { toasts } from '#lib/toastStore.js';
   import { X } from 'lucide-svelte';
-  import { t } from '$lib/i18n';
+  import { t } from '#lib/i18n.js';
 
   function dismiss(id: number) {
     toasts.update((t) => t.filter((toast) => toast.id !== id));

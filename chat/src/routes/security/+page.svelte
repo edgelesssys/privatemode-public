@@ -10,8 +10,8 @@
   } from 'lucide-svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { privatemodeClient } from '$lib/clientStore';
-  import { t } from '$lib/i18n';
+  import { privatemodeClient } from '#lib/clientStore.js';
+  import { t } from '#lib/i18n.js';
 
   let manifestHash = $state('');
   let trustedMeasurement = $state('');

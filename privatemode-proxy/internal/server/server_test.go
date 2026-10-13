@@ -71,7 +71,6 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 		expectedHeaders  map[string]string
 		expectedBody     string
 		requestMutator   func(*http.Request)
-		isApp            bool
 	}{
 		"derive from configured key overriding incoming key": {
 			proxyAPIKey:      &apiKey,
@@ -229,12 +228,6 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 			proxyCacheSalt:   "p1234567890123456789012345678912",
 			requestCacheSalt: "r1234567890123456789012345678912",
 		},
-		"with app client": {
-			proxyAPIKey:      &apiKey,
-			expectStatusCode: http.StatusOK,
-			prompt:           "Hello",
-			isApp:            true,
-		},
 	}
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
@@ -265,11 +258,7 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 
 				// test set headers
 				appHeader := r.Header.Get(constants.PrivatemodeClientHeader)
-				if tc.isApp {
-					assert.Equal(constants.PrivatemodeClientApp, appHeader)
-				} else {
-					assert.Equal(constants.PrivatemodeClientProxy, appHeader)
-				}
+				assert.Equal(constants.PrivatemodeClientProxy, appHeader)
 				assert.Equal(runtime.GOOS, r.Header.Get(constants.PrivatemodeOSHeader))
 				assert.Equal(runtime.GOARCH, r.Header.Get(constants.PrivatemodeArchitectureHeader))
 
@@ -280,7 +269,7 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 			}))
 			defer stubAuthBackendServer.Close()
 
-			sut := newTestServer(tc.proxyAPIKey, secret, stubAuthBackendServer.Listener.Addr().String(), tc.proxyCacheSalt, tc.isApp)
+			sut := newTestServer(tc.proxyAPIKey, secret, stubAuthBackendServer.Listener.Addr().String(), tc.proxyCacheSalt)
 			if tc.apiKeyFallback != "" {
 				sut.apiKeyFallback = tc.apiKeyFallback
 			}
@@ -354,7 +343,7 @@ func TestPromptCacheWithoutAPIKey(t *testing.T) {
 			// Accept requests without API-key authentication to inspect their encrypted salts.
 			backend := httptest.NewServer(stub.EchoHandler(secret.Map(), slog.Default()))
 			defer backend.Close()
-			sut := newTestServer(nil, secret, backend.Listener.Addr().String(), "", false)
+			sut := newTestServer(nil, secret, backend.Listener.Addr().String(), "")
 			sut.promptCacheSaltFromAPIKey = true
 			var previousSalt string
 			for range 2 {
@@ -392,7 +381,7 @@ func TestPromptCacheSaltReuse(t *testing.T) {
 			secret := secretmanager.Secret{ID: "123", Data: bytes.Repeat([]byte{0x42}, 32)}
 			backend := httptest.NewServer(stub.EchoHandler(secret.Map(), slog.Default()))
 			defer backend.Close()
-			sut := newTestServer(toPtr(testAPIKey), secret, backend.Listener.Addr().String(), tc.proxySalt, false)
+			sut := newTestServer(toPtr(testAPIKey), secret, backend.Listener.Addr().String(), tc.proxySalt)
 			var previousSalt string
 			for range 2 {
 				req := prepareChatRequest(t.Context(), require, "Hello", nil, tc.requestSalt)
@@ -456,7 +445,6 @@ func TestInvalidSecretRetry(t *testing.T) {
 		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secretInvalid, secretValid}},
 		forwarder:                    forwarder.New(http.DefaultClient, stubAuthBackendServer.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default()),
 		log:                          slog.Default(),
-		isApp:                        false,
 		nvidiaOCSPAllowUnknown:       true,
 		nvidiaOCSPRevokedGracePeriod: 24 * time.Hour,
 	}
@@ -489,6 +477,42 @@ func TestInvalidSecretRetry(t *testing.T) {
 	)
 }
 
+// Error responses from outside the TCB are unencrypted and must reach the client with their headers.
+func TestUnencryptedUpstreamErrorKeepsRetryAfter(t *testing.T) {
+	testCases := map[string]struct {
+		status int
+	}{
+		"rate limited": {status: http.StatusTooManyRequests},
+		"no nodes":     {status: http.StatusServiceUnavailable},
+		"overloaded":   {status: 529},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+
+			stubBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Retry-After", "42")
+				forwarder.HTTPError(w, r, tc.status, "rejected")
+			}))
+			defer stubBackend.Close()
+
+			apiKey := testAPIKey
+			secret := secretmanager.Secret{ID: "123", Data: bytes.Repeat([]byte{0x42}, 32)}
+			sut := newTestServer(&apiKey, secret, stubBackend.Listener.Addr().String(), "")
+
+			prompt := "Hello"
+			req := prepareChatRequest(t.Context(), require, &prompt, nil, "")
+			resp := httptest.NewRecorder()
+			sut.GetHandler().ServeHTTP(resp, req)
+
+			assert.Equal(tc.status, resp.Code)
+			assert.Equal("42", resp.Header().Get("Retry-After"))
+		})
+	}
+}
+
 func TestTools(t *testing.T) {
 	strPtr := func(s string) *string { return &s }
 
@@ -506,7 +530,7 @@ func TestTools(t *testing.T) {
 
 	// Create the SUT once (or inside the loop if you prefer)
 	apiKey := testAPIKey
-	sut := newTestServer(&apiKey, secret, stubAuthBackendServer.Listener.Addr().String(), "", false)
+	sut := newTestServer(&apiKey, secret, stubAuthBackendServer.Listener.Addr().String(), "")
 
 	testFunc1 := `{"type":"function","function":"func1"}`
 	testFunc1Echo := `{"type":"function","function":"func1","test":"echo"}`
@@ -689,7 +713,7 @@ func TestUnstructuredEncrypted(t *testing.T) {
 			})
 			t.Cleanup(func() { stub.Close() })
 
-			sut := newTestServer(nil, secret, stub.Listener.Addr().String(), "", false)
+			sut := newTestServer(nil, secret, stub.Listener.Addr().String(), "")
 
 			body, contentType := tc.buildBody(t)
 
@@ -768,7 +792,7 @@ func TestSetDynamicHeaders(t *testing.T) {
 			require := require.New(t)
 			assert := assert.New(t)
 
-			server := newTestServer(nil, tc.secret, "", "", false)
+			server := newTestServer(nil, tc.secret, "", "")
 
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
 			requestID := requestid.New()
@@ -896,7 +920,7 @@ func TestInferenceHeaders(t *testing.T) {
 			defer stubBackend.Close()
 
 			apiKey := testAPIKey
-			sut := newTestServer(&apiKey, secret, stubBackend.Listener.Addr().String(), "", false)
+			sut := newTestServer(&apiKey, secret, stubBackend.Listener.Addr().String(), "")
 
 			req := tc.buildRequest(t, require)
 			req.Header.Set(constants.PrivatemodeContentLengthTokensHeader, "9999")
@@ -949,20 +973,17 @@ func TestAPIKeyFallback(t *testing.T) {
 
 func TestClientHeader(t *testing.T) {
 	testCases := map[string]struct {
-		isApp    bool
 		clientID string
 		want     string
 	}{
 		"proxy default":      {want: constants.PrivatemodeClientProxy},
-		"app default":        {isApp: true, want: constants.PrivatemodeClientApp},
 		"clientID overrides": {clientID: "OpenRouter", want: "OpenRouter"},
-		"clientID beats app": {isApp: true, clientID: "OpenRouter", want: "OpenRouter"},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
 			secret := secretmanager.Secret{ID: "123", Data: bytes.Repeat([]byte{0x42}, 32)}
-			sut := newTestServer(nil, secret, "192.0.2.1:8080", "", tc.isApp)
+			sut := newTestServer(nil, secret, "192.0.2.1:8080", "")
 			sut.clientID = tc.clientID
 
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", http.NoBody)
@@ -978,7 +999,7 @@ func TestReadinessHandler(t *testing.T) {
 		ID:   "123",
 		Data: bytes.Repeat([]byte{0x42}, 32),
 	}
-	sut := newTestServer(nil, secret, "192.0.2.1:8080", "", false)
+	sut := newTestServer(nil, secret, "192.0.2.1:8080", "")
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/readyz", http.NoBody)
 	resp := httptest.NewRecorder()
@@ -988,7 +1009,7 @@ func TestReadinessHandler(t *testing.T) {
 }
 
 // newTestServer returns a stub server for testing.
-func newTestServer(apiKey *string, secret secretmanager.Secret, backendAddr string, defaultCacheSalt string, isApp bool) *Server {
+func newTestServer(apiKey *string, secret secretmanager.Secret, backendAddr string, defaultCacheSalt string) *Server {
 	return &Server{
 		apiKey:                       apiKey,
 		apiKeyFallback:               APIKeyFallbackAlways,
@@ -996,7 +1017,6 @@ func newTestServer(apiKey *string, secret secretmanager.Secret, backendAddr stri
 		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secret}},
 		forwarder:                    forwarder.New(http.DefaultClient, backendAddr, forwarder.SchemeHTTP, slog.Default()),
 		log:                          slog.Default(),
-		isApp:                        isApp,
 		nvidiaOCSPAllowUnknown:       true,
 		nvidiaOCSPRevokedGracePeriod: time.Hour * 24,
 	}

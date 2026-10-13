@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Copy, Check, X } from 'lucide-svelte';
-  import { modalFocus } from '$lib/modalFocus';
-  import type { AttachedFile } from '$lib/chatStore';
-  import { t } from '$lib/i18n';
+  import { modalFocus } from '#lib/modalFocus.js';
+  import type { AttachedFile } from '#lib/chatStore.js';
+  import { t } from '#lib/i18n.js';
 
   export let file: AttachedFile;
   export let onClose: () => void;

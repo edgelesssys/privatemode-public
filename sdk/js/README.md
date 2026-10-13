@@ -41,8 +41,8 @@ console.log(completion.choices[0]?.message.content);
 `PrivatemodeAI` verifies the Privatemode deployment and
 establishes an encryption secret lazily before the first request.
 
-To authenticate with rotating credentials (e.g. short-lived JWTs) or
-anonymously, pass an `auth` provider instead of `apiKey`. It is invoked
+To authenticate with rotating credentials,
+pass an `auth` provider instead of `apiKey`. It is invoked
 before every request to obtain the current credential.
 
 ### Streaming
@@ -96,7 +96,7 @@ import { PrivatemodeAI } from 'privatemode-ai';
 
 const client = new PrivatemodeAI({
   // Rotating credentials, as an alternative to a static `apiKey`.
-  auth: async () => ({ type: 'jwt', value: await fetchSessionToken() }),
+  auth: async () => ({ type: 'apiKey', value: await loadAPIKey() }),
   // Required when running in a browser.
   dangerouslyAllowBrowser: true,
 });

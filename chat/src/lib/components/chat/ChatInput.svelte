@@ -11,31 +11,31 @@
   import ChatErrorBanner from './ChatErrorBanner.svelte';
   import TokenIndicator from './TokenIndicator.svelte';
   import ThinkingToggle from './ThinkingToggle.svelte';
-  import { chatStore } from '$lib/chatStore';
-  import type { AttachedFile, AttachedImage, Message } from '$lib/chatStore';
-  import { countWords } from '$lib/chatStore';
-  import { modelConfig } from '$lib/models';
+  import { chatStore } from '#lib/chatStore.js';
+  import type { AttachedFile, AttachedImage, Message } from '#lib/chatStore.js';
+  import { countWords } from '#lib/chatStore.js';
+  import { modelConfig } from '#lib/models.js';
   import {
     models as modelsStore,
     modelsLoaded,
     modelsLoading,
-  } from '$lib/clientStore';
-  import type { PrivatemodeClient } from '$lib/clientStore';
+  } from '#lib/clientStore.js';
+  import type { PrivatemodeClient } from '#lib/clientStore.js';
   import {
     DEFAULT_TRANSCRIPTION_MODEL_ID,
     getAvailableTranscriptionModels,
     transcriptionModel,
-  } from '$lib/transcriptionStore';
+  } from '#lib/transcriptionStore.js';
   import {
     classifyFiles,
     extractDocumentText,
     readImageAsAttached,
     transcribeAudio,
-  } from '$lib/uploads';
+  } from '#lib/uploads.js';
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
-  import { showToast } from '$lib/toastStore';
-  import { locale, t } from '$lib/i18n';
+  import { showToast } from '#lib/toastStore.js';
+  import { locale, t } from '#lib/i18n.js';
 
   export let privatemodeAIClient: PrivatemodeClient | null;
   export let currentChatId: string | null;

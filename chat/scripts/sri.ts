@@ -103,23 +103,18 @@ export function sriPlugin(): Plugin {
   return {
     name: 'sveltekit-sri',
     apply: 'build',
+    enforce: 'post',
 
     configResolved(config: ResolvedConfig) {
       rootDir = config.root;
     },
 
-    async closeBundle() {
-      const buildDir = join(rootDir, 'build');
-      // SvelteKit runs two Vite builds (client + server). The HTML files
-      // only exist after the adapter runs at the end of the server build,
-      // so we need to wait until then to patch the files.
-      try {
-        const entries = await readdir(buildDir);
-        if (!entries.some((f) => f.endsWith('.html'))) return;
-      } catch {
-        return; // build directory doesn't exist yet (client build phase)
-      }
-      await patchBuildFiles(buildDir);
+    // Kit 3 adapts the completed app in a post-ordered buildApp hook.
+    buildApp: {
+      order: 'post',
+      async handler() {
+        await patchBuildFiles(join(rootDir, 'build'));
+      },
     },
   };
 }

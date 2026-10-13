@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { chatStore } from '$lib/chatStore';
-  import type { Message, AttachedFile, AttachedImage } from '$lib/chatStore';
+  import { chatStore } from '#lib/chatStore.js';
+  import type { Message, AttachedFile, AttachedImage } from '#lib/chatStore.js';
   import ImagePreviewModal from '../common/ImagePreviewModal.svelte';
   import TranscriptionPreviewModal from '../common/TranscriptionPreviewModal.svelte';
   import EmptyState from './EmptyState.svelte';
   import ChatMessage from './ChatMessage.svelte';
-  import { renderMarkdown } from '$lib/markdown';
-  import logoDark from '$lib/assets/favicon-dark.svg';
-  import logoLight from '$lib/assets/favicon-light.svg';
-  import { isDark } from '$lib/themeStore';
-  import { t } from '$lib/i18n';
+  import { renderMarkdown } from '#lib/markdown.js';
+  import logoDark from '#lib/assets/favicon-dark.svg';
+  import logoLight from '#lib/assets/favicon-light.svg';
+  import { isDark } from '#lib/themeStore.js';
+  import { t } from '#lib/i18n.js';
   import 'highlight.js/styles/github-dark.css';
 
   export let chatId: string | null;

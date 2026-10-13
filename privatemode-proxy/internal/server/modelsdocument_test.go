@@ -126,7 +126,7 @@ func TestModelsEndpointRouting(t *testing.T) {
 			defer backend.Close()
 
 			secret := secretmanager.Secret{ID: "123", Data: bytes.Repeat([]byte{0x42}, 32)}
-			sut := newTestServer(nil, secret, backend.Listener.Addr().String(), "", false)
+			sut := newTestServer(nil, secret, backend.Listener.Addr().String(), "")
 			if tc.withDocument {
 				path := filepath.Join(t.TempDir(), "models.json")
 				require.NoError(os.WriteFile(path, []byte(doc), 0o600))

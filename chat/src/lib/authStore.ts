@@ -52,6 +52,7 @@ export async function getAuthCredential(): Promise<AuthCredential> {
     }
     throw new Error('Clerk session present but no token could be resolved');
   }
+  // @ts-expect-error Anonymous auth is supported internally but intentionally excluded from the public SDK types.
   return { type: 'anonymous', value: getAnonymousFingerprint() };
 }
 

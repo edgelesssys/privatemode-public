@@ -1,6 +1,6 @@
 <script lang="ts">
   import Tooltip from '../common/Tooltip.svelte';
-  import { locale, t } from '$lib/i18n';
+  import { locale, t } from '#lib/i18n.js';
 
   export let totalWordCount: number;
   export let maxWords: number;

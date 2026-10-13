@@ -4,8 +4,8 @@
   import FileChip from './FileChip.svelte';
   import ImageChip from './ImageChip.svelte';
   import ThoughtBlock from './ThoughtBlock.svelte';
-  import type { Message, AttachedFile, AttachedImage } from '$lib/chatStore';
-  import { t } from '$lib/i18n';
+  import type { Message, AttachedFile, AttachedImage } from '#lib/chatStore.js';
+  import { t } from '#lib/i18n.js';
 
   export let message: Message & {
     renderedContent: string;

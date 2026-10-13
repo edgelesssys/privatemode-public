@@ -1,8 +1,8 @@
 <script lang="ts">
   import { File, Mic, X } from 'lucide-svelte';
-  import type { AttachedFile } from '$lib/chatStore';
+  import type { AttachedFile } from '#lib/chatStore.js';
   import Tooltip from '../common/Tooltip.svelte';
-  import { t } from '$lib/i18n';
+  import { t } from '#lib/i18n.js';
 
   export let file: AttachedFile;
   export let onPreview: ((file: AttachedFile) => void) | undefined = undefined;

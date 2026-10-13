@@ -5,8 +5,8 @@
     orgId,
     userOrganizations,
     switchOrganization,
-  } from '$lib/authStore';
-  import { t } from '$lib/i18n';
+  } from '#lib/authStore.js';
+  import { t } from '#lib/i18n.js';
 
   let open = false;
   let containerRef: HTMLDivElement | null = null;

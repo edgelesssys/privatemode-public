@@ -6,7 +6,6 @@ Package openai implements an inference API adapter for the [OpenAI API spec].
 package openai
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -17,7 +16,6 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/compat"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
-	"github.com/edgelesssys/continuum/internal/oss/model"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
 	"github.com/tidwall/gjson"
@@ -146,14 +144,13 @@ func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	a.ForwardEncrypted(
 		w, r,
 		a.mutators.AudioStreamUsageReportingInjector,
 		legacyStringDurationMutation(r.Header.Get(constants.PrivatemodeVersionHeader)),
 		nil,
-		extractUnaryTranscriptionUsage,
-		a.extractStreamingTranscriptionUsage(ctx),
+		extractTranscriptionUsage,
+		extractTranscriptionUsage,
 	)
 }
 
@@ -189,6 +186,7 @@ func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 		w, r,
 		forwarder.RequestMutatorChain(
 			a.mutators.CacheSaltValidator,
+			a.mutators.LegacyCacheSaltHasher,
 			a.mutators.MediaContentValidator,
 			a.mutators.StreamUsageReportingInjector,
 		),
@@ -250,7 +248,8 @@ func extractOpenAIUsage(body []byte) (usage.Stats, error) {
 	return parsed.Usage.ToUsageStats(), nil
 }
 
-func extractUnaryTranscriptionUsage(body []byte) (usage.Stats, error) {
+// extractTranscriptionUsage uses vLLM's reported duration for both unary responses and SSE events.
+func extractTranscriptionUsage(body []byte) (usage.Stats, error) {
 	var resp openai.TranscriptionUsageResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return usage.Stats{}, err
@@ -262,39 +261,4 @@ func extractUnaryTranscriptionUsage(body []byte) (usage.Stats, error) {
 	}
 
 	return usage.Stats{AudioSeconds: audioSeconds}, nil
-}
-
-func (a *Adapter) extractStreamingTranscriptionUsage(ctx context.Context) func([]byte) (usage.Stats, error) {
-	return func(body []byte) (usage.Stats, error) {
-		var parsed struct {
-			Model string        `json:"model"`
-			Usage *openai.Usage `json:"usage"`
-		}
-		if err := json.Unmarshal(body, &parsed); err != nil {
-			return usage.Stats{}, err
-		}
-		if parsed.Usage == nil {
-			return usage.Stats{}, inference.ErrNoUsage
-		}
-
-		baseUsage := parsed.Usage.ToUsageStats()
-		modelName := model.Resolve(parsed.Model)
-
-		var audioSeconds int64
-		switch modelName {
-		case model.OpenAIWhisperLargeV3:
-			audioSeconds = baseUsage.PromptTokens / model.TokensPerAudioSecondWhisper
-		case model.VoxtralMini3b:
-			audioSeconds = (baseUsage.PromptTokens - model.TokenOverheadVoxtral) / model.TokensPerAudioSecondVoxtral
-		default:
-			a.Log.WarnContext(
-				ctx,
-				"Unknown transcription model, falling back to Voxtral billing formula",
-				"model", parsed.Model,
-			)
-			audioSeconds = (baseUsage.PromptTokens - model.TokenOverheadVoxtral) / model.TokensPerAudioSecondVoxtral
-		}
-
-		return usage.Stats{AudioSeconds: max(0, audioSeconds)}, nil
-	}
 }

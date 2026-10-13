@@ -1,8 +1,8 @@
 <script lang="ts">
   import { X } from 'lucide-svelte';
-  import { modalFocus } from '$lib/modalFocus';
-  import type { AttachedImage } from '$lib/chatStore';
-  import { t } from '$lib/i18n';
+  import { modalFocus } from '#lib/modalFocus.js';
+  import type { AttachedImage } from '#lib/chatStore.js';
+  import { t } from '#lib/i18n.js';
 
   export let image: AttachedImage;
   export let onClose: () => void;

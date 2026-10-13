@@ -1,6 +1,41 @@
 import { expect, test } from '@playwright/test';
+import { createHash } from 'node:crypto';
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { modelConfig } from '../src/lib/models';
 import * as web from './helpers/web';
+
+test('static build protects every JavaScript module with SRI', async () => {
+  const buildDir = process.env.WEB_APP_DIR ?? 'build';
+  const html = await readFile(join(buildDir, 'index.html'), 'utf8');
+  const maps = [
+    ...html.matchAll(/<script type="importmap">([\s\S]*?)<\/script>/g),
+  ];
+  expect(maps).toHaveLength(1);
+  const { integrity } = JSON.parse(maps[0][1]);
+  const assetDir = join(buildDir, '_app/immutable');
+  const modules = (await readdir(assetDir, { recursive: true })).filter(
+    (file) => file.endsWith('.js'),
+  );
+  expect(modules.length).toBeGreaterThan(0);
+  expect(Object.keys(integrity)).toHaveLength(modules.length);
+  for (const file of modules) {
+    const bytes = await readFile(join(assetDir, file));
+    const hash = createHash('sha384').update(bytes).digest('base64');
+    expect(integrity[`/_app/immutable/${file}`]).toBe(`sha384-${hash}`);
+  }
+
+  const preloads = html.match(/<link\b[^>]*\brel="modulepreload"[^>]*>/g) ?? [];
+  expect(preloads.length).toBeGreaterThan(0);
+  for (const link of preloads) {
+    const href = link.match(/\bhref="([^"]+)"/)?.[1];
+    expect(href).toBeTruthy();
+    const bytes = await readFile(join(buildDir, href!));
+    const hash = createHash('sha384').update(bytes).digest('base64');
+    expect(link).toContain(`integrity="sha384-${hash}"`);
+    expect(link).toMatch(/\scrossorigin(?:\s|=|>)/);
+  }
+});
 
 test('should provide localized system prompts for every model', () => {
   for (const model of Object.values(modelConfig)) {

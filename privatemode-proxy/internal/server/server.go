@@ -57,7 +57,6 @@ type Server struct {
 	forwarder                    apiForwarder
 	sm                           secretManager
 	log                          *slog.Logger
-	isApp                        bool
 	nvidiaOCSPAllowUnknown       bool
 	nvidiaOCSPRevokedGracePeriod time.Duration
 	dumpRequestsDir              string
@@ -74,12 +73,11 @@ type Opts struct {
 	ProtocolScheme               forwarder.ProtocolScheme
 	PromptCacheSalt              string
 	PromptCacheSaltFromAPIKey    bool
-	IsApp                        bool
 	NvidiaOCSPAllowUnknown       bool
 	NvidiaOCSPRevokedGracePeriod time.Duration
 	DumpRequestsDir              string
 	CORSAllowedOrigins           []string
-	// ClientID overrides the Privatemode-Client header value. Empty keeps the App/Proxy default.
+	// ClientID overrides the Privatemode-Client header value. Empty keeps the Proxy default.
 	ClientID string
 	// ModelsDocument, if set, is served at the models endpoint instead of forwarding the request.
 	ModelsDocument *ModelsDocument
@@ -114,7 +112,6 @@ func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Se
 		forwarder:                    fwd,
 		sm:                           sm,
 		log:                          log,
-		isApp:                        opts.IsApp,
 		nvidiaOCSPAllowUnknown:       opts.NvidiaOCSPAllowUnknown,
 		nvidiaOCSPRevokedGracePeriod: opts.NvidiaOCSPRevokedGracePeriod,
 		dumpRequestsDir:              opts.DumpRequestsDir,
@@ -426,10 +423,6 @@ func (s *Server) getClientHeader() string {
 	if s.clientID != "" {
 		return s.clientID
 	}
-	if s.isApp {
-		return constants.PrivatemodeClientApp
-	}
-
 	return constants.PrivatemodeClientProxy
 }
 

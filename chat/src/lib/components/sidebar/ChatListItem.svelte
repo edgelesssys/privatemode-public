@@ -1,8 +1,8 @@
 <script lang="ts">
   import { Pencil, Trash2 } from 'lucide-svelte';
   import Tooltip from '../common/Tooltip.svelte';
-  import type { Chat } from '$lib/chatStore';
-  import { t } from '$lib/i18n';
+  import type { Chat } from '#lib/chatStore.js';
+  import { t } from '#lib/i18n.js';
 
   export let chat: Chat;
   export let active: boolean;

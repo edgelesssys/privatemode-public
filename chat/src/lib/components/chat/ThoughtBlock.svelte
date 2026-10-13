@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Brain } from 'lucide-svelte';
-  import { locale, t } from '$lib/i18n';
+  import { locale, t } from '#lib/i18n.js';
 
   export let renderedReasoning: string;
   export let isStreaming: boolean;

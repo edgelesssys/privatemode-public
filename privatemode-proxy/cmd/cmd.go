@@ -310,7 +310,6 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("setting up secret manager configuration: %w", err)
 	}
-	const isApp = false
 
 	listenEndpoint := net.JoinHostPort(listenAddress, port)
 	lis, err := net.Listen("tcp", listenEndpoint)
@@ -329,7 +328,7 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 
 	wg.Go(func() {
 		err = setup.
-			NewServer(flags, isApp, manager, log).
+			NewServer(flags, manager, log).
 			Serve(cmd.Context(), lis, tlsConfig)
 	})
 

@@ -5,6 +5,7 @@ package openai
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -69,6 +70,51 @@ func TestRequestMutationValidationStatus(t *testing.T) {
 			fwd := forwarder.New(nil, "upstream", forwarder.SchemeHTTP, log)
 			fwd.Forward(resp, req, tc.mutator, forwarder.PassthroughResponseMapper)
 			assert.Equal(t, http.StatusBadRequest, resp.Code)
+		})
+	}
+}
+
+func TestLegacyCacheSaltHasher(t *testing.T) {
+	salt := "Jp3c/Hn9Q2tWkx8aVb4ZrL6mYe0sTfUg1iOqP7dNwE5="
+	digest := sha256.Sum256([]byte(salt))
+	hashed := base64.URLEncoding.EncodeToString(digest[:])
+
+	testCases := map[string]struct {
+		clientVersion string
+		body          string
+		wantBody      string
+	}{
+		"client before v1.58 gets the salt hashed": {
+			clientVersion: "v1.57.2",
+			body:          `{"model":"model","cache_salt":"` + salt + `"}`,
+			wantBody:      `{"model":"model","cache_salt":"` + hashed + `"}`,
+		},
+		"client v1.58 keeps its salt": {
+			clientVersion: "v1.58.0",
+			body:          `{"model":"model","cache_salt":"` + salt + `"}`,
+			wantBody:      `{"model":"model","cache_salt":"` + salt + `"}`,
+		},
+		"body without salt is unchanged": {
+			clientVersion: "v1.57.2",
+			body:          `{"model":"model"}`,
+			wantBody:      `{"model":"model"}`,
+		},
+		"empty body is unchanged": {
+			clientVersion: "v1.57.2",
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(tc.body))
+			req.Header.Set(constants.PrivatemodeVersionHeader, tc.clientVersion)
+
+			require.NoError(LegacyCacheSaltHasher(slog.Default())(req))
+
+			after, err := io.ReadAll(req.Body)
+			require.NoError(err)
+			assert.Equal(t, tc.wantBody, string(after))
 		})
 	}
 }

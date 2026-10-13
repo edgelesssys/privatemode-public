@@ -41,7 +41,7 @@ type ContrastFlags struct {
 }
 
 // NewServer creates a new server instance.
-func NewServer(flags Flags, isApp bool, manager *secretmanager.SecretManager, log *slog.Logger) *server.Server {
+func NewServer(flags Flags, manager *secretmanager.SecretManager, log *slog.Logger) *server.Server {
 	transport := httputil.NewTransport()
 	// Non-streaming inference can be silent for more than ten minutes. Allow one hour,
 	// consistent with the load balancer's tunnel timeout, without limiting response body duration.
@@ -58,7 +58,6 @@ func NewServer(flags Flags, isApp bool, manager *secretmanager.SecretManager, lo
 		ProtocolScheme:               forwarder.SchemeHTTPS,
 		PromptCacheSalt:              flags.PromptCacheSalt,
 		PromptCacheSaltFromAPIKey:    flags.PromptCacheSaltFromAPIKey,
-		IsApp:                        isApp,
 		NvidiaOCSPAllowUnknown:       flags.NvidiaOCSPAllowUnknown,
 		NvidiaOCSPRevokedGracePeriod: flags.NvidiaOCSPRevokedGracePeriod,
 		DumpRequestsDir:              flags.DumpRequestsDir,

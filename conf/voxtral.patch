@@ -1,13 +1,13 @@
 diff --git a/vllm/entrypoints/speech_to_text/base/serving.py b/vllm/entrypoints/speech_to_text/base/serving.py
-index b1d3b72777..95afb2a643 100644
+index a52aa7b80f..27310ddeee 100644
 --- a/vllm/entrypoints/speech_to_text/base/serving.py
 +++ b/vllm/entrypoints/speech_to_text/base/serving.py
-@@ -30,13 +30,13 @@ from vllm.entrypoints.serve.engine.typing import SpeechToTextRequest
+@@ -29,13 +29,13 @@ from vllm.entrypoints.serve.engine.typing import SpeechToTextRequest
  from vllm.entrypoints.serve.utils.api_utils import get_max_tokens
  from vllm.entrypoints.serve.utils.request_logger import RequestLogger
  from vllm.exceptions import VLLMValidationError
 -from vllm.inputs import EncoderDecoderInput, EngineInput
-+from vllm.inputs import EncoderDecoderInput, EngineInput, PromptType
++from vllm.inputs import EncoderDecoderInput, EngineInput, PromptType, TokensPrompt
  from vllm.logger import init_logger
  from vllm.logprobs import FlatLogprobs, Logprob
  from vllm.model_executor.models import SupportsTranscription
@@ -18,7 +18,7 @@ index b1d3b72777..95afb2a643 100644
  from vllm.renderers.inputs.preprocess import parse_enc_dec_prompt, parse_model_prompt
  from vllm.sampling_params import BeamSearchParams, SamplingParams
  from vllm.tokenizers import get_tokenizer
-@@ -173,6 +173,185 @@ def decode_audio(
+@@ -172,6 +172,185 @@ def decode_audio(
          raise ValueError("Invalid or unsupported audio file.") from exc
  
  
@@ -204,7 +204,7 @@ index b1d3b72777..95afb2a643 100644
  class SpeechToTextBaseServing(GenerateBaseServing):
      """Base class for speech-to-text operations like transcription and
      translation."""
-@@ -386,8 +565,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -377,8 +556,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
  
              parsed_prompt: DictPrompt
              if request.response_format == "verbose_json":
@@ -214,7 +214,7 @@ index b1d3b72777..95afb2a643 100644
              else:
                  parsed_prompt = parse_model_prompt(self.model_config, prompt)
  
-@@ -397,8 +575,18 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -388,8 +566,20 @@ class SpeechToTextBaseServing(GenerateBaseServing):
  
          return engine_inputs, duration, chunk_start_offsets
  
@@ -227,7 +227,9 @@ index b1d3b72777..95afb2a643 100644
 +            and "prompt_token_ids" in prompt
 +            and "voxtral" in self.model_cls.__name__.lower()
 +        ):
-+            prompt["prompt_token_ids"].extend(voxtralInitTokens(self.tokenizer))
++            cast(TokensPrompt, prompt)["prompt_token_ids"].extend(
++                voxtralInitTokens(self.tokenizer)
++            )
 +            return prompt
 +
 +        parsed = parse_enc_dec_prompt(prompt)
@@ -235,7 +237,7 @@ index b1d3b72777..95afb2a643 100644
  
          if not (isinstance(dec_prompt, dict) and "prompt" in dec_prompt):
              raise VLLMValidationError(
-@@ -411,7 +599,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -402,7 +592,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
              "<|notimestamps|>", "<|0.00|>"
          )
  
@@ -244,7 +246,7 @@ index b1d3b72777..95afb2a643 100644
  
      @staticmethod
      def _get_decoder_prompt_len(engine_inputs: list[EngineInput]) -> int:
-@@ -453,6 +641,69 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -443,6 +633,69 @@ class SpeechToTextBaseServing(GenerateBaseServing):
          Note: No_speech_prob field is not supported
          in this implementation and will be None. See docs for details.
          """
@@ -315,10 +317,10 @@ index b1d3b72777..95afb2a643 100644
          init_token = self.tokenizer.encode("<|0.00|>", add_special_tokens=False)[0]
          if tokens[-1] == self.tokenizer.eos_token_id:
 diff --git a/vllm/model_executor/models/voxtral.py b/vllm/model_executor/models/voxtral.py
-index 5be82632f4..56198535d0 100644
+index c65dc38298..7ef37cdfd7 100644
 --- a/vllm/model_executor/models/voxtral.py
 +++ b/vllm/model_executor/models/voxtral.py
-@@ -312,6 +312,7 @@ class VoxtralForConditionalGeneration(
+@@ -305,6 +305,7 @@ class VoxtralForConditionalGeneration(
      # transformers' currently has limited support for MistralCommon backend
      # and cached_get_processor. Let's skip until fixed
      skip_warmup_audio_preprocessing = True
@@ -326,7 +328,7 @@ index 5be82632f4..56198535d0 100644
  
      packed_modules_mapping = {
          "qkv_proj": ["q_proj", "k_proj", "v_proj"],
-@@ -439,13 +440,18 @@ class VoxtralForConditionalGeneration(
+@@ -432,13 +433,18 @@ class VoxtralForConditionalGeneration(
      ) -> SpeechToTextConfig:
          tokenizer = cached_tokenizer_from_config(model_config)
          audio_config = tokenizer.instruct.audio_encoder.audio_config

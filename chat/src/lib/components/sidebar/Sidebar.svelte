@@ -1,14 +1,14 @@
 <script lang="ts">
   import { ChevronRight, ChevronLeft, MessageCirclePlus } from 'lucide-svelte';
-  import { chatStore } from '$lib/chatStore';
+  import { chatStore } from '#lib/chatStore.js';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
-  import { page } from '$app/stores';
+  import { page } from '$app/state';
   import SidebarLogo from './SidebarLogo.svelte';
   import ChatList from './ChatList.svelte';
   import InfoSection from './InfoSection.svelte';
   import AuthSection from './AuthSection.svelte';
-  import { t } from '$lib/i18n';
+  import { t } from '#lib/i18n.js';
 
   export let onNewChat: () => void = () => {};
   export let onSelectChat: (chatId: string) => void = () => {};
@@ -21,7 +21,7 @@
   $: effectiveCollapsed = mobileOpen ? false : collapsed;
 
   function handleNewChat() {
-    if ($page.url.pathname !== '/') {
+    if (page.url.pathname !== '/') {
       goto(resolve('/'));
     }
     onNewChat();
@@ -29,7 +29,7 @@
   }
 
   function handleSelectChat(chatId: string) {
-    if ($page.url.pathname !== '/') {
+    if (page.url.pathname !== '/') {
       chatStore.currentChatId.set(chatId);
       goto(resolve('/'));
     } else {

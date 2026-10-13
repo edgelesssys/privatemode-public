@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,8 @@ import (
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 
+	"github.com/edgelesssys/continuum/internal/oss/compat"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
@@ -262,6 +265,7 @@ type DefaultRequestMutators struct {
 	AudioStreamUsageReportingInjector forwarder.RequestMutator // AudioStreamUsageReportingInjector ensures vLLM includes usage stats in streaming audio responses.
 	CacheSaltInjector                 forwarder.RequestMutator // CacheSaltInjector ensures a vLLM prompt cache salt is set.
 	CacheSaltValidator                forwarder.RequestMutator // CacheSaltValidator validates the vLLM prompt cache set.
+	LegacyCacheSaltHasher             forwarder.RequestMutator // LegacyCacheSaltHasher makes the cache salt of clients before v1.58 acceptable to vLLM.
 	MediaContentValidator             forwarder.RequestMutator // MediaContentValidator enforces the policy on media content blocks in the request.
 	StreamUsageReportingInjector      forwarder.RequestMutator // StreamUsageReportingInjector ensures vLLM includes usage stats in streaming completion responses.
 }
@@ -272,6 +276,7 @@ func GetDefaultRequestMutators(cacheSaltGenerator CacheSaltGenerator, log *slog.
 		AudioStreamUsageReportingInjector: AudioStreamUsageReportingInjector(log),
 		CacheSaltInjector:                 CacheSaltInjector(cacheSaltGenerator, log),
 		CacheSaltValidator:                CacheSaltValidator(log),
+		LegacyCacheSaltHasher:             LegacyCacheSaltHasher(log),
 		MediaContentValidator:             MediaContentValidator(log),
 		StreamUsageReportingInjector:      StreamUsageReportingInjector(log),
 	}
@@ -319,6 +324,32 @@ func CacheSaltValidator(log *slog.Logger) forwarder.RequestMutator {
 	}
 
 	return forwarder.WithRequestMutation(validateSalt, log)
+}
+
+// LegacyCacheSaltHasher creates a [forwarder.RequestMutator] that replaces the cache salt of
+// clients before v1.58 with its base64url-encoded SHA-256 digest. They send standard base64 salts,
+// and vLLM (>= v0.30) rejects the roughly half of them that contain '/'.
+// TODO: drop this once the minimum client version is past v1.57.
+func LegacyCacheSaltHasher(log *slog.Logger) forwarder.RequestMutator {
+	hashSalt := forwarder.WithRequestMutation(func(httpBody string) (string, error) {
+		cacheSalt := gjson.Get(httpBody, "cache_salt")
+		if !cacheSalt.Exists() {
+			return httpBody, nil
+		}
+		digest := sha256.Sum256([]byte(cacheSalt.String()))
+		mutatedBody, err := sjson.Set(httpBody, "cache_salt", base64.URLEncoding.EncodeToString(digest[:]))
+		if err != nil {
+			return "", fmt.Errorf("hashing cache salt: %w", err)
+		}
+		return mutatedBody, nil
+	}, log)
+
+	return func(r *http.Request) error {
+		if compat.AtLeastMajorMinor(r.Header.Get(constants.PrivatemodeVersionHeader), 1, 58) {
+			return nil
+		}
+		return hashSalt(r)
+	}
 }
 
 // MediaContentValidator creates a [forwarder.RequestMutator] that enforces policy on media

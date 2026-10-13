@@ -1,9 +1,9 @@
 <script lang="ts">
-  import sidebarLogoDark from '$lib/assets/logo-text.svg';
-  import sidebarLogoLight from '$lib/assets/logo-text-light.svg';
-  import sidebarLogoSmallDark from '$lib/assets/logo.svg';
-  import sidebarLogoSmallLight from '$lib/assets/logo-light.svg';
-  import { isDark } from '$lib/themeStore';
+  import sidebarLogoDark from '#lib/assets/logo-text.svg';
+  import sidebarLogoLight from '#lib/assets/logo-text-light.svg';
+  import sidebarLogoSmallDark from '#lib/assets/logo.svg';
+  import sidebarLogoSmallLight from '#lib/assets/logo-light.svg';
+  import { isDark } from '#lib/themeStore.js';
 
   export let collapsed: boolean;
 

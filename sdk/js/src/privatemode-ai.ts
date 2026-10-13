@@ -7,19 +7,13 @@ import {
   type WasmClient,
 } from './wasm.js';
 
-/**
- * An authentication credential for the Privatemode API. Privatemode supports
- * authenticating with an API key, a Clerk session JWT, or anonymously.
- */
+/** An authentication credential for the Privatemode API. */
 export type AuthCredential =
-  | { type: 'apiKey'; value: string }
-  | { type: 'jwt'; value: string }
-  | { type: 'anonymous'; value: string };
+  { type: 'apiKey'; value: string } | { type: 'jwt'; value: string };
 
 /**
  * A function that returns the credential to authenticate the next request with.
- * It's invoked before every request, so it can return short-lived credentials
- * (such as JWTs) that are refreshed over time.
+ * It's invoked before every request, so credentials can be refreshed over time.
  */
 export type AuthProvider = () => AuthCredential | Promise<AuthCredential>;
 
@@ -33,8 +27,7 @@ export interface PrivatemodeCoreOptions {
 
   /**
    * Authentication provider, invoked before every request to obtain the
-   * credential to use. Use this to authenticate with a Clerk JWT or
-   * anonymously, or to rotate short-lived credentials. Mutually exclusive
+   * credential to use. Use this to rotate credentials. Mutually exclusive
    * with {@link apiKey}.
    */
   auth?: AuthProvider;

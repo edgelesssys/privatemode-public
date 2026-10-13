@@ -1,8 +1,8 @@
 <script lang="ts">
   import { X } from 'lucide-svelte';
-  import type { AttachedImage } from '$lib/chatStore';
+  import type { AttachedImage } from '#lib/chatStore.js';
   import Tooltip from '../common/Tooltip.svelte';
-  import { t } from '$lib/i18n';
+  import { t } from '#lib/i18n.js';
 
   export let image: AttachedImage;
   export let onPreview: ((image: AttachedImage) => void) | undefined =

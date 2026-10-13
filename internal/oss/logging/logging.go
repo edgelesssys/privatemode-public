@@ -166,8 +166,7 @@ func NewFileLogger(logLevel string, output io.Writer, filename string) *slog.Log
 }
 
 // NewHTTPErrorLogger returns a [*log.Logger] suitable for usage as an error logger for http servers.
-// The logger filters out TLS handshake errors, which are common for servers exposed on public endpoints,
-// or TLS endpoints that are scraped by Prometheus.
+// The logger logs common benign HTTP server errors as info.
 //
 // The logger sets the attribute "source" to "httpErrorLog".
 // Additional attributes may be provided to add to the logger, e.g. "component", "usageCollector".
@@ -185,12 +184,23 @@ type httpLogger struct {
 	errorLog *log.Logger
 }
 
+var httpInfoLogPrefixes = []string{
+	// Common for servers exposed on public endpoints or TLS endpoints scraped by Prometheus.
+	"http: TLS handshake error from",
+
+	// GOAWAY asks to gracefully stop accepting new requests or streams on the current connection
+	// while allowing active streams to finish.
+	"http2: received GOAWAY",
+}
+
 func (h *httpLogger) Write(b []byte) (n int, err error) {
 	s := string(b)
-	if strings.HasPrefix(s, "http: TLS handshake error from") {
-		h.infoLog.Print(s)
-	} else {
-		h.errorLog.Print(s)
+	for _, prefix := range httpInfoLogPrefixes {
+		if strings.HasPrefix(s, prefix) {
+			h.infoLog.Print(s)
+			return len(b), nil
+		}
 	}
+	h.errorLog.Print(s)
 	return len(b), nil
 }

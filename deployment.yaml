@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: secret-service
-  namespace: continuum-0a7a47
+  namespace: continuum-7a3b43
   labels:
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
 spec:
   replicas: 3
   serviceName: secret-service-headless
@@ -15,14 +15,14 @@ spec:
     metadata:
       labels:
         app: secret-service
-        app.kubernetes.io/instance: '0a7a47'
+        app.kubernetes.io/instance: '7a3b43'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
     spec:
       runtimeClassName: contrast-cc
       containers:
         - name: secret-service
-          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.58.0@sha256:d26b0e1c0e98360c0d253c728f678988971125891d3a52c2329c37f2afb6d004'
+          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.59.0@sha256:d70103e2ff3bf969c6299f31cea15ff6743d40c8490989b97f71e076e16f49bb'
           resources:
             requests:
               memory: 2Gi
@@ -32,7 +32,7 @@ spec:
           args:
             - |
               exec /bin/secret-service \
-                --k8s-namespace=continuum-0a7a47 \
+                --k8s-namespace=continuum-7a3b43 \
                 $([ "${HOSTNAME##*-}" = "0" ] && echo "--may-bootstrap") \
                 --etcd-server-cert=/contrast/tls-config/certChain.pem \
                 --etcd-server-key=/contrast/tls-config/key.pem \
@@ -66,12 +66,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-deepseek-ocr-2
-  namespace: continuum-0a7a47
+  namespace: continuum-7a3b43
   labels:
     app: workload-deepseek-ocr-2
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: workload-deepseek-ocr-2
@@ -79,7 +78,7 @@ spec:
     metadata:
       labels:
         app: workload-deepseek-ocr-2
-        app.kubernetes.io/instance: '0a7a47'
+        app.kubernetes.io/instance: '7a3b43'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -92,7 +91,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-snp-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.58.0@sha256:68217462ee84c01aade6c0c100d206d209ed1736cd9374f72a4383b851bb6ae6
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.59.0@sha256:0b55b0805bb862d6ae317202b8a9f718a9bfbaa6f9ccf24a1aca51a0f5a5c112
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -111,7 +110,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.58.0@sha256:42d8be0026189593a17c213a4affc30c655dcd4d3a491d18d5220a701d07c0ae
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.59.0@sha256:b98a49fe92e6857edaaf1825b51dfe732885329e529a8e0b509130515fcb4651
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -128,7 +127,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-deepseek-ocr-2-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.58.0@sha256:8c99d72b25693000f89c902c93796441695fe6b8e76599e656c50f127c1bd7e8
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.59.0@sha256:99aea95418f72c5d71e4ae60bafe19c38a86acc4ad0abfcc7ac5c477b7538ffd
           args:
             - 'deepseek-ocr-2'
             - '0'
@@ -145,7 +144,20 @@ spec:
               devicePath: /dev/modelweights-deepseek-ocr-2-0
       containers:
         - name: workload-deepseek-ocr-2-0
-          image: docker.io/vllm/vllm-openai:v0.28.0@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14
+          image: docker.io/vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_ADMIN
+                - CHOWN
+                - SETUID
+                - SETGID
+                - SETPCAP
           readinessProbe:
             httpGet:
               path: /workload-readyz
@@ -184,6 +196,10 @@ spec:
               value: /vllm-workspace
             - name: PRIVATEMODE_STAT_LOGGER_URL
               value: 'http://127.0.0.1:8285/SubmitStatsEvents'
+            - name: TRITON_ALLOW_NON_CONSTEXPR_GLOBALS
+              value: "1"
+            - name: VLLM_USE_V2_MODEL_RUNNER
+              value: "0"
             - name: OTEL_SERVICE_NAME
               value: 'vllm-deepseek-ocr-2'
             - name: OTEL_EXPORTER_OTLP_TRACES_INSECURE
@@ -209,18 +225,38 @@ spec:
               echo "Installing privatemode_stat_logger_pyproject.toml"
               install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger_pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
               if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode_stat_logger_pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing stop_token_ids_validation.patch"
-              install -D -m 644 /untrusted-vllm-patch/stop_token_ids_validation.patch /vllm-workspace/stop_token_ids_validation.patch
-              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '1c70a4cf0fb6fe94cbec6c264dca70c6108b2592fc62f217140df46a69ce73a1' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/stop_token_ids_validation.patch
+              echo "Installing restrict-vllm-network.py"
+              install -D -m 644 /untrusted-vllm-patch/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
+              if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing skip_special_tokens.patch"
               install -D -m 644 /untrusted-vllm-patch/skip_special_tokens.patch /vllm-workspace/skip_special_tokens.patch
-              if [ $(sha256sum /vllm-workspace/skip_special_tokens.patch | cut -d ' ' -f 1) != '4b58015542518f04aa2212d2d3886a19eeeb93d18d457b0ee9fbf6494eac3eac' ]; then echo skip_special_tokens.patch hash mismatch: $(sha256sum /vllm-workspace/skip_special_tokens.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/skip_special_tokens.patch | cut -d ' ' -f 1) != '82e3269ef4ffd41c0670253cf2c37474118ab1615b3dca0a2bf2f2e1be15dbe7' ]; then echo skip_special_tokens.patch hash mismatch: $(sha256sum /vllm-workspace/skip_special_tokens.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/skip_special_tokens.patch
+              echo "Installing anthropic_usage_stream.patch"
+              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
+              echo "Installing dump_input_anonymization.patch"
+              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
+              echo "Installing slot_mapping_block_table_bounds.patch"
+              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
+              echo "Installing transcriptions_stream_usage.patch"
+              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               # --no-build-isolation builds without a venv using setuptools.
               # --offline verifies the declared dependencies are present without using network.
               uv pip install --system --no-build-isolation --offline /vllm-workspace/privatemode-stat-logger
-              exec vllm serve "$@"
+              # Each model gets a separate UID for independent bootstrap and restarts.
+              vllm_uid=10001
+              python3 -I -S /vllm-workspace/restrict-vllm-network.py "$vllm_uid"
+              exec env HOME=/vllm-workspace setpriv --reuid="$vllm_uid" --regid="$vllm_uid" --clear-groups \
+                --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs \
+                vllm serve "$@"
             - _
           args:
             - '/mnt/modelweights-deepseek-ocr-2-0'
@@ -263,7 +299,7 @@ spec:
               memory: 64Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-deepseek-ocr-2-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.58.0@sha256:13228c4300ecf2723bf1c01a3c831f84bf08622f4fe30a6779c6ffa067ff22f8
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.59.0@sha256:88d280c89f3e764cc4eb4d5ed486ff2cecb1145ff4c797977407af943b379aa0
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -279,7 +315,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/deepseek-ocr-2-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-0a7a47.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-7a3b43.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -287,7 +323,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,vision'
-            - '--usage-collector-endpoint=usage-collector.continuum-0a7a47.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-7a3b43.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -361,12 +397,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-glm-5-3
-  namespace: continuum-0a7a47
+  namespace: continuum-7a3b43
   labels:
     app: workload-glm-5-3
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: workload-glm-5-3
@@ -374,7 +409,7 @@ spec:
     metadata:
       labels:
         app: workload-glm-5-3
-        app.kubernetes.io/instance: '0a7a47'
+        app.kubernetes.io/instance: '7a3b43'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -387,7 +422,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-tdx-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.58.0@sha256:68217462ee84c01aade6c0c100d206d209ed1736cd9374f72a4383b851bb6ae6
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.59.0@sha256:0b55b0805bb862d6ae317202b8a9f718a9bfbaa6f9ccf24a1aca51a0f5a5c112
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -406,7 +441,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.58.0@sha256:42d8be0026189593a17c213a4affc30c655dcd4d3a491d18d5220a701d07c0ae
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.59.0@sha256:b98a49fe92e6857edaaf1825b51dfe732885329e529a8e0b509130515fcb4651
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -423,7 +458,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-glm-5-3-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.58.0@sha256:8c99d72b25693000f89c902c93796441695fe6b8e76599e656c50f127c1bd7e8
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.59.0@sha256:99aea95418f72c5d71e4ae60bafe19c38a86acc4ad0abfcc7ac5c477b7538ffd
           command:
             - /bin/sh
             - -ec
@@ -447,7 +482,7 @@ spec:
               devicePath: /dev/modelweights-glm-5.3-0
       containers:
         - name: workload-glm-5-3-0
-          image: docker.io/vllm/vllm-openai:v0.28.0@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14
+          image: docker.io/vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -507,6 +542,10 @@ spec:
               value: "60"
             - name: VLLM_MEM_POLL_SNAPSHOT
               value: "0"
+            - name: VLLM_USE_BREAKABLE_CUDAGRAPH
+              value: "0"
+            - name: VLLM_USE_V2_MODEL_RUNNER
+              value: "0"
             - name: OTEL_SERVICE_NAME
               value: 'vllm-glm-5.3'
             - name: OTEL_EXPORTER_OTLP_TRACES_INSECURE
@@ -535,23 +574,30 @@ spec:
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing sitecustomize.py"
               install -D -m 644 /untrusted-vllm-patch/sitecustomize.py /vllm-workspace/sitecustomize.py
-              if [ $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1) != 'b3c9f7587e6b27c7cf7869df880500b364955c6792a89674390d5edaf06fec13' ]; then echo sitecustomize.py hash mismatch: $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing stop_token_ids_validation.patch"
-              install -D -m 644 /untrusted-vllm-patch/stop_token_ids_validation.patch /vllm-workspace/stop_token_ids_validation.patch
-              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '1c70a4cf0fb6fe94cbec6c264dca70c6108b2592fc62f217140df46a69ce73a1' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/stop_token_ids_validation.patch
+              if [ $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1) != 'f215015407e39580e2b8f709981034c4586c4c421caaefa76b72f076a998a62d' ]; then echo sitecustomize.py hash mismatch: $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing chat_template_glm-5.3.jinja"
+              install -D -m 644 /untrusted-vllm-patch/chat_template_glm-5.3.jinja /vllm-workspace/chat_template_glm-5.3.jinja
+              if [ $(sha256sum /vllm-workspace/chat_template_glm-5.3.jinja | cut -d ' ' -f 1) != '3740abcea51c45830cb3ca562084ad5fb2ef53589376f73332e9886f93ade41c' ]; then echo chat_template_glm-5.3.jinja hash mismatch: $(sha256sum /vllm-workspace/chat_template_glm-5.3.jinja | cut -d ' ' -f 1); exit 1; fi
               echo "Installing repetition_detection_cap.patch"
               install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
-              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != 'c3b0dcc32d989d678544e459b1de01e0acafa81f5531e00b8e2a4c6960aa7410' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
-              echo "Installing reasoning_marker_detokenize.patch"
-              install -D -m 644 /untrusted-vllm-patch/reasoning_marker_detokenize.patch /vllm-workspace/reasoning_marker_detokenize.patch
-              if [ $(sha256sum /vllm-workspace/reasoning_marker_detokenize.patch | cut -d ' ' -f 1) != '0f794067f1e6a5daa9a5895291b1ee825f629d0af813a7019b5833630e62e0e3' ]; then echo reasoning_marker_detokenize.patch hash mismatch: $(sha256sum /vllm-workspace/reasoning_marker_detokenize.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/reasoning_marker_detokenize.patch
-              echo "Installing sparse_mla_dcp.patch"
-              install -D -m 644 /untrusted-vllm-patch/sparse_mla_dcp.patch /vllm-workspace/sparse_mla_dcp.patch
-              if [ $(sha256sum /vllm-workspace/sparse_mla_dcp.patch | cut -d ' ' -f 1) != 'b46a5ed739e30ee14052d64b0a17db99c25678c6bafc6c5598be3e1894175be8' ]; then echo sparse_mla_dcp.patch hash mismatch: $(sha256sum /vllm-workspace/sparse_mla_dcp.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/sparse_mla_dcp.patch
+              echo "Installing anthropic_usage_stream.patch"
+              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
+              echo "Installing dump_input_anonymization.patch"
+              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
+              echo "Installing slot_mapping_block_table_bounds.patch"
+              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
+              echo "Installing transcriptions_stream_usage.patch"
+              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               # --no-build-isolation builds without a venv using setuptools.
               # --offline verifies the declared dependencies are present without using network.
               uv pip install --system --no-build-isolation --offline /vllm-workspace/privatemode-stat-logger
@@ -574,8 +620,7 @@ spec:
             - '--max-num-seqs=500'
             - '--max-num-batched-tokens=8192'
             - '--max-model-len=1048576'
-            - '--chat-template'
-            - '/mnt/modelweights-glm-5.3-0/chat_template.jinja'
+            - '--chat-template=/vllm-workspace/chat_template_glm-5.3.jinja'
             - '--enable-auto-tool-choice'
             - '--tool-call-parser'
             - 'glm47'
@@ -625,7 +670,7 @@ spec:
               memory: 120Gi
               "nvidia.com/GB100_B200": 4
         - name: inference-proxy-glm-5-3-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.58.0@sha256:13228c4300ecf2723bf1c01a3c831f84bf08622f4fe30a6779c6ffa067ff22f8
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.59.0@sha256:88d280c89f3e764cc4eb4d5ed486ff2cecb1145ff4c797977407af943b379aa0
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -641,7 +686,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/glm-5-3-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-0a7a47.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-7a3b43.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -649,7 +694,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling'
-            - '--usage-collector-endpoint=usage-collector.continuum-0a7a47.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-7a3b43.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -723,12 +768,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-glm-5-3-flash
-  namespace: continuum-0a7a47
+  namespace: continuum-7a3b43
   labels:
     app: workload-glm-5-3-flash
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: workload-glm-5-3-flash
@@ -736,7 +780,7 @@ spec:
     metadata:
       labels:
         app: workload-glm-5-3-flash
-        app.kubernetes.io/instance: '0a7a47'
+        app.kubernetes.io/instance: '7a3b43'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -749,7 +793,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-tdx-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.58.0@sha256:68217462ee84c01aade6c0c100d206d209ed1736cd9374f72a4383b851bb6ae6
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.59.0@sha256:0b55b0805bb862d6ae317202b8a9f718a9bfbaa6f9ccf24a1aca51a0f5a5c112
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -768,7 +812,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.58.0@sha256:42d8be0026189593a17c213a4affc30c655dcd4d3a491d18d5220a701d07c0ae
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.59.0@sha256:b98a49fe92e6857edaaf1825b51dfe732885329e529a8e0b509130515fcb4651
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -785,7 +829,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-glm-5-3-flash-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.58.0@sha256:8c99d72b25693000f89c902c93796441695fe6b8e76599e656c50f127c1bd7e8
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.59.0@sha256:99aea95418f72c5d71e4ae60bafe19c38a86acc4ad0abfcc7ac5c477b7538ffd
           command:
             - /bin/sh
             - -ec
@@ -796,7 +840,7 @@ spec:
           args:
             - 'glm-5.3-flash'
             - '0'
-            - 'cf61e9b6c80c3bed9524c972aa89610a7c691d0ff00cb42774eb0083a8100591'
+            - 'c5dcd713fffc38c956bbd41fb299c360ed07d60de61938a6ff2729f6c3acd245'
           restartPolicy: Always
           securityContext:
             privileged: true
@@ -809,7 +853,20 @@ spec:
               devicePath: /dev/modelweights-glm-5.3-flash-0
       containers:
         - name: workload-glm-5-3-flash-0
-          image: docker.io/vllm/vllm-openai:glm53-flash@sha256:2c6da6c6f16ed15c91e412d896dba13701f25fe1861eaec9ddaa4db34d1d21c4
+          image: docker.io/vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_ADMIN
+                - CHOWN
+                - SETUID
+                - SETGID
+                - SETPCAP
           readinessProbe:
             httpGet:
               path: /workload-readyz
@@ -854,6 +911,8 @@ spec:
               value: "60"
             - name: VLLM_MEM_POLL_SNAPSHOT
               value: "0"
+            - name: VLLM_USE_V2_MODEL_RUNNER
+              value: "0"
             - name: OTEL_SERVICE_NAME
               value: 'vllm-glm-5.3-flash'
             - name: OTEL_EXPORTER_OTLP_TRACES_INSECURE
@@ -877,29 +936,44 @@ spec:
               echo "Installing privatemode_stat_logger_pyproject.toml"
               install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger_pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
               if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode_stat_logger_pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing restrict-vllm-network.py"
+              install -D -m 644 /untrusted-vllm-patch/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
+              if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing sitecustomize.py"
               install -D -m 644 /untrusted-vllm-patch/sitecustomize.py /vllm-workspace/sitecustomize.py
-              if [ $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1) != 'b3c9f7587e6b27c7cf7869df880500b364955c6792a89674390d5edaf06fec13' ]; then echo sitecustomize.py hash mismatch: $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing stop_token_ids_validation_0.27.1.patch"
-              install -D -m 644 /untrusted-vllm-patch/stop_token_ids_validation_0.27.1.patch /vllm-workspace/stop_token_ids_validation_0.27.1.patch
-              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation_0.27.1.patch | cut -d ' ' -f 1) != '944159cc045f4a5722fbbccde2879d92b4e3e60320e2efecf9b1f3a05b9fe564' ]; then echo stop_token_ids_validation_0.27.1.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation_0.27.1.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/stop_token_ids_validation_0.27.1.patch
-              echo "Installing repetition_detection_cap_0.27.1.patch"
-              install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap_0.27.1.patch /vllm-workspace/repetition_detection_cap_0.27.1.patch
-              if [ $(sha256sum /vllm-workspace/repetition_detection_cap_0.27.1.patch | cut -d ' ' -f 1) != '5dd3a4dd4e1e6c92bc871107c92abf87de94234b88ec82491e5d744d5e8ca673' ]; then echo repetition_detection_cap_0.27.1.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap_0.27.1.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap_0.27.1.patch
-              echo "Installing reasoning_marker_detokenize_0.27.1.patch"
-              install -D -m 644 /untrusted-vllm-patch/reasoning_marker_detokenize_0.27.1.patch /vllm-workspace/reasoning_marker_detokenize_0.27.1.patch
-              if [ $(sha256sum /vllm-workspace/reasoning_marker_detokenize_0.27.1.patch | cut -d ' ' -f 1) != '0f794067f1e6a5daa9a5895291b1ee825f629d0af813a7019b5833630e62e0e3' ]; then echo reasoning_marker_detokenize_0.27.1.patch hash mismatch: $(sha256sum /vllm-workspace/reasoning_marker_detokenize_0.27.1.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/reasoning_marker_detokenize_0.27.1.patch
-              echo "Installing slot_mapping_block_table_bounds_0.27.1.patch"
-              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds_0.27.1.patch /vllm-workspace/slot_mapping_block_table_bounds_0.27.1.patch
-              if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds_0.27.1.patch | cut -d ' ' -f 1) != 'a59f40787dff00367d76a93e9934c067a8ba1ad450850dedfefc188cb679e9de' ]; then echo slot_mapping_block_table_bounds_0.27.1.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds_0.27.1.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds_0.27.1.patch
+              if [ $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1) != 'f215015407e39580e2b8f709981034c4586c4c421caaefa76b72f076a998a62d' ]; then echo sitecustomize.py hash mismatch: $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing chat_template_glm-5.3-flash.jinja"
+              install -D -m 644 /untrusted-vllm-patch/chat_template_glm-5.3-flash.jinja /vllm-workspace/chat_template_glm-5.3-flash.jinja
+              if [ $(sha256sum /vllm-workspace/chat_template_glm-5.3-flash.jinja | cut -d ' ' -f 1) != '0c4099f3382d6c92700dfb99725025360966fd73032f0ecf32377c0d9e6309c5' ]; then echo chat_template_glm-5.3-flash.jinja hash mismatch: $(sha256sum /vllm-workspace/chat_template_glm-5.3-flash.jinja | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing repetition_detection_cap.patch"
+              install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
+              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
+              echo "Installing anthropic_usage_stream.patch"
+              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
+              echo "Installing dump_input_anonymization.patch"
+              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
+              echo "Installing slot_mapping_block_table_bounds.patch"
+              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
+              echo "Installing transcriptions_stream_usage.patch"
+              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               # --no-build-isolation builds without a venv using setuptools.
               # --offline verifies the declared dependencies are present without using network.
               uv pip install --system --no-build-isolation --offline /vllm-workspace/privatemode-stat-logger
-              exec vllm serve "$@"
+              # Each model gets a separate UID for independent bootstrap and restarts.
+              vllm_uid=10001
+              python3 -I -S /vllm-workspace/restrict-vllm-network.py "$vllm_uid"
+              exec env HOME=/vllm-workspace setpriv --reuid="$vllm_uid" --regid="$vllm_uid" --clear-groups \
+                --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs \
+                vllm serve "$@"
             - _
           args:
             - '/mnt/modelweights-glm-5.3-flash-0'
@@ -907,13 +981,12 @@ spec:
             - '--port=8000'
             - '--enable-prompt-tokens-details'
             - '--allowed-media-domains=/'
-            - '--tensor-parallel-size=4'
+            - '--tensor-parallel-size=2'
             - '--gpu-memory-utilization=0.1'
-            - '--kv-cache-memory-bytes=83g'
-            - '--max-num-seqs=500'
+            - '--kv-cache-memory-bytes=70g'
+            - '--max-num-seqs=400'
             - '--max-model-len=1048576'
-            - '--chat-template'
-            - '/mnt/modelweights-glm-5.3-flash-0/chat_template.jinja'
+            - '--chat-template=/vllm-workspace/chat_template_glm-5.3-flash.jinja'
             - '--enable-auto-tool-choice'
             - '--tool-call-parser'
             - 'glm47'
@@ -926,7 +999,7 @@ spec:
             - '--kv-cache-dtype'
             - 'fp8'
             - '--block-size'
-            - '2304'
+            - '4608'
             - '--enable-expert-parallel'
             - '--enable-ep-weight-filter'
             - '--api-server-count'
@@ -958,9 +1031,9 @@ spec:
             limits:
               cpu: "7"
               memory: 120Gi
-              "nvidia.com/GB100_B200": 4
+              "nvidia.com/GB100_B200": 2
         - name: inference-proxy-glm-5-3-flash-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.58.0@sha256:13228c4300ecf2723bf1c01a3c831f84bf08622f4fe30a6779c6ffa067ff22f8
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.59.0@sha256:88d280c89f3e764cc4eb4d5ed486ff2cecb1145ff4c797977407af943b379aa0
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -976,7 +1049,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/glm-5-3-flash-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-0a7a47.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-7a3b43.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -984,7 +1057,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling,vision'
-            - '--usage-collector-endpoint=usage-collector.continuum-0a7a47.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-7a3b43.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -1058,12 +1131,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-gpt-oss-120b
-  namespace: continuum-0a7a47
+  namespace: continuum-7a3b43
   labels:
     app: workload-gpt-oss-120b
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: workload-gpt-oss-120b
@@ -1071,7 +1143,7 @@ spec:
     metadata:
       labels:
         app: workload-gpt-oss-120b
-        app.kubernetes.io/instance: '0a7a47'
+        app.kubernetes.io/instance: '7a3b43'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -1084,7 +1156,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-snp-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.58.0@sha256:68217462ee84c01aade6c0c100d206d209ed1736cd9374f72a4383b851bb6ae6
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.59.0@sha256:0b55b0805bb862d6ae317202b8a9f718a9bfbaa6f9ccf24a1aca51a0f5a5c112
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -1103,7 +1175,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.58.0@sha256:42d8be0026189593a17c213a4affc30c655dcd4d3a491d18d5220a701d07c0ae
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.59.0@sha256:b98a49fe92e6857edaaf1825b51dfe732885329e529a8e0b509130515fcb4651
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -1120,7 +1192,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-gpt-oss-120b-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.58.0@sha256:8c99d72b25693000f89c902c93796441695fe6b8e76599e656c50f127c1bd7e8
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.59.0@sha256:99aea95418f72c5d71e4ae60bafe19c38a86acc4ad0abfcc7ac5c477b7538ffd
           args:
             - 'gpt-oss-120b'
             - '0'
@@ -1137,7 +1209,7 @@ spec:
               devicePath: /dev/modelweights-gpt-oss-120b-0
       containers:
         - name: workload-gpt-oss-120b-0
-          image: docker.io/vllm/vllm-openai:v0.28.0@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14
+          image: docker.io/vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -1189,6 +1261,8 @@ spec:
               value: /vllm-workspace
             - name: PRIVATEMODE_STAT_LOGGER_URL
               value: 'http://127.0.0.1:8285/SubmitStatsEvents'
+            - name: VLLM_USE_V2_MODEL_RUNNER
+              value: "0"
             - name: OTEL_SERVICE_NAME
               value: 'vllm-gpt-oss-120b'
             - name: OTEL_EXPORTER_OTLP_TRACES_INSECURE
@@ -1214,14 +1288,26 @@ spec:
               echo "Installing restrict-vllm-network.py"
               install -D -m 644 /untrusted-vllm-patch/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing stop_token_ids_validation.patch"
-              install -D -m 644 /untrusted-vllm-patch/stop_token_ids_validation.patch /vllm-workspace/stop_token_ids_validation.patch
-              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '1c70a4cf0fb6fe94cbec6c264dca70c6108b2592fc62f217140df46a69ce73a1' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/stop_token_ids_validation.patch
               echo "Installing repetition_detection_cap.patch"
               install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
-              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != 'c3b0dcc32d989d678544e459b1de01e0acafa81f5531e00b8e2a4c6960aa7410' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
+              echo "Installing anthropic_usage_stream.patch"
+              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
+              echo "Installing dump_input_anonymization.patch"
+              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
+              echo "Installing slot_mapping_block_table_bounds.patch"
+              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
+              echo "Installing transcriptions_stream_usage.patch"
+              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               echo "Installing preload-gpt-oss-120b-tokenizer.sh"
               install -D -m 644 /untrusted-vllm-patch/preload-gpt-oss-120b-tokenizer.sh /vllm-workspace/preload-gpt-oss-120b-tokenizer.sh
               if [ $(sha256sum /vllm-workspace/preload-gpt-oss-120b-tokenizer.sh | cut -d ' ' -f 1) != '824eb430cfa963848c8d41f9ad2c9477acaf26584aa2719845f13e0fbf6d6916' ]; then echo preload-gpt-oss-120b-tokenizer.sh hash mismatch: $(sha256sum /vllm-workspace/preload-gpt-oss-120b-tokenizer.sh | cut -d ' ' -f 1); exit 1; fi
@@ -1283,7 +1369,7 @@ spec:
               memory: 64Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-gpt-oss-120b-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.58.0@sha256:13228c4300ecf2723bf1c01a3c831f84bf08622f4fe30a6779c6ffa067ff22f8
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.59.0@sha256:88d280c89f3e764cc4eb4d5ed486ff2cecb1145ff4c797977407af943b379aa0
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -1299,7 +1385,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/gpt-oss-120b-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-0a7a47.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-7a3b43.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1307,7 +1393,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling'
-            - '--usage-collector-endpoint=usage-collector.continuum-0a7a47.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-7a3b43.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -1381,12 +1467,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-whisper-qwen3-voxtral
-  namespace: continuum-0a7a47
+  namespace: continuum-7a3b43
   labels:
     app: workload-whisper-qwen3-voxtral
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: workload-whisper-qwen3-voxtral
@@ -1394,7 +1479,7 @@ spec:
     metadata:
       labels:
         app: workload-whisper-qwen3-voxtral
-        app.kubernetes.io/instance: '0a7a47'
+        app.kubernetes.io/instance: '7a3b43'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -1407,7 +1492,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-snp-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.58.0@sha256:68217462ee84c01aade6c0c100d206d209ed1736cd9374f72a4383b851bb6ae6
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.59.0@sha256:0b55b0805bb862d6ae317202b8a9f718a9bfbaa6f9ccf24a1aca51a0f5a5c112
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -1426,7 +1511,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.58.0@sha256:42d8be0026189593a17c213a4affc30c655dcd4d3a491d18d5220a701d07c0ae
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.59.0@sha256:b98a49fe92e6857edaaf1825b51dfe732885329e529a8e0b509130515fcb4651
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -1443,7 +1528,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-whisper-large-v3-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.58.0@sha256:8c99d72b25693000f89c902c93796441695fe6b8e76599e656c50f127c1bd7e8
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.59.0@sha256:99aea95418f72c5d71e4ae60bafe19c38a86acc4ad0abfcc7ac5c477b7538ffd
           args:
             - 'whisper-large-v3'
             - '0'
@@ -1459,7 +1544,7 @@ spec:
             - name: modelweights-whisper-large-v3-0
               devicePath: /dev/modelweights-whisper-large-v3-0
         - name: disk-mounter-qwen3-embedding-4b-1
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.58.0@sha256:8c99d72b25693000f89c902c93796441695fe6b8e76599e656c50f127c1bd7e8
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.59.0@sha256:99aea95418f72c5d71e4ae60bafe19c38a86acc4ad0abfcc7ac5c477b7538ffd
           args:
             - 'qwen3-embedding-4b'
             - '1'
@@ -1475,7 +1560,7 @@ spec:
             - name: modelweights-qwen3-embedding-4b-1
               devicePath: /dev/modelweights-qwen3-embedding-4b-1
         - name: disk-mounter-voxtral-mini-3b-2
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.58.0@sha256:8c99d72b25693000f89c902c93796441695fe6b8e76599e656c50f127c1bd7e8
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.59.0@sha256:99aea95418f72c5d71e4ae60bafe19c38a86acc4ad0abfcc7ac5c477b7538ffd
           args:
             - 'voxtral-mini-3b'
             - '2'
@@ -1492,7 +1577,7 @@ spec:
               devicePath: /dev/modelweights-voxtral-mini-3b-2
       containers:
         - name: workload-whisper-large-v3-0
-          image: docker.io/vllm/vllm-openai:v0.28.0@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14
+          image: docker.io/vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -1565,9 +1650,9 @@ spec:
               mv '/var/run/workload-marker/whisper-large-v3-0.tmp' '/var/run/workload-marker/whisper-large-v3-0'
               mkdir -p /vllm-workspace
               cp /untrusted-pylock/pylock.audio.toml /vllm-workspace/pylock.audio.toml
-              if [ $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1) != 'bc967a14a151d0c4a39ed81994fbf4aa1b8daa5a60fa28f8dffe1d7dff4963b6' ]; then echo pylock.audio.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1) != 'e625bab294070791594da8f353f672bfffb3180dce772b36dbb07ac6c78f287a' ]; then echo pylock.audio.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1); exit 1; fi
               env -u UV_OVERRIDE uv pip install --system --no-deps -r /vllm-workspace/pylock.audio.toml
-              if [ $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1) != 'b5d794041399df627d6cb5c632e2d56565f9d27c503b7d3a6f8ef7909ee6b825' ]; then echo python environment hash mismatch: $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1); exit 1; fi
+              if [ $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1) != 'e5d1bed4e38c5a44103a39a671c66faef468577067b0253152585f545f0d2c9c' ]; then echo python environment hash mismatch: $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1); exit 1; fi
               echo "Installing privatemode_stat_logger.py"
               install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
               if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
@@ -1579,20 +1664,28 @@ spec:
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing transcriptions.patch"
               install -D -m 644 /untrusted-vllm-patch/transcriptions.patch /vllm-workspace/transcriptions.patch
-              if [ $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1) != '2f44d06a23ef3b7191faae9af4f7a107d61ff0ca8a52394bd11332292262f9df' ]; then echo transcriptions.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1) != 'e0286354e2f3787cb873dc70d659cbf55420adec19852d27fb3cade6266af627' ]; then echo transcriptions.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions.patch
-              echo "Installing stop_token_ids_validation.patch"
-              install -D -m 644 /untrusted-vllm-patch/stop_token_ids_validation.patch /vllm-workspace/stop_token_ids_validation.patch
-              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '1c70a4cf0fb6fe94cbec6c264dca70c6108b2592fc62f217140df46a69ce73a1' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/stop_token_ids_validation.patch
               echo "Installing repetition_detection_cap.patch"
               install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
-              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != 'c3b0dcc32d989d678544e459b1de01e0acafa81f5531e00b8e2a4c6960aa7410' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
-              echo "Installing decoder_prompt_len_validation.patch"
-              install -D -m 644 /untrusted-vllm-patch/decoder_prompt_len_validation.patch /vllm-workspace/decoder_prompt_len_validation.patch
-              if [ $(sha256sum /vllm-workspace/decoder_prompt_len_validation.patch | cut -d ' ' -f 1) != '4b4c5e04c4611826bf40176bb8ecaa6110ecf84c08361ae5823db12b539c0e92' ]; then echo decoder_prompt_len_validation.patch hash mismatch: $(sha256sum /vllm-workspace/decoder_prompt_len_validation.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/decoder_prompt_len_validation.patch
+              echo "Installing anthropic_usage_stream.patch"
+              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
+              echo "Installing dump_input_anonymization.patch"
+              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
+              echo "Installing slot_mapping_block_table_bounds.patch"
+              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
+              echo "Installing transcriptions_stream_usage.patch"
+              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               # --no-build-isolation builds without a venv using setuptools.
               # --offline verifies the declared dependencies are present without using network.
               uv pip install --system --no-build-isolation --offline /vllm-workspace/privatemode-stat-logger
@@ -1638,7 +1731,7 @@ spec:
               memory: 70Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-whisper-large-v3-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.58.0@sha256:13228c4300ecf2723bf1c01a3c831f84bf08622f4fe30a6779c6ffa067ff22f8
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.59.0@sha256:88d280c89f3e764cc4eb4d5ed486ff2cecb1145ff4c797977407af943b379aa0
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -1654,7 +1747,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/whisper-large-v3-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-0a7a47.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-7a3b43.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1662,7 +1755,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=transcribe'
-            - '--usage-collector-endpoint=usage-collector.continuum-0a7a47.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-7a3b43.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -1687,7 +1780,7 @@ spec:
               mountPath: '/var/run/workload-marker'
               readOnly: true
         - name: workload-qwen3-embedding-4b-1
-          image: docker.io/vllm/vllm-openai:v0.28.0@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14
+          image: docker.io/vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -1739,6 +1832,8 @@ spec:
               value: /vllm-workspace
             - name: PRIVATEMODE_STAT_LOGGER_URL
               value: 'http://127.0.0.1:8286/SubmitStatsEvents'
+            - name: VLLM_USE_V2_MODEL_RUNNER
+              value: "0"
             - name: OTEL_SERVICE_NAME
               value: 'vllm-qwen3-embedding-4b'
             - name: OTEL_EXPORTER_OTLP_TRACES_INSECURE
@@ -1764,14 +1859,26 @@ spec:
               echo "Installing restrict-vllm-network.py"
               install -D -m 644 /untrusted-vllm-patch/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing stop_token_ids_validation.patch"
-              install -D -m 644 /untrusted-vllm-patch/stop_token_ids_validation.patch /vllm-workspace/stop_token_ids_validation.patch
-              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '1c70a4cf0fb6fe94cbec6c264dca70c6108b2592fc62f217140df46a69ce73a1' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/stop_token_ids_validation.patch
               echo "Installing repetition_detection_cap.patch"
               install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
-              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != 'c3b0dcc32d989d678544e459b1de01e0acafa81f5531e00b8e2a4c6960aa7410' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
+              echo "Installing anthropic_usage_stream.patch"
+              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
+              echo "Installing dump_input_anonymization.patch"
+              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
+              echo "Installing slot_mapping_block_table_bounds.patch"
+              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
+              echo "Installing transcriptions_stream_usage.patch"
+              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               # --no-build-isolation builds without a venv using setuptools.
               # --offline verifies the declared dependencies are present without using network.
               uv pip install --system --no-build-isolation --offline /vllm-workspace/privatemode-stat-logger
@@ -1818,7 +1925,7 @@ spec:
               cpu: "4"
               memory: 24Gi
         - name: inference-proxy-qwen3-embedding-4b-1
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.58.0@sha256:13228c4300ecf2723bf1c01a3c831f84bf08622f4fe30a6779c6ffa067ff22f8
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.59.0@sha256:88d280c89f3e764cc4eb4d5ed486ff2cecb1145ff4c797977407af943b379aa0
           ports:
             - containerPort: 8086
             - containerPort: 8186
@@ -1834,7 +1941,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8001/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/qwen3-embedding-4b-1'
             - '--workload-metrics=http://127.0.0.1:8001/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-0a7a47.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-7a3b43.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1842,7 +1949,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=embed'
-            - '--usage-collector-endpoint=usage-collector.continuum-0a7a47.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-7a3b43.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4318'
           readinessProbe:
@@ -1867,7 +1974,7 @@ spec:
               mountPath: '/var/run/workload-marker'
               readOnly: true
         - name: workload-voxtral-mini-3b-2
-          image: docker.io/vllm/vllm-openai:v0.28.0@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14
+          image: docker.io/vllm/vllm-openai:v0.31.0@sha256:c1c9f6fd5c109ba7f0546a59f5b2f15fb87f64c77782e90a27b648b42a8e67c3
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -1940,9 +2047,9 @@ spec:
               mv '/var/run/workload-marker/voxtral-mini-3b-2.tmp' '/var/run/workload-marker/voxtral-mini-3b-2'
               mkdir -p /vllm-workspace
               cp /untrusted-pylock/pylock.audio.toml /vllm-workspace/pylock.audio.toml
-              if [ $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1) != 'bc967a14a151d0c4a39ed81994fbf4aa1b8daa5a60fa28f8dffe1d7dff4963b6' ]; then echo pylock.audio.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1) != 'e625bab294070791594da8f353f672bfffb3180dce772b36dbb07ac6c78f287a' ]; then echo pylock.audio.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1); exit 1; fi
               env -u UV_OVERRIDE uv pip install --system --no-deps -r /vllm-workspace/pylock.audio.toml
-              if [ $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1) != 'b5d794041399df627d6cb5c632e2d56565f9d27c503b7d3a6f8ef7909ee6b825' ]; then echo python environment hash mismatch: $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1); exit 1; fi
+              if [ $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1) != 'e5d1bed4e38c5a44103a39a671c66faef468577067b0253152585f545f0d2c9c' ]; then echo python environment hash mismatch: $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1); exit 1; fi
               echo "Installing privatemode_stat_logger.py"
               install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
               if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
@@ -1957,24 +2064,36 @@ spec:
               if [ $(sha256sum /vllm-workspace/generation_config.json | cut -d ' ' -f 1) != 'c8297823ed0e642d9932ca2ef1cdc0fa174563a3396c687852c1c377b60a18fd' ]; then echo generation_config_voxtral.json hash mismatch: $(sha256sum /vllm-workspace/generation_config.json | cut -d ' ' -f 1); exit 1; fi
               echo "Installing transcriptions.patch"
               install -D -m 644 /untrusted-vllm-patch/transcriptions.patch /vllm-workspace/transcriptions.patch
-              if [ $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1) != '2f44d06a23ef3b7191faae9af4f7a107d61ff0ca8a52394bd11332292262f9df' ]; then echo transcriptions.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1) != 'e0286354e2f3787cb873dc70d659cbf55420adec19852d27fb3cade6266af627' ]; then echo transcriptions.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions.patch
               echo "Installing voxtral.patch"
               install -D -m 644 /untrusted-vllm-patch/voxtral.patch /vllm-workspace/voxtral.patch
-              if [ $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1) != '2570864228d8bc132017ca89a07de24c4bba68fcd990e498d95e9169863c57d2' ]; then echo voxtral.patch hash mismatch: $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1) != 'dd59b2e26971e18d165fcc4463026b47b8149b796bb253646005e2fa88dc49e0' ]; then echo voxtral.patch hash mismatch: $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/voxtral.patch
               echo "Installing generation_config.patch"
               install -D -m 644 /untrusted-vllm-patch/generation_config.patch /vllm-workspace/generation_config.patch
-              if [ $(sha256sum /vllm-workspace/generation_config.patch | cut -d ' ' -f 1) != 'd6850d619b5aa8450c60efa5309ae30a21fa1c93f4f7350a4dd2914d3033f57a' ]; then echo generation_config.patch hash mismatch: $(sha256sum /vllm-workspace/generation_config.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/generation_config.patch | cut -d ' ' -f 1) != '22f84010fece1a64969f8dc17ecd89579c6bd876e05ba9d5cfe4da0ec7d005d2' ]; then echo generation_config.patch hash mismatch: $(sha256sum /vllm-workspace/generation_config.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/generation_config.patch
-              echo "Installing stop_token_ids_validation.patch"
-              install -D -m 644 /untrusted-vllm-patch/stop_token_ids_validation.patch /vllm-workspace/stop_token_ids_validation.patch
-              if [ $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1) != '1c70a4cf0fb6fe94cbec6c264dca70c6108b2592fc62f217140df46a69ce73a1' ]; then echo stop_token_ids_validation.patch hash mismatch: $(sha256sum /vllm-workspace/stop_token_ids_validation.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/stop_token_ids_validation.patch
               echo "Installing repetition_detection_cap.patch"
               install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
-              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != 'c3b0dcc32d989d678544e459b1de01e0acafa81f5531e00b8e2a4c6960aa7410' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
+              echo "Installing anthropic_usage_stream.patch"
+              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
+              echo "Installing dump_input_anonymization.patch"
+              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
+              echo "Installing slot_mapping_block_table_bounds.patch"
+              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
+              echo "Installing transcriptions_stream_usage.patch"
+              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               # --no-build-isolation builds without a venv using setuptools.
               # --offline verifies the declared dependencies are present without using network.
               uv pip install --system --no-build-isolation --offline /vllm-workspace/privatemode-stat-logger
@@ -2024,7 +2143,7 @@ spec:
               cpu: "4"
               memory: 30Gi
         - name: inference-proxy-voxtral-mini-3b-2
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.58.0@sha256:13228c4300ecf2723bf1c01a3c831f84bf08622f4fe30a6779c6ffa067ff22f8
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.59.0@sha256:88d280c89f3e764cc4eb4d5ed486ff2cecb1145ff4c797977407af943b379aa0
           ports:
             - containerPort: 8087
             - containerPort: 8187
@@ -2040,7 +2159,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8002/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/voxtral-mini-3b-2'
             - '--workload-metrics=http://127.0.0.1:8002/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-0a7a47.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-7a3b43.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -2048,7 +2167,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=transcribe'
-            - '--usage-collector-endpoint=usage-collector.continuum-0a7a47.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-7a3b43.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4319'
           readinessProbe:
@@ -2134,7 +2253,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: unstructured-api
-  namespace: continuum-0a7a47
+  namespace: continuum-7a3b43
   labels:
     app: unstructured-api
 spec:
@@ -2146,7 +2265,7 @@ spec:
     metadata:
       labels:
         app: unstructured-api
-        app.kubernetes.io/instance: '0a7a47'
+        app.kubernetes.io/instance: '7a3b43'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -2154,7 +2273,7 @@ spec:
       runtimeClassName: contrast-cc
       containers:
         - name: workload-unstructured-api
-          image: 'quay.io/unstructured-io/unstructured-api:0.1.11@sha256:023f27de17bd3a809390acfa147cb6373104eadca4120b36eb154fc1de8a61ca'
+          image: 'quay.io/unstructured-io/unstructured-api:0.1.11@sha256:b1f0eb6be87dbb15edff568a99f6dd2e57072240faff04729e8d91d283f5b86b'
           env:
             - name: HOST
               value: '127.0.0.1'
@@ -2203,7 +2322,7 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
         - name: inference-proxy-unstructured-api
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.58.0@sha256:13228c4300ecf2723bf1c01a3c831f84bf08622f4fe30a6779c6ffa067ff22f8
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.59.0@sha256:88d280c89f3e764cc4eb4d5ed486ff2cecb1145ff4c797977407af943b379aa0
           ports:
             - containerPort: 8085
           args:
@@ -2214,14 +2333,14 @@ spec:
             - --workload-reachability-url=http://127.0.0.1:8000/healthcheck
             - --workload-start-marker=/var/run/workload-marker/unstructured-api
             - --workload-tasks=unstructured
-            - --secret-svc-address=secret-service-internal.continuum-0a7a47.svc.cluster.local
+            - --secret-svc-address=secret-service-internal.continuum-7a3b43.svc.cluster.local
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
             - '--identity-cert-path=/var/run/secrets/identity/tls.crt'
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
-            - '--usage-collector-endpoint=usage-collector.continuum-0a7a47.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-7a3b43.svc.cluster.local:3000'
           volumeMounts:
             - name: unstructured-api-identity
               mountPath: /var/run/secrets/identity
@@ -2256,17 +2375,17 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: coordinator
-  namespace: 'continuum-0a7a47'
+  namespace: 'continuum-7a3b43'
   labels:
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: coordinator
-  namespace: 'continuum-0a7a47'
+  namespace: 'continuum-7a3b43'
   labels:
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
 rules:
   - apiGroups:
       - ""
@@ -2289,9 +2408,9 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: coordinator
-  namespace: 'continuum-0a7a47'
+  namespace: 'continuum-7a3b43'
   labels:
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -2299,15 +2418,15 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: coordinator
-    namespace: "continuum-0a7a47"
+    namespace: "continuum-7a3b43"
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator
-  namespace: 'continuum-0a7a47'
+  namespace: 'continuum-7a3b43'
   labels:
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
 spec:
   ports:
     - name: userapi
@@ -2331,16 +2450,16 @@ spec:
     app.kubernetes.io/name: coordinator
     app.kubernetes.io/part-of: contrast
     contrast.edgeless.systems/pod-role: coordinator
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
   type: ClusterIP
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator-ready
-  namespace: 'continuum-0a7a47'
+  namespace: 'continuum-7a3b43'
   labels:
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
 spec:
   ports:
     - name: userapi
@@ -2363,7 +2482,7 @@ spec:
     app.kubernetes.io/name: coordinator
     app.kubernetes.io/part-of: contrast
     contrast.edgeless.systems/pod-role: coordinator
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/instance: '7a3b43'
   type: ClusterIP
 ---
 apiVersion: apps/v1
@@ -2373,10 +2492,10 @@ metadata:
     app.kubernetes.io/component: coordinator
     app.kubernetes.io/name: coordinator
     app.kubernetes.io/part-of: contrast
-    app.kubernetes.io/version: 1.24.1
-    app.kubernetes.io/instance: '0a7a47'
+    app.kubernetes.io/version: 1.25.0
+    app.kubernetes.io/instance: '7a3b43'
   name: coordinator
-  namespace: 'continuum-0a7a47'
+  namespace: 'continuum-7a3b43'
 spec:
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Delete
@@ -2396,7 +2515,7 @@ spec:
         app.kubernetes.io/name: coordinator
         app.kubernetes.io/part-of: contrast
         contrast.edgeless.systems/pod-role: coordinator
-        app.kubernetes.io/instance: '0a7a47'
+        app.kubernetes.io/instance: '7a3b43'
         privatemode.edgeless.systems/environment: 'production'
     spec:
       affinity:
@@ -2409,7 +2528,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
               weight: 100
       containers:
-        - image: ghcr.io/edgelesssys/contrast/coordinator:v1.24.1@sha256:557a26c82f6e0a14c21696e918f8bf991219adb9ace9fb541bbe7eb6fe020328
+        - image: ghcr.io/edgelesssys/contrast/coordinator:v1.25.0@sha256:e22b353f6a9b7eb6d4b351a28cc5362dab3364c44c5271aa9c10364d3678dd65
           livenessProbe:
             failureThreshold: 3
             httpGet:

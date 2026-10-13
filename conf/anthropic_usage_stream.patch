@@ -1,0 +1,209 @@
+diff --git a/vllm/entrypoints/anthropic/protocol.py b/vllm/entrypoints/anthropic/protocol.py
+index 9bd40a9161..0306772c14 100644
+--- a/vllm/entrypoints/anthropic/protocol.py
++++ b/vllm/entrypoints/anthropic/protocol.py
+@@ -33,6 +33,15 @@ class AnthropicUsage(BaseModel):
+     cache_read_input_tokens: int | None = None
+ 
+ 
++class AnthropicMessageDeltaUsage(BaseModel):
++    """Cumulative usage updates for message_delta events."""
++
++    output_tokens: int
++    input_tokens: int | None = None
++    cache_creation_input_tokens: int | None = None
++    cache_read_input_tokens: int | None = None
++
++
+ class AnthropicContentBlock(BaseModel):
+     """Content block in message."""
+ 
+@@ -282,7 +291,7 @@ class AnthropicStreamEvent(BaseModel):
+     content_block: AnthropicContentBlock | None = None
+     index: int | None = None
+     error: AnthropicError | None = None
+-    usage: AnthropicUsage | None = None
++    usage: AnthropicMessageDeltaUsage | None = None
+ 
+ 
+ class AnthropicMessagesResponse(BaseModel):
+diff --git a/vllm/entrypoints/anthropic/serving.py b/vllm/entrypoints/anthropic/serving.py
+index 22484c744d..2c23f2ed79 100644
+--- a/vllm/entrypoints/anthropic/serving.py
++++ b/vllm/entrypoints/anthropic/serving.py
+@@ -15,6 +15,7 @@ from typing import Any, get_args
+ import jinja2
+ from fastapi import Request
+ 
++import vllm.envs as envs
+ from vllm.engine.protocol import EngineClient
+ from vllm.entrypoints.anthropic.protocol import (
+     AnthropicContentBlock,
+@@ -26,6 +27,7 @@ from vllm.entrypoints.anthropic.protocol import (
+     AnthropicDisabledThinkingEffortOption,
+     AnthropicEffort,
+     AnthropicError,
++    AnthropicMessageDeltaUsage,
+     AnthropicMessagesRequest,
+     AnthropicMessagesResponse,
+     AnthropicOutputConfig,
+@@ -104,6 +106,8 @@ def wrap_data_with_event(data: str, event: str):
+ class AnthropicServingMessages(OpenAIServingChat):
+     """Handler for Anthropic Messages API requests."""
+ 
++    _include_continuous_prompt_tokens_details = True
++
+     def __init__(
+         self,
+         engine_client: EngineClient,
+@@ -805,6 +809,7 @@ class AnthropicServingMessages(OpenAIServingChat):
+         generator: AsyncGenerator[str, None],
+     ) -> AsyncGenerator[str, None]:
+         try:
++            usage_stream_interval = envs.VLLM_ANTHROPIC_USAGE_STREAM_INTERVAL
+ 
+             class _ActiveBlockState:
+                 def __init__(self) -> None:
+@@ -841,6 +846,7 @@ class AnthropicServingMessages(OpenAIServingChat):
+                         self.tool_use_id = None
+ 
+             first_item = True
++            chunks_since_usage = 0
+             finish_reason = None
+             # Matched stop string, when generation stopped on one (a str);
+             # int stop-token-id / None are not stop sequences.
+@@ -970,7 +976,11 @@ class AnthropicServingMessages(OpenAIServingChat):
+                             chunk = AnthropicStreamEvent(
+                                 type="message_delta",
+                                 delta=stop_delta,
+-                                usage=_build_anthropic_usage(origin_chunk.usage),
++                                usage=AnthropicMessageDeltaUsage(
++                                    **_build_anthropic_usage(
++                                        origin_chunk.usage
++                                    ).model_dump(exclude_unset=True)
++                                ),
+                             )
+                             data = chunk.model_dump_json(exclude_unset=True)
+                             yield wrap_data_with_event(data, "message_delta")
+@@ -1116,7 +1126,28 @@ class AnthropicServingMessages(OpenAIServingChat):
+                                         yield wrap_data_with_event(
+                                             data, "content_block_delta"
+                                         )
+-                            continue
++                        if usage_stream_interval > 0 and finish_reason is None:
++                            chunks_since_usage += 1
++                            usage = origin_chunk.usage
++                            if (
++                                chunks_since_usage >= usage_stream_interval
++                                and usage is not None
++                                and usage.completion_tokens is not None
++                            ):
++                                chunk = AnthropicStreamEvent(
++                                    type="message_delta",
++                                    delta=AnthropicDelta(
++                                        stop_reason=None, stop_sequence=None
++                                    ),
++                                    usage=AnthropicMessageDeltaUsage(
++                                        **_build_anthropic_usage(usage).model_dump(
++                                            exclude_unset=True
++                                        )
++                                    ),
++                                )
++                                data = chunk.model_dump_json(exclude_unset=True)
++                                yield wrap_data_with_event(data, "message_delta")
++                                chunks_since_usage = 0
+                 else:
+                     error_response = AnthropicStreamEvent(
+                         type="error",
+diff --git a/vllm/entrypoints/openai/chat_completion/serving.py b/vllm/entrypoints/openai/chat_completion/serving.py
+index f22fed1e75..12d6a4bc3e 100644
+--- a/vllm/entrypoints/openai/chat_completion/serving.py
++++ b/vllm/entrypoints/openai/chat_completion/serving.py
+@@ -116,6 +116,8 @@ def _make_completion_tokens_details(
+ 
+ 
+ class OpenAIServingChat(GenerateBaseServing):
++    _include_continuous_prompt_tokens_details = False
++
+     def __init__(
+         self,
+         engine_client: EngineClient,
+@@ -578,6 +580,15 @@ class OpenAIServingChat(GenerateBaseServing):
+                                     else None
+                                 ),
+                             )
++                            if self._include_continuous_prompt_tokens_details:
++                                chunk.usage.prompt_tokens_details = (
++                                    _make_prompt_tokens_details(
++                                        self.enable_prompt_tokens_details,
++                                        num_cached_tokens,
++                                        num_cache_creation_tokens,
++                                        mm_token_counts,
++                                    )
++                                )
+ 
+                         data = chunk.model_dump_json(exclude_unset=True)
+                         yield f"data: {data}\n\n"
+@@ -619,6 +630,15 @@ class OpenAIServingChat(GenerateBaseServing):
+                                             else None
+                                         ),
+                                     )
++                                    if self._include_continuous_prompt_tokens_details:
++                                        chunk.usage.prompt_tokens_details = (
++                                            _make_prompt_tokens_details(
++                                                self.enable_prompt_tokens_details,
++                                                num_cached_tokens,
++                                                num_cache_creation_tokens,
++                                                mm_token_counts,
++                                            )
++                                        )
+ 
+                                 data = chunk.model_dump_json(exclude_unset=True)
+                                 yield f"data: {data}\n\n"
+@@ -823,6 +843,15 @@ class OpenAIServingChat(GenerateBaseServing):
+                                 else None
+                             ),
+                         )
++                        if self._include_continuous_prompt_tokens_details:
++                            chunk.usage.prompt_tokens_details = (
++                                _make_prompt_tokens_details(
++                                    self.enable_prompt_tokens_details,
++                                    num_cached_tokens,
++                                    num_cache_creation_tokens,
++                                    mm_token_counts,
++                                )
++                            )
+ 
+                     data = chunk.model_dump_json(exclude_unset=True)
+                     yield f"data: {data}\n\n"
+diff --git a/vllm/envs.py b/vllm/envs.py
+index 64b5ca2c4e..b5b65f575f 100755
+--- a/vllm/envs.py
++++ b/vllm/envs.py
+@@ -27,6 +27,7 @@ if TYPE_CHECKING:
+     VLLM_ENGINE_READY_TIMEOUT_S: int = 600
+     VLLM_API_KEY: str | None = None
+     VLLM_DEBUG_LOG_API_SERVER_RESPONSE: bool = False
++    VLLM_ANTHROPIC_USAGE_STREAM_INTERVAL: int = 0
+     S3_ACCESS_KEY_ID: str | None = None
+     S3_SECRET_ACCESS_KEY: str | None = None
+     S3_ENDPOINT_URL: str | None = None
+@@ -739,6 +740,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
+     "VLLM_RINGBUFFER_WARNING_INTERVAL": lambda: int(
+         os.environ.get("VLLM_RINGBUFFER_WARNING_INTERVAL", "60")
+     ),
++    # Emit Anthropic usage updates every N backend chunks. Zero disables them.
++    "VLLM_ANTHROPIC_USAGE_STREAM_INTERVAL": lambda: int(
++        os.getenv("VLLM_ANTHROPIC_USAGE_STREAM_INTERVAL", "0")
++    ),
+     # path to cudatoolkit home directory, under which should be bin, include,
+     # and lib directories.
+     "CUDA_HOME": lambda: os.environ.get("CUDA_HOME", None),
+@@ -2328,6 +2333,7 @@ def compile_factors() -> dict[str, object]:
+         # Credential; never affects compiled artifacts and must not be
+         # persisted in cache_key_factors.json.
+         "VLLM_API_KEY",
++        "VLLM_ANTHROPIC_USAGE_STREAM_INTERVAL",
+         "VLLM_USAGE_STATS_SERVER",
+         "VLLM_NO_USAGE_STATS",
+         "VLLM_DO_NOT_TRACK",

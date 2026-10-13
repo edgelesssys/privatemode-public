@@ -2,13 +2,13 @@
   import { onMount } from 'svelte';
   import { ChevronUp, ChevronDown } from 'lucide-svelte';
   import Tooltip from '../common/Tooltip.svelte';
-  import type { Model, PrivatemodeClient } from '$lib/clientStore';
-  import { modelConfig, DEFAULT_MODEL_ID } from '$lib/models';
+  import type { Model, PrivatemodeClient } from '#lib/clientStore.js';
+  import { modelConfig, DEFAULT_MODEL_ID } from '#lib/models.js';
   import {
     loadModels as loadModelsFromClient,
     models as modelsStore,
-  } from '$lib/clientStore';
-  import { t } from '$lib/i18n';
+  } from '#lib/clientStore.js';
+  import { t } from '#lib/i18n.js';
 
   export let privatemodeAIClient: PrivatemodeClient | null = null;
   export let selectedModel: string = '';

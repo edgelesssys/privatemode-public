@@ -1,9 +1,14 @@
 import js from '@eslint/js';
+import { loadConfig } from '@sveltejs/load-config';
 import svelte from 'eslint-plugin-svelte';
 import { defineConfig } from 'eslint/config';
 import globals from 'globals';
 import ts from 'typescript-eslint';
-import svelteConfig from './svelte.config.js';
+
+const loaded = await loadConfig(import.meta.dirname, { traverse: false });
+if (!loaded?.config)
+  throw loaded?.error ?? new Error('no Svelte/Kit config found');
+const svelteConfig = { ...loaded.config, typescript: undefined };
 
 export default defineConfig(
   {

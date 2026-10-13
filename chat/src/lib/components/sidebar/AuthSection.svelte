@@ -17,8 +17,8 @@
     signIn,
     signOut,
     clerkLoaded,
-  } from '$lib/authStore';
-  import { t } from '$lib/i18n';
+  } from '#lib/authStore.js';
+  import { t } from '#lib/i18n.js';
 
   export let collapsed: boolean;
 

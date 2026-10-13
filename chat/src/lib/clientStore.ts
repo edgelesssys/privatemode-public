@@ -212,6 +212,9 @@ export async function initializeClient(): Promise<void> {
       : undefined;
     const opts = {
       auth: getAuthCredential,
+      openAIOptions: {
+        defaultHeaders: { 'Privatemode-Client': 'WebApp' },
+      },
       apiBaseURL: import.meta.env.VITE_PRIVATEMODE_URL || undefined,
       manifestBytes: configuredManifestBytes,
       dangerouslyAllowBrowser: true,

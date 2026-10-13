@@ -1,7 +1,7 @@
 <script lang="ts">
   import { FileUp } from 'lucide-svelte';
   import { onMount } from 'svelte';
-  import { t } from '$lib/i18n';
+  import { t } from '#lib/i18n.js';
 
   export let enabled = true;
   export let onDrop: (files: globalThis.File[]) => void;

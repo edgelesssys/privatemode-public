@@ -1,0 +1,360 @@
+diff --git a/vllm/logging_utils/anonymize.py b/vllm/logging_utils/anonymize.py
+new file mode 100644
+index 0000000000..1728a37f99
+--- /dev/null
++++ b/vllm/logging_utils/anonymize.py
+@@ -0,0 +1,50 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++"""Helpers for obfuscating request content in crash dumps.
++
++See `vllm.logging_utils.dump_input` and the `anon_repr` methods it dispatches
++to.
++"""
++
++import contextlib
++import contextvars
++from collections.abc import Iterator
++
++_mm_hash_indices: contextvars.ContextVar[dict[str, int] | None] = (
++    contextvars.ContextVar("_mm_hash_indices", default=None)
++)
++
++
++@contextlib.contextmanager
++def anonymization_scope() -> Iterator[None]:
++    """Number multi-modal hashes afresh within this scope; see `anon_mm_hash`."""
++    token = _mm_hash_indices.set({})
++    try:
++        yield
++    finally:
++        _mm_hash_indices.reset(token)
++
++
++def anon_mm_hash(value: str | None) -> str | None:
++    """Replace a multi-modal content hash with a per-dump index label.
++
++    Equal hashes map to the same label within one `anonymization_scope`, so a
++    dump can correlate items without revealing the hashes. Outside any scope,
++    each call numbers against a throwaway table, so labels carry no correlation.
++    """
++    if value is None:
++        return None
++    indices = _mm_hash_indices.get()
++    if indices is None:
++        indices = {}
++    index = indices.setdefault(value, len(indices))
++    return f"mm#{index}"
++
++
++def tensor_repr_no_data(value: object) -> str:
++    """Describe a tensor by shape, device and dtype; others fail closed to type."""
++    import torch
++
++    if not isinstance(value, torch.Tensor):
++        return f"{type(value).__name__}(...)"
++    return f"Tensor(shape={value.shape}, device={value.device},dtype={value.dtype})"
+diff --git a/vllm/logging_utils/dump_input.py b/vllm/logging_utils/dump_input.py
+index cb289d04e3..1dd5074abe 100644
+--- a/vllm/logging_utils/dump_input.py
++++ b/vllm/logging_utils/dump_input.py
+@@ -3,12 +3,12 @@
+ 
+ import contextlib
+ import enum
+-import json
+ 
+ import torch
+ 
+ from vllm.config import VllmConfig
+ from vllm.logger import init_logger
++from vllm.logging_utils.anonymize import tensor_repr_no_data
+ from vllm.v1.core.sched.output import SchedulerOutput
+ from vllm.v1.metrics.stats import SchedulerStats
+ from vllm.version import __version__ as VLLM_VERSION
+@@ -17,11 +17,15 @@ logger = init_logger(__name__)
+ 
+ 
+ def prepare_object_to_dump(obj) -> str:
++    # Fail closed: raw strings and numbers may be prompt text or token IDs.
+     if isinstance(obj, str):
+-        return f"'{obj}'"  # Double quotes
++        return f"str(len={len(obj)})"
+     elif isinstance(obj, dict):
+         dict_str = ", ".join(
+-            {f"{str(k)}: {prepare_object_to_dump(v)}" for k, v in obj.items()}
++            [
++                f"{prepare_object_to_dump(k)}: {prepare_object_to_dump(v)}"
++                for k, v in obj.items()
++            ]
+         )
+         return f"{{{dict_str}}}"
+     elif isinstance(obj, list):
+@@ -36,21 +40,14 @@ def prepare_object_to_dump(obj) -> str:
+     elif isinstance(obj, torch.Tensor):
+         # We only print the 'draft' of the tensor to not expose sensitive data
+         # and to get some metadata in case of CUDA runtime crashed
+-        return f"Tensor(shape={obj.shape}, device={obj.device},dtype={obj.dtype})"
++        return tensor_repr_no_data(obj)
+     elif hasattr(obj, "anon_repr"):
+         return obj.anon_repr()
+-    elif hasattr(obj, "__dict__"):
+-        items = obj.__dict__.items()
+-        dict_str = ", ".join(
+-            [f"{str(k)}={prepare_object_to_dump(v)}" for k, v in items]
+-        )
+-        return f"{type(obj).__name__}({dict_str})"
++    elif obj is None or isinstance(obj, bool):
++        return repr(obj)
+     else:
+-        # Hacky way to make sure we can serialize the object in JSON format
+-        try:
+-            return json.dumps(obj)
+-        except (TypeError, OverflowError):
+-            return repr(obj)
++        # Fail closed: types without `anon_repr` may carry request content.
++        return f"{type(obj).__name__}(...)"
+ 
+ 
+ def dump_engine_exception(
+diff --git a/vllm/multimodal/inputs.py b/vllm/multimodal/inputs.py
+index 91fa34e864..2e75cca32f 100644
+--- a/vllm/multimodal/inputs.py
++++ b/vllm/multimodal/inputs.py
+@@ -21,6 +21,7 @@ import numpy as np
+ from PIL.Image import Image
+ from typing_extensions import TypeVar
+ 
++from vllm.logging_utils.anonymize import anon_mm_hash, tensor_repr_no_data
+ from vllm.utils.collection_utils import is_list_of
+ from vllm.utils.import_utils import LazyLoader
+ from vllm.utils.jsontree import json_iter_leaves, json_map_leaves
+@@ -372,6 +373,30 @@ class MultiModalFeatureSpec:
+     mm_hash: str | None = None
+     """The hash for caching processor outputs (without LoRA prefix)."""
+ 
++    def anon_repr(self) -> str:
++        """Version of repr with tensor data and hashes replaced by placeholders."""
++        data_repr = (
++            None
++            if self.data is None
++            else {
++                key: None
++                if elem.data is None
++                else json_map_leaves(tensor_repr_no_data, elem.data)
++                for key, elem in self.data.items()
++            }
++        )
++        pos = self.mm_position
++        is_embed = None if pos.is_embed is None else tensor_repr_no_data(pos.is_embed)
++        return (
++            f"MultiModalFeatureSpec("
++            f"data={data_repr},"
++            f"modality={self.modality},"
++            f"identifier={anon_mm_hash(self.identifier)},"
++            f"mm_position=PlaceholderRange(offset={pos.offset}, "
++            f"length={pos.length}, is_embed={is_embed}),"
++            f"mm_hash={anon_mm_hash(self.mm_hash)})"
++        )
++
+     @staticmethod
+     def gather_kwargs(features: list["MultiModalFeatureSpec"], keys: set[str]):
+         kwargs = defaultdict[str, list[NestedTensors]](list)
+diff --git a/vllm/sampling_params.py b/vllm/sampling_params.py
+index 0d32dfd97a..d4bd308a1e 100644
+--- a/vllm/sampling_params.py
++++ b/vllm/sampling_params.py
+@@ -83,6 +83,16 @@ class SamplingType(IntEnum):
+     RANDOM_SEED = 2
+ 
+ 
++_STRUCTURED_OUTPUT_CONSTRAINTS = (
++    "json",
++    "regex",
++    "choice",
++    "grammar",
++    "json_object",
++    "structural_tag",
++)
++
++
+ # maybe make msgspec?
+ @dataclass
+ class StructuredOutputsParams:
+@@ -126,18 +136,27 @@ class StructuredOutputsParams:
+                 f"but none are specified: {self.__dict__}"
+             )
+ 
++    def anon_repr(self) -> str:
++        """Version of repr with caller-supplied constraints obfuscated."""
++        constraints = [
++            name
++            for name in _STRUCTURED_OUTPUT_CONSTRAINTS
++            if getattr(self, name) is not None
++        ]
++        return (
++            f"StructuredOutputsParams("
++            f"constraints={constraints},"
++            f"disable_any_whitespace={self.disable_any_whitespace},"
++            f"disable_additional_properties={self.disable_additional_properties},"
++            f"has_whitespace_pattern={self.whitespace_pattern is not None},"
++            f"backend={self._backend},"
++            f"backend_was_auto={self._backend_was_auto})"
++        )
++
+     def all_constraints_none(self) -> bool:
+         """Returns True if all structured-output constraint fields are None."""
+         return all(
+-            getattr(self, field) is None
+-            for field in (
+-                "json",
+-                "regex",
+-                "choice",
+-                "grammar",
+-                "json_object",
+-                "structural_tag",
+-            )
++            getattr(self, field) is None for field in _STRUCTURED_OUTPUT_CONSTRAINTS
+         )
+ 
+     def all_non_structural_tag_constraints_none(self) -> bool:
+@@ -402,6 +421,44 @@ class SamplingParams(
+     token IDs during decoding instead of sampling randomly. Real logprobs are
+     still computed. Conflict checking is performed at the engine level."""
+ 
++    def anon_repr(self) -> str:
++        """Version of __repr__ with caller-supplied content obfuscated.
++
++        Mirrors the fields of __repr__, replacing content-bearing ones with a
++        count, presence flag or constraint kind.
++        """
++        stop = [self.stop] if isinstance(self.stop, str) else self.stop
++        structured_outputs = (
++            self.structured_outputs.anon_repr() if self.structured_outputs else None
++        )
++        return (
++            f"SamplingParams(n={self.n}, "
++            f"presence_penalty={self.presence_penalty}, "
++            f"frequency_penalty={self.frequency_penalty}, "
++            f"repetition_penalty={self.repetition_penalty}, "
++            f"temperature={self.temperature}, "
++            f"watermarking={self.watermarking}, "
++            f"top_p={self.top_p}, "
++            f"top_k={self.top_k}, "
++            f"min_p={self.min_p}, "
++            f"has_seed={self.seed is not None}, "
++            f"num_stop={len(stop or ())}, "
++            f"num_stop_token_ids={len(self.stop_token_ids or ())}, "
++            f"num_bad_words={len(self.bad_words or ())}, "
++            f"thinking_token_budget={self.thinking_token_budget}, "
++            f"include_stop_str_in_output={self.include_stop_str_in_output}, "
++            f"ignore_eos={self.ignore_eos}, "
++            f"max_tokens={self.max_tokens}, "
++            f"min_tokens={self.min_tokens}, "
++            f"logprobs={self.logprobs}, "
++            f"prompt_logprobs={self.prompt_logprobs}, "
++            f"skip_special_tokens={self.skip_special_tokens}, "
++            "spaces_between_special_tokens="
++            f"{self.spaces_between_special_tokens}, "
++            f"structured_outputs={structured_outputs}, "
++            f"num_extra_args={len(self.extra_args or ())})"
++        )
++
+     @staticmethod
+     def from_optional(
+         n: int | None = 1,
+diff --git a/vllm/v1/core/sched/output.py b/vllm/v1/core/sched/output.py
+index 0da64cf27e..c6c567ffc0 100644
+--- a/vllm/v1/core/sched/output.py
++++ b/vllm/v1/core/sched/output.py
+@@ -7,6 +7,7 @@ from functools import cached_property
+ from typing import TYPE_CHECKING
+ 
+ from vllm.config.ec_manager_config import EncoderCacheManagerMetadata
++from vllm.logging_utils.anonymize import anon_mm_hash, anonymization_scope
+ from vllm.multimodal.utils import strip_covered_mm_data
+ 
+ if TYPE_CHECKING:
+@@ -37,6 +38,10 @@ else:
+     Request = object
+ 
+ 
++def _type_name(obj: object) -> str | None:
++    return None if obj is None else type(obj).__name__
++
++
+ @dataclass
+ class NewRequestData:
+     req_id: str
+@@ -119,13 +124,17 @@ class NewRequestData:
+         prefill_token_ids_len = (
+             len(self.prefill_token_ids) if self.prefill_token_ids is not None else None
+         )
++        sampling_params = (
++            self.sampling_params.anon_repr() if self.sampling_params else None
++        )
++        mm_features = ", ".join(f.anon_repr() for f in self.mm_features)
+         return (
+             f"NewRequestData("
+             f"req_id={self.req_id},"
+             f"prompt_token_ids_len={prompt_token_ids_len},"
+             f"prefill_token_ids_len={prefill_token_ids_len},"
+-            f"mm_features={self.mm_features},"
+-            f"sampling_params={self.sampling_params},"
++            f"mm_features=[{mm_features}],"
++            f"sampling_params={sampling_params},"
+             f"block_ids={self.block_ids},"
+             f"num_computed_tokens={self.num_computed_tokens},"
+             f"lora_request={self.lora_request},"
+@@ -314,6 +323,51 @@ class SchedulerOutput:
+     # Number of spec tokens to schedule for the next step.
+     num_spec_tokens_to_schedule: int = 0
+ 
++    def anon_repr(self) -> str:
++        """Version of repr with request content obfuscated.
++
++        Mirrors the dataclass fields, replacing those that carry request
++        content -- token ids, multi-modal hashes and opaque connector
++        payloads -- with lengths, per-dump indices or type names.
++        """
++        with anonymization_scope():
++            new_reqs = ", ".join(r.anon_repr() for r in self.scheduled_new_reqs)
++            free_mm_hashes = [anon_mm_hash(h) for h in self.free_encoder_mm_hashes]
++        spec_decode_lens = {
++            req_id: len(toks)
++            for req_id, toks in self.scheduled_spec_decode_tokens.items()
++        }
++        return (
++            f"SchedulerOutput("
++            f"scheduled_new_reqs=[{new_reqs}], "
++            f"scheduled_cached_reqs={self.scheduled_cached_reqs.anon_repr()}, "
++            f"num_scheduled_tokens={self.num_scheduled_tokens}, "
++            f"total_num_scheduled_tokens={self.total_num_scheduled_tokens}, "
++            f"scheduled_spec_decode_tokens_lens={spec_decode_lens}, "
++            f"scheduled_encoder_inputs={self.scheduled_encoder_inputs}, "
++            f"num_common_prefix_blocks={self.num_common_prefix_blocks}, "
++            f"finished_req_ids={self.finished_req_ids}, "
++            f"free_encoder_mm_hashes={free_mm_hashes}, "
++            f"scheduled_encoder_input_stats={self.scheduled_encoder_input_stats}, "
++            f"preempted_req_ids={self.preempted_req_ids}, "
++            f"has_structured_output_requests={self.has_structured_output_requests}, "
++            f"pending_structured_output_tokens="
++            f"{self.pending_structured_output_tokens}, "
++            f"num_invalid_spec_tokens={self.num_invalid_spec_tokens}, "
++            f"kv_connector_metadata={_type_name(self.kv_connector_metadata)}, "
++            f"has_sync_kv_loads={self.has_sync_kv_loads}, "
++            f"aux_output_connector_metadata="
++            f"{_type_name(self.aux_output_connector_metadata)}, "
++            f"ec_connector_metadata={_type_name(self.ec_connector_metadata)}, "
++            f"ec_manager_metadata={_type_name(self.ec_manager_metadata)}, "
++            f"new_block_ids_to_zero={self.new_block_ids_to_zero}, "
++            f"kv_cache_block_copies={self.kv_cache_block_copies}, "
++            f"block_table_updates={self.block_table_updates}, "
++            f"kv_connector_block_state="
++            f"{_type_name(self.kv_connector_block_state)}, "
++            f"num_spec_tokens_to_schedule={self.num_spec_tokens_to_schedule})"
++        )
++
+     @classmethod
+     def make_empty(cls) -> "SchedulerOutput":
+         return cls(

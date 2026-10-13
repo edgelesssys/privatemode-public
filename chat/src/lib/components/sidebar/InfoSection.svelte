@@ -7,9 +7,13 @@
     LoaderCircle,
     TriangleAlert,
   } from 'lucide-svelte';
-  import { clientError, clientReady, clientVerifying } from '$lib/clientStore';
+  import {
+    clientError,
+    clientReady,
+    clientVerifying,
+  } from '#lib/clientStore.js';
   import { resolve } from '$app/paths';
-  import { t } from '$lib/i18n';
+  import { t } from '#lib/i18n.js';
 
   export let collapsed: boolean;
   export let onMobileClose: () => void;

@@ -23,6 +23,7 @@ import (
 type Adapter struct {
 	*inference.Adapter
 	cacheSaltValidator    forwarder.RequestMutator
+	legacyCacheSaltHasher forwarder.RequestMutator
 	mediaContentValidator forwarder.RequestMutator
 }
 
@@ -37,6 +38,7 @@ func New(workloadTasks []string, secrets inference.SecretGetter, ocspStatusFile 
 	return &Adapter{
 		Adapter:               baseAdapter,
 		cacheSaltValidator:    openai.CacheSaltValidator(log),
+		legacyCacheSaltHasher: openai.LegacyCacheSaltHasher(log),
 		mediaContentValidator: anthropic.MediaContentValidator(log),
 	}, nil
 }
@@ -57,7 +59,7 @@ func (a *Adapter) HandlesCatchAll() bool {
 func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request) {
 	a.ForwardEncrypted(
 		w, r,
-		forwarder.RequestMutatorChain(a.cacheSaltValidator, a.mediaContentValidator),
+		forwarder.RequestMutatorChain(a.cacheSaltValidator, a.legacyCacheSaltHasher, a.mediaContentValidator),
 		nil,
 		nil,
 		extractAnthropicUsage,
