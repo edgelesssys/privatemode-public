@@ -1,7 +1,9 @@
 package anthropic
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/adaptertest"
@@ -18,6 +21,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
+	"github.com/edgelesssys/continuum/internal/oss/sse"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
 	"github.com/edgelesssys/continuum/internal/usagecollector"
 	"github.com/stretchr/testify/assert"
@@ -137,7 +141,7 @@ func TestForwardMessagesRequest(t *testing.T) {
 			require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
 
 			log := slog.Default()
-			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
+			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, log)
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: fwd}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
@@ -293,7 +297,7 @@ func TestUsageExtraction(t *testing.T) {
 			require.NoError(t, os.WriteFile(ocspFile, ocspStatus, 0o644))
 
 			reporter := &adaptertest.UsageReporter{}
-			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default())
+			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, slog.Default())
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: fwd}, reporter, slog.Default())
 			require.NoError(t, err)
 
@@ -311,5 +315,138 @@ func TestUsageExtraction(t *testing.T) {
 				return ok && report.Stats == tc.wantUsage
 			}, time.Second, 10*time.Millisecond)
 		})
+	}
+}
+
+func TestExtractAnthropicUsageStream(t *testing.T) {
+	extract := extractAnthropicUsageStream()
+	testCases := []struct {
+		name string
+		body string
+		want usage.Stats
+	}{
+		{
+			name: "initial usage",
+			body: `{"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0,"cache_read_input_tokens":20,"cache_creation_input_tokens":5}}}`,
+			want: usage.Stats{PromptTokens: 15, CachedPromptTokens: 20},
+		},
+		{
+			name: "output only",
+			body: `{"type":"message_delta","usage":{"output_tokens":10}}`,
+			want: usage.Stats{PromptTokens: 15, CachedPromptTokens: 20, CompletionTokens: 10},
+		},
+		{
+			name: "cumulative output",
+			body: `{"type":"message_delta","usage":{"output_tokens":20}}`,
+			want: usage.Stats{PromptTokens: 15, CachedPromptTokens: 20, CompletionTokens: 20},
+		},
+		{
+			name: "input only preserves output and cache creation",
+			body: `{"type":"message_delta","usage":{"input_tokens":12}}`,
+			want: usage.Stats{PromptTokens: 17, CachedPromptTokens: 20, CompletionTokens: 20},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := extract([]byte(tc.body))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	for _, body := range []string{
+		`{"type":"content_block_delta"}`,
+		`{"type":"message_stop"}`,
+		`{"type":"message_delta"}`,
+		`{"type":"message_delta","usage":null}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`,
+		`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":null}`,
+	} {
+		_, err := extract([]byte(body))
+		require.ErrorIs(t, err, inference.ErrNoUsage)
+	}
+	for _, body := range []string{
+		`not json`,
+		`{"type":"message_delta","usage":{"input_tokens":999,"output_tokens":"invalid"}}`,
+	} {
+		_, err := extract([]byte(body))
+		require.Error(t, err)
+	}
+	got, err := extract([]byte(`{"type":"message_delta","usage":{"output_tokens":30}}`))
+	require.NoError(t, err)
+	assert.Equal(t, usage.Stats{PromptTokens: 17, CachedPromptTokens: 20, CompletionTokens: 30}, got)
+
+	other := extractAnthropicUsageStream()
+	got, err = other([]byte(`{"type":"message_delta","usage":{"output_tokens":1}}`))
+	require.NoError(t, err)
+	assert.Equal(t, usage.Stats{CompletionTokens: 1}, got)
+}
+
+func TestExtractAnthropicUsageStreamFinalUsage(t *testing.T) {
+	testCases := map[string]struct {
+		initialUsage string
+		finalUsage   string
+		want         usage.Stats
+	}{
+		"final usage splits input into regular and cached tokens": {
+			initialUsage: `{"input_tokens":35,"output_tokens":0}`,
+			finalUsage:   `{"input_tokens":10,"output_tokens":25,"cache_read_input_tokens":20,"cache_creation_input_tokens":5}`,
+			want:         usage.Stats{PromptTokens: 15, CachedPromptTokens: 20, CompletionTokens: 25},
+		},
+		"final usage can contain only cached input tokens": {
+			initialUsage: `{"input_tokens":35,"output_tokens":0}`,
+			finalUsage:   `{"input_tokens":0,"output_tokens":25,"cache_read_input_tokens":35,"cache_creation_input_tokens":0}`,
+			want:         usage.Stats{CachedPromptTokens: 35, CompletionTokens: 25},
+		},
+		"final omitted fields do not retain earlier counts": {
+			initialUsage: `{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":20,"cache_creation_input_tokens":5}`,
+			finalUsage:   `{"output_tokens":25}`,
+			want:         usage.Stats{CompletionTokens: 25},
+		},
+		"final usage without earlier events": {
+			finalUsage: `{"input_tokens":10,"output_tokens":25,"cache_read_input_tokens":20,"cache_creation_input_tokens":5}`,
+			want:       usage.Stats{PromptTokens: 15, CachedPromptTokens: 20, CompletionTokens: 25},
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			extract := extractAnthropicUsageStream()
+			if tc.initialUsage != "" {
+				_, err := extract([]byte(`{"type":"message_start","message":{"usage":` + tc.initialUsage + `}}`))
+				require.NoError(t, err)
+			}
+
+			got, err := extract([]byte(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":` + tc.finalUsage + `}`))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestAnthropicUsageStreamCancelled(t *testing.T) {
+	events := []string{
+		`{"type":"message_start","message":{"usage":{"input_tokens":10,"output_tokens":0,"cache_read_input_tokens":20,"cache_creation_input_tokens":5}}}`,
+		`{"type":"message_delta","usage":{"output_tokens":10}}`,
+		`{"type":"message_delta","usage":{"output_tokens":20}}`,
+		`{"type":"content_block_delta","delta":{"type":"text_delta","text":"More text"}}`,
+	}
+	for _, count := range []int{1, 2, 4} {
+		stream := "data: " + strings.Join(events[:count], "\n\ndata: ") + "\n\n"
+		source := io.MultiReader(strings.NewReader(stream), iotest.ErrReader(context.Canceled))
+		reader := inference.NewUsageSSEReader(sse.NewEventReader(source, constants.MaxSSEEventBytes), extractAnthropicUsageStream())
+		for range count {
+			_, err := reader.Next()
+			require.NoError(t, err)
+		}
+		_, err := reader.Next()
+		require.ErrorIs(t, err, context.Canceled)
+		want := usage.Stats{PromptTokens: 15, CachedPromptTokens: 20}
+		if count > 1 {
+			want.CompletionTokens = 10
+		}
+		if count > 2 {
+			want.CompletionTokens = 20
+		}
+		assert.Equal(t, want, reader.LatestUsage())
 	}
 }

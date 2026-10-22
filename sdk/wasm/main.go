@@ -64,6 +64,7 @@ func newWasmWrapper() *privatemodeWasmWrapper {
 //   - args[2]: authentication value, e.g. the API key, JWT, or fingerprint (string)
 //   - args[3]: API base URL for the Privatemode API (string)
 //   - args[4]: whether to enable logging (bool)
+//   - args[5]: optional additional HTTP headers (object)
 //
 // The returned Promise resolves with undefined on success, or rejects
 // with a JS Error on failure.
@@ -83,6 +84,9 @@ func (w *privatemodeWasmWrapper) initialize(this js.Value, args []js.Value) any 
 	}
 
 	client := privatemode.New(cred).WithAPIBaseURL(apiBaseURL)
+	if len(args) > 5 {
+		client = client.WithExtraHTTPHeaders(requestOptionsFromArg(args, 5).Header)
+	}
 	if enableLogging {
 		client = client.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	}
@@ -124,6 +128,7 @@ func (w *privatemodeWasmWrapper) initialize(this js.Value, args []js.Value) any 
 //   - args[1]: authentication value, e.g. the API key, JWT, or fingerprint (string)
 //   - args[2]: API base URL for the Privatemode API (string)
 //   - args[3]: whether to enable logging (bool)
+//   - args[4]: optional additional HTTP headers (object)
 //
 // Throws a JS Error if the authentication method is unknown.
 func (w *privatemodeWasmWrapper) initializeOffline(this js.Value, args []js.Value) any {
@@ -138,6 +143,9 @@ func (w *privatemodeWasmWrapper) initializeOffline(this js.Value, args []js.Valu
 	}
 
 	client := privatemode.New(cred).WithAPIBaseURL(apiBaseURL)
+	if len(args) > 4 {
+		client = client.WithExtraHTTPHeaders(requestOptionsFromArg(args, 4).Header)
+	}
 	if enableLogging {
 		client = client.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	}

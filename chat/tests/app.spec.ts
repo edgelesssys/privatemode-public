@@ -1,9 +1,16 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { modelConfig } from '../src/lib/models';
 import * as web from './helpers/web';
+
+async function storedChatCount(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const stored = localStorage.getItem('privatemode_chats');
+    return stored ? (JSON.parse(stored) as unknown[]).length : 0;
+  });
+}
 
 test('static build protects every JavaScript module with SRI', async () => {
   const buildDir = process.env.WEB_APP_DIR ?? 'build';
@@ -244,6 +251,101 @@ test.describe('Chat storage', () => {
     ).not.toBeVisible();
   });
 
+  test('should branch off a chat whose model was retired', async ({ page }) => {
+    const chat = web.createTestChat({
+      modelId: 'retired-model',
+      messages: [
+        {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: 'Hello',
+          timestamp: Date.now(),
+        },
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Hi there.',
+          timestamp: Date.now() + 1,
+        },
+      ],
+    });
+    await web.injectTestChat(page, chat);
+    await page.evaluate((id) => {
+      localStorage.setItem('privatemode_current_chat', id);
+    }, chat.id);
+    await page.reload();
+
+    const banner = page.locator('.chat-error-banner');
+    await expect(banner).toContainText('retired-model', { timeout: 60000 });
+    await banner
+      .getByRole('button', { name: 'branch off from the last message' })
+      .click();
+
+    // The branch must not inherit the retired model.
+    await expect(page.locator('.chat-error-banner')).not.toBeVisible();
+    await expect(page.getByPlaceholder('Type a message...')).toBeVisible();
+    await expect(
+      page.locator('.message.assistant').filter({ hasText: 'Hi there.' }),
+    ).toBeVisible();
+    const modelButton = page.locator('.model-picker .model-button');
+    await expect(modelButton).not.toHaveClass(/disabled/);
+    await expect(modelButton).not.toContainText('retired-model');
+  });
+
+  test('should keep storage consistent when a branch does not fit', async ({
+    page,
+  }) => {
+    // Chromium caps localStorage at about 5 MB per origin. Branching
+    // duplicates the chat, so a chat above half of that can't be branched.
+    const chat = web.createTestChat({
+      title: 'Big Chat',
+      messages: [
+        {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: 'Summarize this file.',
+          attachedFiles: [{ name: 'big.txt', content: 'x'.repeat(3_000_000) }],
+          timestamp: Date.now(),
+        },
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'It is a lot of x.',
+          timestamp: Date.now() + 1,
+        },
+      ],
+    });
+    await web.injectTestChat(page, chat);
+    await page.evaluate((id) => {
+      localStorage.setItem('privatemode_current_chat', id);
+    }, chat.id);
+    await page.reload();
+    await web.waitForAppReady(page);
+
+    const assistantMessage = page
+      .locator('.message.assistant')
+      .filter({ hasText: 'It is a lot of x.' });
+    await assistantMessage.hover();
+    await assistantMessage.locator('.branch-message-button').click();
+
+    await expect(page.locator('.toast.error')).toContainText(
+      'Chat history storage is full',
+    );
+    await expect(page.locator('.chat-item-wrapper')).toHaveCount(1);
+    expect(await storedChatCount(page)).toBe(1);
+
+    // Deleting a chat must still free up space after the failed branch.
+    page.on('dialog', (dialog) => dialog.accept());
+    const chatItem = page
+      .locator('.chat-item-wrapper')
+      .filter({ hasText: 'Big Chat' });
+    await chatItem.hover();
+    await chatItem.locator('button.delete-btn').click();
+
+    await expect(page.locator('.chat-item-wrapper')).toHaveCount(0);
+    expect(await storedChatCount(page)).toBe(0);
+  });
+
   test('should identify assistant messages as Privatemode AI', async ({
     page,
   }) => {
@@ -379,14 +481,36 @@ test.describe('Security page', () => {
   });
 });
 
-test.describe('File upload', () => {
+test.describe('Anonymous limits', () => {
   test.beforeEach(async ({ page }) => {
     await web.resetApp(page);
   });
 
-  test('should upload and process a text file', async ({ page }) => {
+  test('should require sign-in for document uploads', async ({ page }) => {
     const fileContent = 'This is a test document with important information.';
 
+    await expect(
+      page.getByRole('button', {
+        name: 'Sign in to upload documents, images, or audio',
+        exact: true,
+      }),
+    ).toBeEnabled();
+    await expect(page.getByText('Guest chat', { exact: true })).toBeVisible();
+    const allowance = page.getByRole('region', {
+      name: 'Guest chat',
+      exact: true,
+    });
+    await expect(
+      allowance.getByLabel('0/1000 conversation characters', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      allowance.getByText('Includes your messages and AI replies.'),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', {
+        name: 'Sign in for longer chats and uploads',
+      }),
+    ).toBeVisible();
     const fileInput = page.locator('input[type="file"][accept*=".md"]');
 
     await fileInput.setInputFiles({
@@ -395,27 +519,16 @@ test.describe('File upload', () => {
       buffer: Buffer.from(fileContent),
     });
 
-    await expect(page.getByText('test.txt')).toBeVisible({ timeout: 30000 });
-
-    const fileChip = page.locator('.file-chip').filter({ hasText: 'test.txt' });
-    await expect(fileChip).toBeVisible();
-    await expect(page.locator('.send-button')).toBeEnabled({
-      timeout: 30000,
-    });
-
-    const removeButton = fileChip.locator('button');
-    await removeButton.click();
-    await expect(fileChip).not.toBeVisible();
+    await expect(page.getByText('test.txt', { exact: true })).not.toBeVisible();
+    await expect(page.locator('.send-button')).toBeDisabled();
   });
 
-  test('should allow sending an image without message text', async ({
-    page,
-  }) => {
+  test('should reject anonymous image attachments', async ({ page }) => {
     await page.evaluate(() => {
       localStorage.setItem('privatemode_selected_model', 'glm-flash-latest');
     });
     await page.reload();
-    await web.waitForAppReady(page);
+    await expect(page.getByPlaceholder('Type a message...')).toBeVisible();
 
     const imageInput = page.locator('input[type="file"][accept*="image/png"]');
 
@@ -428,10 +541,141 @@ test.describe('File upload', () => {
       ),
     });
 
-    await expect(page.getByText('image.png')).toBeVisible({ timeout: 30000 });
+    await expect(
+      page.getByText('image.png', { exact: true }),
+    ).not.toBeVisible();
     await expect(page.getByPlaceholder('Type a message...')).toHaveValue('');
-    await expect(page.locator('.send-button')).toBeEnabled({
-      timeout: 30000,
+    await expect(page.locator('.send-button')).toBeDisabled();
+  });
+
+  test('should count Unicode characters and explain the conversation limit', async ({
+    page,
+  }) => {
+    const textarea = page.getByPlaceholder('Type a message...');
+    await textarea.fill('😀'.repeat(1000));
+    await expect(
+      page.getByLabel('1000/1000 conversation characters', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', {
+        name: 'Sign in for longer chats and uploads',
+      }),
+    ).toBeVisible();
+    await expect(page.locator('.send-button')).toBeEnabled();
+    await textarea.press('End');
+    await textarea.press('a');
+    await expect(
+      page.getByLabel('1001/1000 conversation characters', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Sign in to continue this chat' }),
+    ).toBeVisible();
+    await expect(page.locator('.send-button')).toBeDisabled();
+    await textarea.press('Enter');
+    await expect(textarea).toHaveValue('😀'.repeat(1000) + 'a');
+    await textarea.press('Backspace');
+    await expect(
+      page.getByRole('button', {
+        name: 'Sign in for longer chats and uploads',
+      }),
+    ).toBeVisible();
+    await expect(page.locator('.send-button')).toBeEnabled();
+  });
+
+  test('should include conversation history in the anonymous limit', async ({
+    page,
+  }) => {
+    const modelId = await page.evaluate(() =>
+      localStorage.getItem('privatemode_selected_model'),
+    );
+    expect(modelId).toBeTruthy();
+    const chat = web.createTestChat({
+      modelId: modelId!,
+      messages: [
+        {
+          id: 'user',
+          role: 'user',
+          content: 'a'.repeat(173),
+          timestamp: Date.now(),
+        },
+        {
+          id: 'assistant',
+          role: 'assistant',
+          content: 'b'.repeat(327),
+          timestamp: Date.now() + 1,
+        },
+      ],
     });
+    await web.injectTestChat(page, chat);
+    await page.evaluate(
+      (id) => localStorage.setItem('privatemode_current_chat', id),
+      chat.id,
+    );
+    await page.reload();
+    await web.waitForAppReady(page);
+    const textarea = page.getByPlaceholder('Type a message...');
+    await textarea.fill('c'.repeat(500));
+    await expect(
+      page.getByLabel('1000/1000 conversation characters', { exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('.send-button')).toBeEnabled();
+    await textarea.press('End');
+    await textarea.press('d');
+    await expect(
+      page.getByLabel('1001/1000 conversation characters', { exact: true }),
+    ).toBeVisible();
+    await expect(page.locator('.send-button')).toBeDisabled();
+  });
+
+  test('should explain an exhausted conversation before the user types again', async ({
+    page,
+  }) => {
+    const modelId = await page.evaluate(() =>
+      localStorage.getItem('privatemode_selected_model'),
+    );
+    expect(modelId).toBeTruthy();
+    const chat = web.createTestChat({
+      modelId: modelId!,
+      messages: [
+        {
+          id: 'user',
+          role: 'user',
+          content: 'a'.repeat(173),
+          timestamp: Date.now(),
+        },
+        {
+          id: 'assistant',
+          role: 'assistant',
+          content: 'b'.repeat(827),
+          timestamp: Date.now() + 1,
+        },
+      ],
+    });
+    await web.injectTestChat(page, chat);
+    await page.evaluate(
+      (id) => localStorage.setItem('privatemode_current_chat', id),
+      chat.id,
+    );
+    await page.reload();
+    await web.waitForAppReady(page);
+    await expect(page.getByPlaceholder('Type a message...')).toHaveValue('');
+    const allowance = page.getByRole('region', {
+      name: 'Guest chat',
+      exact: true,
+    });
+    await expect(
+      allowance.getByLabel('1000/1000 conversation characters', {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await expect(allowance.getByRole('status')).toHaveText(
+      'Conversation limit reached. Sign in to continue this chat.',
+    );
+    await expect(
+      page.getByRole('button', {
+        name: 'Sign in to continue this chat',
+        exact: true,
+      }),
+    ).toBeVisible();
   });
 });

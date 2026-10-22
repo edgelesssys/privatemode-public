@@ -24,6 +24,7 @@ import (
 
 func TestExchangeSecret(t *testing.T) {
 	meshCA, meshCert, meshKey := newTestMeshCertificate(t)
+	const clientID = "test-id"
 
 	for _, tc := range []struct {
 		name          string
@@ -40,6 +41,7 @@ func TestExchangeSecret(t *testing.T) {
 				assert.Equal(t, http.MethodPost, r.Method)
 				assert.Equal(t, SecretPath, r.URL.Path)
 				assert.Equal(t, constants.Version(), r.Header.Get(constants.PrivatemodeVersionHeader))
+				assert.Equal(t, clientID, r.Header.Get(constants.PrivatemodeClientHeader))
 
 				var req httpapi.SecretReq
 				if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&req)) {
@@ -73,7 +75,11 @@ func TestExchangeSecret(t *testing.T) {
 			}))
 			defer secretService.Close()
 
-			client := New(secretService.Client(), secretService.Listener.Addr().String())
+			client := New(
+				secretService.Client(),
+				secretService.Listener.Addr().String(),
+				http.Header{constants.PrivatemodeClientHeader: {clientID}},
+			)
 			id, secret, err := client.ExchangeSecret(t.Context(), meshCA, auth.Credential{})
 
 			if tc.wantErr != "" {

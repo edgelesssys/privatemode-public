@@ -30,24 +30,29 @@ import (
 var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 
 var (
-	logLevel                     string
-	logFormat                    string
-	apiKeyStr                    string
-	apiKeyFallback               string
-	workspace                    string
-	apiEndpoint                  string
-	listenAddress                string
-	port                         string
-	manifestPath                 string
-	nvidiaOCSPAllowUnknown       bool
-	nvidiaOCSPRevokedGracePeriod int
-	tlsCertPath                  string
-	tlsKeyPath                   string
-	insecureAPIConnection        bool
-	dumpRequests                 bool
-	corsAllowedOrigins           []string
-	clientID                     string
-	modelsDocumentPath           string
+	logLevel                      string
+	logFormat                     string
+	apiKeyStr                     string
+	apiKeyFallback                string
+	workspace                     string
+	apiEndpoint                   string
+	listenAddress                 string
+	port                          string
+	manifestPath                  string
+	nvidiaOCSPAllowUnknown        bool
+	nvidiaOCSPRevokedGracePeriod  int
+	tlsCertPath                   string
+	tlsKeyPath                    string
+	insecureAPIConnection         bool
+	dumpRequests                  bool
+	corsAllowedOrigins            []string
+	clientID                      string
+	modelsDocumentPath            string
+	timeoutRead                   time.Duration
+	timeoutReadHeader             time.Duration
+	timeoutWrite                  time.Duration
+	timeoutIdle                   time.Duration
+	timeoutUpstreamResponseHeader time.Duration
 
 	disablePromptCache    bool
 	promptCacheSalt       string
@@ -64,7 +69,13 @@ func New() *cobra.Command {
 		Args:    cobra.NoArgs,
 		Version: constants.Version(),
 		PreRunE: func(_ *cobra.Command, _ []string) error {
-			return logging.ValidateLogFormat(logFormat)
+			if err := logging.ValidateLogFormat(logFormat); err != nil {
+				return err
+			}
+			if min(timeoutRead, timeoutReadHeader, timeoutWrite, timeoutIdle, timeoutUpstreamResponseHeader) < 0 {
+				return errors.New("timeouts must not be negative")
+			}
+			return nil
 		},
 		RunE:         runProxy,
 		SilenceUsage: true,
@@ -93,6 +104,16 @@ func New() *cobra.Command {
 		fmt.Sprintf("The path into which the binary writes files. This includes the manifest log data in the '%s' subdirectory.", constants.ManifestDir))
 	cmd.Flags().StringVar(&manifestPath, "manifest-path", "",
 		"The path for the manifest file. If not provided, the manifest will be read from the remote source.")
+	cmd.Flags().DurationVar(&timeoutRead, "timeout-read", 2*time.Minute,
+		"Maximum time to read an entire incoming request, including its body. Zero disables the timeout.")
+	cmd.Flags().DurationVar(&timeoutReadHeader, "timeout-read-header", 10*time.Second,
+		"Maximum time to read incoming request headers. Zero uses the value from --timeout-read.")
+	cmd.Flags().DurationVar(&timeoutWrite, "timeout-write", 0, // inference responses may stream for a long time
+		"Maximum time to write a response. Zero disables the timeout.")
+	cmd.Flags().DurationVar(&timeoutIdle, "timeout-idle", time.Minute,
+		"Maximum time to wait for the next request on a keep-alive connection. Zero uses the value from --timeout-read.")
+	cmd.Flags().DurationVar(&timeoutUpstreamResponseHeader, "timeout-upstream-response-header", time.Hour, // same as load balancer's tunnel timeout for long-running non-streaming requests
+		"Maximum time to wait for upstream response headers after sending the request. Zero disables the timeout.")
 	cmd.Flags().BoolVar(&nvidiaOCSPAllowUnknown, "nvidia-ocsp-allow-unknown", true,
 		"Whether it should be tolerated if the NVIDIA OCSP service cannot be reached.")
 	cmd.Flags().IntVar(&nvidiaOCSPRevokedGracePeriod, "nvidia-ocsp-revoked-grace-period", 48,
@@ -127,7 +148,7 @@ func New() *cobra.Command {
 	must(cmd.Flags().MarkHidden("cdn-base-url"))
 
 	// Hosted deployments
-	cmd.Flags().StringVar(&clientID, "client-id", "",
+	cmd.Flags().StringVar(&clientID, "client-id", constants.PrivatemodeClientProxy,
 		"Value of the Privatemode-Client header sent to the API. Identifies a hosted proxy deployment in the API logs.")
 	must(cmd.Flags().MarkHidden("client-id"))
 	cmd.Flags().StringVar(&modelsDocumentPath, "models-document", "",
@@ -136,8 +157,8 @@ func New() *cobra.Command {
 
 	// Request dumping
 	cmd.Flags().BoolVar(&dumpRequests, "dump-requests", false,
-		"If set, the proxy dumps request and response logs to the '/requests' sub‑directory of the workspace. "+
-			"Leaving this flag unset disables request and response dumping.")
+		"If set, the proxy dumps all requests and responses in plaintext to the '/requests' sub‑directory of the workspace. "+
+			"Only use this for debugging on a machine you control.")
 
 	// Keep camelCase aliases for one release. Share the Value so repeated flags,
 	// including slices and mixed spellings, retain the usual parsing behavior.
@@ -267,7 +288,7 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 
 	// The value is sent as a header on every forwarded request. Reject anything net/http would
 	// refuse at send time, where the failure would show up per request instead of at startup.
-	if clientID != "" && !clientIDPattern.MatchString(clientID) {
+	if !clientIDPattern.MatchString(clientID) {
 		return fmt.Errorf("client-id %q must match %s", clientID, clientIDPattern)
 	}
 
@@ -286,15 +307,20 @@ func runProxy(cmd *cobra.Command, _ []string) error {
 		ContrastFlags: setup.ContrastFlags{
 			CDNBaseURL: cdnBaseURL,
 		},
-		InsecureAPIConnection:        insecureAPIConnection,
-		APIEndpoint:                  apiEndpoint,
-		APIKey:                       apiKey,
-		APIKeyFallback:               fallback,
-		CORSAllowedOrigins:           corsAllowedOrigins,
-		PromptCacheSalt:              cacheSalt,
-		PromptCacheSaltFromAPIKey:    cmd.Flags().Changed("prompt-cache-salt") && promptCacheSalt == "api-key",
-		NvidiaOCSPAllowUnknown:       nvidiaOCSPAllowUnknown,
-		NvidiaOCSPRevokedGracePeriod: time.Duration(nvidiaOCSPRevokedGracePeriod) * time.Hour,
+		InsecureAPIConnection:         insecureAPIConnection,
+		APIEndpoint:                   apiEndpoint,
+		APIKey:                        apiKey,
+		APIKeyFallback:                fallback,
+		TimeoutRead:                   timeoutRead,
+		TimeoutReadHeader:             timeoutReadHeader,
+		TimeoutWrite:                  timeoutWrite,
+		TimeoutIdle:                   timeoutIdle,
+		TimeoutUpstreamResponseHeader: timeoutUpstreamResponseHeader,
+		CORSAllowedOrigins:            corsAllowedOrigins,
+		PromptCacheSalt:               cacheSalt,
+		PromptCacheSaltFromAPIKey:     cmd.Flags().Changed("prompt-cache-salt") && promptCacheSalt == "api-key",
+		NvidiaOCSPAllowUnknown:        nvidiaOCSPAllowUnknown,
+		NvidiaOCSPRevokedGracePeriod:  time.Duration(nvidiaOCSPRevokedGracePeriod) * time.Hour,
 		// If request dumping is enabled, store dumps in a hard‑coded "/requests" sub‑directory
 		// under the workspace. Otherwise leave the directory empty to disable dumping.
 		DumpRequestsDir: func() string {

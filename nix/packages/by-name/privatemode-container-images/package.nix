@@ -50,6 +50,7 @@ let
     linuxPkgs.fake-workload.image
     linuxPkgs.contrast.image
     linuxPkgs.availability-test.image
+    linuxPkgs.usage-aggregator.image
   ];
 
   docker-images = linkFarmFromDrvs "privatemode-docker-images" (

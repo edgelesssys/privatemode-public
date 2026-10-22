@@ -52,6 +52,10 @@ const (
 type Server struct {
 	apiKey                       *string
 	apiKeyFallback               APIKeyFallback
+	timeoutRead                  time.Duration
+	timeoutReadHeader            time.Duration
+	timeoutWrite                 time.Duration
+	timeoutIdle                  time.Duration
 	defaultCacheSalt             string // if no salt is set, a random salt will be used
 	promptCacheSaltFromAPIKey    bool
 	forwarder                    apiForwarder
@@ -71,14 +75,17 @@ type Opts struct {
 	APIKey                       *string
 	APIKeyFallback               APIKeyFallback
 	ProtocolScheme               forwarder.ProtocolScheme
+	TimeoutRead                  time.Duration
+	TimeoutReadHeader            time.Duration
+	TimeoutWrite                 time.Duration
+	TimeoutIdle                  time.Duration
 	PromptCacheSalt              string
 	PromptCacheSaltFromAPIKey    bool
 	NvidiaOCSPAllowUnknown       bool
 	NvidiaOCSPRevokedGracePeriod time.Duration
 	DumpRequestsDir              string
 	CORSAllowedOrigins           []string
-	// ClientID overrides the Privatemode-Client header value. Empty keeps the Proxy default.
-	ClientID string
+	ClientID                     string
 	// ModelsDocument, if set, is served at the models endpoint instead of forwarding the request.
 	ModelsDocument *ModelsDocument
 }
@@ -99,7 +106,7 @@ type secretManager interface {
 
 // New sets up a new Server.
 func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Server {
-	fwd := forwarder.New(client, opts.APIEndpoint, opts.ProtocolScheme, log)
+	fwd := forwarder.New(client, opts.APIEndpoint, opts.ProtocolScheme, forwarder.UpstreamAPI, log)
 	if opts.APIKeyFallback == "" {
 		opts.APIKeyFallback = APIKeyFallbackAlways
 	}
@@ -107,6 +114,10 @@ func New(client *http.Client, sm secretManager, opts Opts, log *slog.Logger) *Se
 	return &Server{
 		apiKey:                       opts.APIKey,
 		apiKeyFallback:               opts.APIKeyFallback,
+		timeoutRead:                  opts.TimeoutRead,
+		timeoutReadHeader:            opts.TimeoutReadHeader,
+		timeoutWrite:                 opts.TimeoutWrite,
+		timeoutIdle:                  opts.TimeoutIdle,
 		defaultCacheSalt:             opts.PromptCacheSalt,
 		promptCacheSaltFromAPIKey:    opts.PromptCacheSaltFromAPIKey,
 		forwarder:                    fwd,
@@ -129,10 +140,10 @@ func (s *Server) Serve(ctx context.Context, lis net.Listener, tlsConfig *tls.Con
 		Handler:           s.GetHandler(),
 		TLSConfig:         tlsConfig,
 		ErrorLog:          logging.NewHTTPErrorLogger(s.log),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       2 * time.Minute,
-		IdleTimeout:       time.Minute,
-		// No WriteTimeout: inference responses may stream for a long time.
+		ReadTimeout:       s.timeoutRead,
+		ReadHeaderTimeout: s.timeoutReadHeader,
+		WriteTimeout:      s.timeoutWrite,
+		IdleTimeout:       s.timeoutIdle,
 	}
 	return process.HTTPServeContext(ctx, server, lis, s.log)
 }
@@ -153,9 +164,11 @@ func (s *Server) GetHandler() http.Handler {
 	mux.Handle("POST "+constants.OpenAILegacyCompletionsEndpoint, api(s.chatRequestHandler))
 	mux.Handle("POST "+constants.UnstructuredEndpoint+"/", api(s.unstructuredHandler))
 	if s.modelsDocument != nil {
-		mux.Handle("GET "+constants.OpenAIModelsEndpoint, api(s.modelsDocument.ServeHTTP))
+		mux.Handle("GET "+constants.OpenAIModelsEndpoint, api(s.modelsDocument.ListModels))
+		mux.Handle("GET "+constants.OpenAIModelsEndpoint+"/{model}", api(s.modelsDocument.RetrieveModel))
 	} else {
 		mux.Handle("GET "+constants.OpenAIModelsEndpoint, api(s.forwardUnencrypted))
+		mux.Handle("GET "+constants.OpenAIModelsEndpoint+"/{model}", api(s.forwardUnencrypted))
 	}
 	mux.Handle("POST "+constants.OpenAIEmbeddingsEndpoint, api(s.embeddingsHandler))
 	mux.Handle("POST "+constants.OpenAITranscriptionsEndpoint, api(s.transcriptionsHandler))
@@ -419,13 +432,6 @@ func (s *Server) forwardUnencrypted(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-func (s *Server) getClientHeader() string {
-	if s.clientID != "" {
-		return s.clientID
-	}
-	return constants.PrivatemodeClientProxy
-}
-
 // setStaticRequestHeaders sets static headers for the request. These are the header values
 // that are guaranteed to be immutable over a request's lifetime.
 func (s *Server) setStaticRequestHeaders(r *http.Request) {
@@ -436,7 +442,7 @@ func (s *Server) setStaticRequestHeaders(r *http.Request) {
 	r.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
 	r.Header.Set(constants.PrivatemodeOSHeader, runtime.GOOS)
 	r.Header.Set(constants.PrivatemodeArchitectureHeader, runtime.GOARCH)
-	r.Header.Set(constants.PrivatemodeClientHeader, s.getClientHeader())
+	r.Header.Set(constants.PrivatemodeClientHeader, s.clientID)
 }
 
 // setEncryptionHeaders sets the encryption-related headers for the request.

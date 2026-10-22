@@ -109,6 +109,7 @@ export class PrivatemodeAI extends OpenAI {
       existingState ??
       createPrivatemodeState({
         ...privatemodeOptions,
+        openAIOptions,
         dangerouslyAllowBrowser,
       });
     const transport = new PrivatemodeOpenAITransport(
@@ -248,10 +249,30 @@ function lazyInitialization(privatemode: PrivatemodeCore): () => Promise<void> {
 }
 
 function createPrivatemodeState(
-  options: PrivatemodeCoreOptions,
+  options: PrivatemodeAIOptions,
 ): PrivatemodeAIState {
-  const core = new PrivatemodeCore(options);
+  const { openAIOptions, ...privatemodeOptions } = options;
+  const extraHTTPHeaders = normalizeDefaultHeaders(
+    openAIOptions?.defaultHeaders,
+  );
+  const core = new PrivatemodeCore({ ...privatemodeOptions, extraHTTPHeaders });
   return { core, ensureReady: lazyInitialization(core) };
+}
+
+function normalizeDefaultHeaders(
+  headers: ClientOptions['defaultHeaders'],
+): Headers {
+  if (headers instanceof Headers) return new Headers(headers);
+  const result = new Headers();
+  const entries = Array.isArray(headers)
+    ? headers
+    : Object.entries(headers ?? {});
+  for (const [name, value] of entries) {
+    if (typeof name === 'string' && typeof value === 'string') {
+      result.append(name, value);
+    }
+  }
+  return result;
 }
 
 /** A Fetch-compatible adapter from the OpenAI SDK to Privatemode. */

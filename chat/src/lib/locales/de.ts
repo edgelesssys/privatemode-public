@@ -121,6 +121,16 @@ export const de: Record<TranslationKey, string> = {
   'chat.messageInput': 'Nachrichteneingabe',
   'chat.typeMessage': 'Nachricht eingeben ...',
   'chat.typeMessageLabel': 'Nachricht eingeben',
+  'chat.anonymousCharacters': '{count}/{max} Zeichen im Gespräch',
+  'chat.signInMore': 'Für längere Chats und Uploads anmelden',
+  'chat.signInContinue': 'Anmelden, um diesen Chat fortzusetzen',
+  'chat.signInUploads': 'Anmelden, um Dokumente, Bilder oder Audio hochzuladen',
+  'chat.attachFiles': 'Dateien anhängen',
+  'chat.guestMode': 'Gast-Chat',
+  'chat.guestIncludesReplies':
+    'Zählt deine Nachrichten und die Antworten der KI.',
+  'chat.guestLimitReached': 'Gesprächslimit erreicht',
+  'chat.guestAttachments': 'Anhänge erfordern ein Konto',
   'chat.uploading': 'Wird hochgeladen ...',
   'chat.uploadingDocuments': 'Dokumente werden hochgeladen ...',
   'chat.cannotAttachDocumentsGenerating':

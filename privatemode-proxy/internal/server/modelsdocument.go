@@ -4,6 +4,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,7 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/tidwall/gjson"
 )
 
 // ModelsDocument serves a static JSON document at the models endpoint instead of forwarding
@@ -38,19 +41,30 @@ func NewModelsDocument(path string, log *slog.Logger) (*ModelsDocument, error) {
 	return d, nil
 }
 
-// ServeHTTP writes the current document.
-func (d *ModelsDocument) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	data, err := d.reload()
-	if err != nil {
-		d.log.ErrorContext(r.Context(), "Serving last good models document", "error", err)
-		d.mu.Lock()
-		data = d.last
-		d.mu.Unlock()
-	}
+// ListModels handles GET /v1/models by writing the full models document.
+func (d *ModelsDocument) ListModels(w http.ResponseWriter, r *http.Request) {
+	data := d.current(r.Context())
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(data)
+}
+
+// RetrieveModel handles GET /v1/models/{model} by writing the matching document entry.
+// It returns 404 if the requested model ID is not in the document.
+func (d *ModelsDocument) RetrieveModel(w http.ResponseWriter, r *http.Request) {
+	data := d.current(r.Context())
+	requestedModel := r.PathValue("model")
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	for _, model := range gjson.GetBytes(data, "data").Array() {
+		if model.Get("id").String() == requestedModel {
+			_, _ = w.Write([]byte(model.Raw))
+			return
+		}
+	}
+	forwarder.HTTPError(w, r, http.StatusNotFound, "model %s not found in models document", requestedModel)
 }
 
 // reload returns the current document, re-reading the file only if it changed since the last
@@ -84,4 +98,15 @@ func (d *ModelsDocument) reload() ([]byte, error) {
 
 	d.last, d.size, d.modTime = data, info.Size(), info.ModTime()
 	return data, nil
+}
+
+func (d *ModelsDocument) current(ctx context.Context) []byte {
+	data, err := d.reload()
+	if err != nil {
+		d.log.ErrorContext(ctx, "Serving last good models document", "error", err)
+		d.mu.Lock()
+		data = d.last
+		d.mu.Unlock()
+	}
+	return data
 }

@@ -30,21 +30,23 @@ const (
 
 // Client is used to interact with Privatemode's API.
 type Client struct {
-	httpClient *http.Client
-	endpoint   string
+	httpClient       *http.Client
+	endpoint         string
+	extraHTTPHeaders http.Header
 }
 
 // New sets up a new [Client].
-func New(httpClient *http.Client, endpoint string) *Client {
+func New(httpClient *http.Client, endpoint string, extraHTTPHeaders http.Header) *Client {
 	return &Client{
-		httpClient: httpClient,
-		endpoint:   endpoint,
+		httpClient:       httpClient,
+		endpoint:         endpoint,
+		extraHTTPHeaders: extraHTTPHeaders,
 	}
 }
 
 // ExchangeSecret performs a cryptographic key agreement with the Privatemode backend.
 func (c *Client) ExchangeSecret(ctx context.Context, meshCA *x509.Certificate, cred auth.Credential) (string, []byte, error) {
-	return ExchangeSecret(ctx, c.httpClient, c.endpoint, cred, func(req *httpapi.SecretReq, resp *httpapi.SecretResp) error {
+	return ExchangeSecret(ctx, c.httpClient, c.endpoint, cred, c.extraHTTPHeaders, func(req *httpapi.SecretReq, resp *httpapi.SecretResp) error {
 		ssPublicKey, err := getVerifiedPublicKey(resp.MeshCert, meshCA)
 		if err != nil {
 			return fmt.Errorf("getting public key: %w", err)
@@ -60,7 +62,7 @@ type responseVerifier func(*httpapi.SecretReq, *httpapi.SecretResp) error
 
 // ExchangeSecret performs a cryptographic key agreement with the Privatemode backend.
 func ExchangeSecret(
-	ctx context.Context, httpClient *http.Client, endpoint string, cred auth.Credential, verify responseVerifier,
+	ctx context.Context, httpClient *http.Client, endpoint string, cred auth.Credential, extraHTTPHeaders http.Header, verify responseVerifier,
 ) (string, []byte, error) {
 	priv, err := hpke.MLKEM768X25519().GenerateKey()
 	if err != nil {
@@ -73,7 +75,7 @@ func ExchangeSecret(
 	if err != nil {
 		return "", nil, fmt.Errorf("marshaling request: %w", err)
 	}
-	body, err := httpapi.Do(ctx, httpClient, http.MethodPost, "https://"+endpoint+SecretPath, reqJSON, cred)
+	body, err := httpapi.Do(ctx, httpClient, http.MethodPost, "https://"+endpoint+SecretPath, reqJSON, cred, extraHTTPHeaders)
 	if err != nil {
 		return "", nil, fmt.Errorf("doing request: %w", err)
 	}

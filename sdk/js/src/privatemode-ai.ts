@@ -141,6 +141,7 @@ export interface PrivatemodeStreamOptions extends PrivatemodeRequestOptions {
 export class PrivatemodeCore {
   private authProvider: AuthProvider;
   private apiBaseURL: string;
+  private extraHTTPHeaders: Record<string, string>;
   private isBrowser: boolean;
   private _manifestBytes: Uint8Array | null;
   private wasmURL: string | URL;
@@ -155,7 +156,11 @@ export class PrivatemodeCore {
   private closed = false;
   private wasmClient: WasmClient | null = null;
 
-  constructor(options: PrivatemodeCoreOptions = {}) {
+  constructor(
+    options: PrivatemodeCoreOptions & {
+      extraHTTPHeaders?: HeadersInit;
+    } = {},
+  ) {
     this.isBrowser =
       typeof window !== 'undefined' &&
       typeof window.document !== 'undefined' &&
@@ -190,6 +195,11 @@ export class PrivatemodeCore {
     this.authProvider = auth;
 
     this.apiBaseURL = options.apiBaseURL ?? 'https://api.privatemode.ai';
+    const extraHTTPHeaders = new Headers(options.extraHTTPHeaders);
+    if (!extraHTTPHeaders.has('Privatemode-Client')) {
+      extraHTTPHeaders.set('Privatemode-Client', 'SDK');
+    }
+    this.extraHTTPHeaders = Object.fromEntries(extraHTTPHeaders);
     this._manifestBytes = options.manifestBytes ?? null;
     this.wasmURL = options.wasmURL ?? defaultWasmURL();
     this.browserWasmURL =
@@ -247,6 +257,7 @@ export class PrivatemodeCore {
       cred.value,
       this.apiBaseURL,
       this.enableWasmLogging,
+      this.extraHTTPHeaders,
     );
     this._manifestBytes = manifestBytes;
     this.initialized = true;
@@ -800,6 +811,7 @@ export class PrivatemodeCore {
         cred.value,
         this.apiBaseURL,
         this.enableWasmLogging,
+        this.extraHTTPHeaders,
       );
     } catch (error) {
       if (
@@ -819,6 +831,7 @@ export class PrivatemodeCore {
           cred.value,
           this.apiBaseURL,
           this.enableWasmLogging,
+          this.extraHTTPHeaders,
         );
         this._manifestBytes = manifestBytes;
         if (this.onManifestUpdate) {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/inference"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
@@ -42,7 +43,7 @@ func (t *Adapter) HandlesCatchAll() bool {
 func (t *Adapter) forwardRequest(w http.ResponseWriter, r *http.Request) {
 	t.encForwarder.ForwardEncrypted(
 		w, r,
-		forwarder.NoRequestMutation,
+		inference.RejectAnonymousRequest,
 		func(resp *http.Response) (forwarder.Response, error) {
 			// All responses are unary JSON
 			dsResp, err := forwarder.ReadUnaryResponse(resp, constants.MaxUnaryResponseBodyBytes)

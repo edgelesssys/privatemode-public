@@ -1,0 +1,29 @@
+diff --git a/vllm/parser/glm47_moe.py b/vllm/parser/glm47_moe.py
+index 00e517f2ea..83ea922a39 100644
+--- a/vllm/parser/glm47_moe.py
++++ b/vllm/parser/glm47_moe.py
+@@ -203,6 +203,24 @@ class Glm47MoeParser(ParserEngine):
+         )
+         super().__init__(tokenizer, tools, **kwargs)
+ 
++    def adjust_request(
++        self, request: ChatCompletionRequest | ResponsesRequest
++    ) -> ChatCompletionRequest | ResponsesRequest:
++        request = super().adjust_request(request)
++        # A request that allows no tool call must not start one: the response
++        # cannot carry it. Without tools tool_choice is "none", and the
++        # renderer then calls this only because glm47 is also the reasoning
++        # parser. logit_bias is rejected with speculative decoding.
++        tool_call_start_id = self.vocab.get(TOOL_CALL_START)
++        if tool_call_start_id is not None and (
++            not request.tools or request.tool_choice == "none"
++        ):
++            request.logit_bias = {
++                **(request.logit_bias or {}),
++                str(tool_call_start_id): -100.0,
++            }
++        return request
++
+     def _emit_name_delta(self, idx: int, deltas, name: str | None) -> None:
+         if name is not None:
+             name = name.strip()

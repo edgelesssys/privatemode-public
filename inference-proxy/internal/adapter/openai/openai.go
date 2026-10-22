@@ -47,8 +47,9 @@ func New(workloadTasks []string, secrets inference.SecretGetter, ocspStatusFile 
 func (a *Adapter) RegisterRoutes(mux *http.ServeMux) {
 	// List models: https://platform.openai.com/docs/api-reference/models/list
 	// Not wrapped with OCSP verification - used for health checks
-	mux.HandleFunc("GET "+constants.OpenAIModelsEndpoint, a.forwardModelsRequest)
-	mux.HandleFunc("GET "+constants.OpenAIModelsEndpoint+"/{model}", a.forwardSpecificModelRequest) // Also handle model details endpoint
+	mux.HandleFunc("GET "+constants.OpenAIModelsEndpoint, a.forwardListModelsRequest)
+	// Retrieve model: https://platform.openai.com/docs/api-reference/models/retrieve
+	mux.HandleFunc("GET "+constants.OpenAIModelsEndpoint+"/{model}", a.forwardRetrieveModelRequest)
 
 	// Create chat completion: https://platform.openai.com/docs/api-reference/chat/create
 	mux.Handle(constants.OpenAIChatCompletionsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardChatCompletionsRequest)))
@@ -68,9 +69,9 @@ func (a *Adapter) HandlesCatchAll() bool {
 	return false
 }
 
-// forwardModelsRequest forwards a request to the models endpoint of vllm,
+// forwardListModelsRequest forwards a list models request to vllm,
 // and augments the response with the task vllm is running with.
-func (a *Adapter) forwardModelsRequest(w http.ResponseWriter, r *http.Request) {
+func (a *Adapter) forwardListModelsRequest(w http.ResponseWriter, r *http.Request) {
 	mutate := func(body []byte) ([]byte, error) {
 		data := gjson.GetBytes(body, "data")
 		if !data.Exists() || !data.IsArray() {
@@ -99,7 +100,9 @@ func (a *Adapter) forwardModelsRequest(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
-func (a *Adapter) forwardSpecificModelRequest(w http.ResponseWriter, r *http.Request) {
+// forwardRetrieveModelRequest forwards a retrieve model request to vllm,
+// and augments the response with the task vllm is running with.
+func (a *Adapter) forwardRetrieveModelRequest(w http.ResponseWriter, r *http.Request) {
 	mutate := func(body []byte) ([]byte, error) {
 		body, err := sjson.SetBytes(body, "tasks", a.WorkloadTasks)
 		if err != nil {
@@ -135,7 +138,7 @@ func mapSuccessResponseBody(fn func([]byte) ([]byte, error)) forwarder.ResponseM
 func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Request) {
 	a.ForwardEncrypted(
 		w, r,
-		forwarder.NoRequestMutation,
+		inference.RejectAnonymousRequest,
 		nil,
 		nil,
 		extractOpenAIUsage,
@@ -146,7 +149,7 @@ func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Reques
 func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Request) {
 	a.ForwardEncrypted(
 		w, r,
-		a.mutators.AudioStreamUsageReportingInjector,
+		forwarder.RequestMutatorChain(inference.RejectAnonymousRequest, a.mutators.AudioStreamUsageReportingInjector),
 		legacyStringDurationMutation(r.Header.Get(constants.PrivatemodeVersionHeader)),
 		nil,
 		extractTranscriptionUsage,
@@ -185,6 +188,7 @@ func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 	a.ForwardEncrypted(
 		w, r,
 		forwarder.RequestMutatorChain(
+			validateAnonymousRequest,
 			a.mutators.CacheSaltValidator,
 			a.mutators.LegacyCacheSaltHasher,
 			a.mutators.MediaContentValidator,

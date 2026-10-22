@@ -296,6 +296,15 @@ func (a *Adapter) reportStreamingUsage(
 	return body
 }
 
+// RejectAnonymousRequest denies anonymous access to endpoints other than app text chat.
+// Adapters use it as a post-decryption request mutator for unsupported APIs.
+func RejectAnonymousRequest(r *http.Request) error {
+	if r.Header.Get(constants.PrivatemodeAnonymousAuthHeader) == "" {
+		return nil
+	}
+	return forwarder.NewError("anonymous access", errors.New("only text chat is available; sign in to continue"), http.StatusForbidden)
+}
+
 // ForwardEncrypted decrypts the downstream request, forwarding it as plaintext and encrypts the
 // upstream response to send back to the client. It also handles usage extraction.
 func (a *Adapter) ForwardEncrypted(

@@ -59,18 +59,15 @@ func (a *Adapter) HandlesCatchAll() bool {
 func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request) {
 	a.ForwardEncrypted(
 		w, r,
-		forwarder.RequestMutatorChain(a.cacheSaltValidator, a.legacyCacheSaltHasher, a.mediaContentValidator),
+		forwarder.RequestMutatorChain(inference.RejectAnonymousRequest, a.cacheSaltValidator, a.legacyCacheSaltHasher, a.mediaContentValidator),
 		nil,
 		nil,
-		extractAnthropicUsage,
-		extractAnthropicUsage,
+		extractAnthropicUsageUnary,
+		extractAnthropicUsageStream(),
 	)
 }
 
-func extractAnthropicUsage(body []byte) (usage.Stats, error) {
-	// In streaming responses, usage information is only included in message_delta events, while
-	// response tokens are sent in content_block_delta events. We attempt simply attempt parsing
-	// the known usage structure.
+func extractAnthropicUsageUnary(body []byte) (usage.Stats, error) {
 	var parsed struct {
 		Usage *anthropic.Usage `json:"usage"`
 	}
@@ -81,4 +78,54 @@ func extractAnthropicUsage(body []byte) (usage.Stats, error) {
 		return usage.Stats{}, inference.ErrNoUsage
 	}
 	return parsed.Usage.ToUsageStats(), nil
+}
+
+// extractAnthropicUsageStream creates an extractor with usage state for a single request.
+// Each event contains cumulative counts, but may omit fields that have been sent previously (e.g. input_tokens).
+func extractAnthropicUsageStream() inference.UsageExtractor {
+	var latest anthropic.Usage
+	return func(body []byte) (usage.Stats, error) {
+		var parsed struct {
+			Type    string           `json:"type"`
+			Usage   *anthropic.Usage `json:"usage,omitzero"`
+			Message struct {
+				Usage *anthropic.Usage `json:"usage,omitzero"`
+			} `json:"message"`
+			Delta struct {
+				StopReason string `json:"stop_reason"`
+			} `json:"delta"`
+		}
+		err := json.Unmarshal(body, &parsed)
+		if err != nil {
+			return usage.Stats{}, err
+		}
+
+		var next *anthropic.Usage
+		switch parsed.Type {
+		case "message_start":
+			next = parsed.Message.Usage
+		case "message_delta":
+			next = parsed.Usage
+			// If this was the final event in the stream, simply return
+			// the usage in that message.
+			// This is important since the final message splits up input tokens
+			// into regular input, cached creation, and cache read tokens.
+			// Simply adding this onto existing information in 'latest' results
+			// in over calculation for those values.
+			if next != nil && parsed.Delta.StopReason != "" {
+				return next.ToUsageStats(), nil
+			}
+		}
+		if next == nil {
+			return usage.Stats{}, inference.ErrNoUsage
+		}
+
+		latest = anthropic.Usage{
+			InputTokens:              max(next.InputTokens, latest.InputTokens),
+			OutputTokens:             max(next.OutputTokens, latest.OutputTokens),
+			CacheReadInputTokens:     max(next.CacheReadInputTokens, latest.CacheReadInputTokens),
+			CacheCreationInputTokens: max(next.CacheCreationInputTokens, latest.CacheCreationInputTokens),
+		}
+		return latest.ToUsageStats(), nil
+	}
 }

@@ -14,6 +14,7 @@ stdenv.mkDerivation (finalAttrs: {
   src = lib.continuumRepoRootSrc [
     "chat"
     "sdk/js"
+    "internal/anonymous/policy.json"
   ];
   pnpmRoot = "chat";
 
@@ -27,7 +28,7 @@ stdenv.mkDerivation (finalAttrs: {
     ];
     fetcherVersion = 4;
     sourceRoot = "${finalAttrs.src.name}/chat";
-    hash = "sha256-KVDhoh5zrPUZUeZD2sbRdG3COeZExPEd01ecwFfmmrQ=";
+    hash = "sha256-e04MwxwN3j347fFJKmwtgT8xpMB4sENOZ5uSMGX/iXY=";
   };
 
   nativeBuildInputs = [

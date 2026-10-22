@@ -192,11 +192,35 @@ func TestValidatePromptTokens(t *testing.T) {
 			err := validatePromptTokens(r)
 			if tc.wantErr {
 				assert.Error(t, err)
+				assert.Equal(t, http.StatusBadRequest, forwarder.StatusFromError(err))
 			} else {
 				assert.NoError(t, err)
 			}
 		})
 	}
+}
+
+func TestForwardEncryptedTokenMismatch(t *testing.T) {
+	require := require.New(t)
+
+	secret := bytes.Repeat([]byte{0x01}, 32)
+	r, _ := buildEncryptedRequest(t, secret, `{"model":"gpt","prompt":"abcdefgh"}`, constants.OpenAILegacyCompletionsEndpoint)
+	r.Header.Set(constants.PrivatemodeVersionHeader, "v1.58.0")
+	r.Header.Set(constants.PrivatemodeContentLengthTokensHeader, "1000")
+
+	plainForwarder := &fakePlainForwarder{}
+	f := New(plainForwarder, &fakeSecretGetter{secret: secret})
+	f.ForwardEncrypted(
+		httptest.NewRecorder(), r,
+		forwarder.NoRequestMutation,
+		func(*http.Response) (forwarder.Response, error) { return nil, nil },
+	)
+	require.True(plainForwarder.called)
+
+	// Run request mutator, as [forwarder.Forwarder] would
+	err := plainForwarder.reqMutator(r)
+	require.Error(err)
+	require.Equal(http.StatusBadRequest, forwarder.StatusFromError(err))
 }
 
 // buildEncryptedRequest builds an encrypted request together with the client exchange that can

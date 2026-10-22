@@ -13,6 +13,7 @@ let
       "go.mod"
       "go.sum"
       "inference-proxy"
+      "internal/anonymous"
       "internal/httprpc"
       "internal/mtls"
       "internal/oss"

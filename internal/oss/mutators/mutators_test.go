@@ -72,6 +72,29 @@ func TestContentLengthTokensInjector(t *testing.T) {
 	}
 }
 
+func TestEstimateAudioDuration(t *testing.T) {
+	for name, tc := range map[string]struct {
+		audioTokens int64
+		modelName   string
+		wantSeconds int64
+	}{
+		"empty whisper":          {modelName: "openai/whisper-large-v3"},
+		"whisper":                {audioTokens: 200, modelName: "openai/whisper-large-v3", wantSeconds: 2},
+		"whisper alias":          {audioTokens: 200, modelName: "whisper-large-v3", wantSeconds: 2},
+		"whisper whole seconds":  {audioTokens: 199, modelName: "whisper-large-v3", wantSeconds: 1},
+		"empty voxtral":          {modelName: "voxtral-mini-3b"},
+		"below voxtral overhead": {audioTokens: 100, modelName: "voxtral-mini-3b"},
+		"voxtral overhead":       {audioTokens: 323, modelName: "voxtral-mini-3b"},
+		"voxtral":                {audioTokens: 373, modelName: "voxtral-mini-3b", wantSeconds: 2},
+		"voxtral whole seconds":  {audioTokens: 372, modelName: "voxtral-mini-3b", wantSeconds: 1},
+		"unknown model":          {audioTokens: 348, modelName: "unknown", wantSeconds: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.wantSeconds, EstimateAudioDuration(tc.audioTokens, tc.modelName))
+		})
+	}
+}
+
 func TestGenerateShardKey(t *testing.T) {
 	cacheSalt := "test-salt"
 

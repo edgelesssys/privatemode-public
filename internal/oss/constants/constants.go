@@ -98,6 +98,8 @@ const (
 	PrivatemodeClientAPIGateway = "ApiGateway"
 	// PrivatemodeClientSDK is the [PrivatemodeClientHeader] value for the Privatemode SDK client.
 	PrivatemodeClientSDK = "SDK"
+	// PrivatemodeClientWebApp is the [PrivatemodeClientHeader] value for the web app.
+	PrivatemodeClientWebApp = "WebApp"
 	// PrivatemodeNvidiaOCSPPolicyHeader is the header used to allow specific NVIDIA OCSP status codes.
 	PrivatemodeNvidiaOCSPPolicyHeader = "Privatemode-NVIDIA-OCSP-Policy"
 	// PrivatemodeNvidiaOCSPPolicyMACHeader is the header used to verify the integrity of the Privatemode-NVIDIA-OCSP-Policy header.

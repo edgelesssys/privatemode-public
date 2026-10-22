@@ -131,6 +131,14 @@ func EstimateAudioTokens(bodySize int64, modelName string) int64 {
 	return seconds*model.TokensPerAudioSecondVoxtral + model.TokenOverheadVoxtral
 }
 
+// EstimateAudioDuration estimates audio duration in whole seconds from model-specific prompt tokens.
+func EstimateAudioDuration(audioTokens int64, modelName string) int64 {
+	if model.Resolve(modelName) == model.OpenAIWhisperLargeV3 {
+		return audioTokens / model.TokensPerAudioSecondWhisper
+	}
+	return max(0, (audioTokens-model.TokenOverheadVoxtral)/model.TokensPerAudioSecondVoxtral)
+}
+
 // shardContent assembles the request content used for shard key generation and token
 // estimation. Image payloads are replaced by a hash sized to the image's embedding so the
 // resulting length reflects the number of tokens the model actually sees (see [replaceImages]).

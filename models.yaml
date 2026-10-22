@@ -152,3 +152,18 @@ data:
         "nvidia.com/gpu.B200=true"
       ]
     }
+  nvidia-glm-5-3-nvfp4: |-
+    {
+      "model_source": "https://huggingface.co/nvidia/GLM-5.3-NVFP4",
+      "commit_hash": "e3b8f9f2fad29727dfa95e766c5cac18ea1414bf",
+      "excluded_files": "",
+      "root_hash": "df66c4cfc7f34c4f7aefd710795a511cde8384677cd041220a04b55541a07d75",
+      "hash_offset": "464185135104",
+      "erofs_version": "1.9.4",
+      "veritysetup_version": "2.8.8",
+      "file_size_bytes": 467840147456,
+      "node_selectors": [
+        "privatemode.edgeless.systems/gpu-type=b300",
+        "nvidia.com/gpu.B200=true"
+      ]
+    }

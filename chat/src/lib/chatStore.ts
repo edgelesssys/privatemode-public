@@ -4,6 +4,8 @@ import type { PrivatemodeClient } from './clientStore';
 import { translate } from './i18n';
 import { deleteImages, loadImage, saveImage } from './imageStore';
 import type { ReasoningEffort } from './models';
+import { modelConfig } from './models';
+import { showToast } from './toastStore';
 
 export interface AttachedFile {
   name: string;
@@ -200,38 +202,38 @@ function createChatStore() {
   const { subscribe, set, update } = writable<Chat[]>(loadChats());
   const currentChatId = writable<string | null>(loadCurrentChatId());
 
-  const saveToStorage = (chats: Chat[]) => {
-    if (typeof window !== 'undefined') {
-      // Persist image data in IndexedDB and strip dataUrl from
-      // localStorage to avoid exceeding its ~5 MB quota.
-      const stripped = chats.map((chat) => ({
-        ...chat,
-        messages: chat.messages.map((msg) => {
-          if (!msg.attachedImages || msg.attachedImages.length === 0)
-            return msg;
-          return {
-            ...msg,
-            attachedImages: msg.attachedImages.map(
-              ({ dataUrl, ...rest }): PersistedImage => {
-                saveImage(rest.id, dataUrl).catch((e) =>
-                  console.error('Failed to persist image to IndexedDB:', e),
-                );
-                return rest;
-              },
-            ),
-          };
-        }),
-      }));
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(stripped));
-      } catch (e) {
-        if (e instanceof DOMException && e.name === 'QuotaExceededError') {
-          console.error('localStorage quota exceeded');
-          alert(translate('storage.full'));
-        } else {
-          throw e;
-        }
+  /** Returns false if the chats didn't fit into localStorage. */
+  const saveToStorage = (chats: Chat[]): boolean => {
+    if (typeof window === 'undefined') return true;
+    // Persist image data in IndexedDB and strip dataUrl from
+    // localStorage to avoid exceeding its ~5 MB quota.
+    const stripped = chats.map((chat) => ({
+      ...chat,
+      messages: chat.messages.map((msg) => {
+        if (!msg.attachedImages || msg.attachedImages.length === 0) return msg;
+        return {
+          ...msg,
+          attachedImages: msg.attachedImages.map(
+            ({ dataUrl, ...rest }): PersistedImage => {
+              saveImage(rest.id, dataUrl).catch((e) =>
+                console.error('Failed to persist image to IndexedDB:', e),
+              );
+              return rest;
+            },
+          ),
+        };
+      }),
+    }));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stripped));
+      return true;
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'QuotaExceededError') {
+        console.error('localStorage quota exceeded');
+        showToast(translate('storage.full'), { type: 'error' });
+        return false;
       }
+      throw e;
     }
   };
 
@@ -518,6 +520,15 @@ function createChatStore() {
             : { ...m, id: crypto.randomUUID() },
         );
 
+      // A retired model has no config left. Don't carry it over, so the branch
+      // can continue with a currently offered model instead of inheriting the
+      // source chat's "model unavailable" state.
+      const sourceModelId = sourceChat.modelId;
+      const modelId =
+        sourceModelId && Object.hasOwn(modelConfig, sourceModelId)
+          ? sourceModelId
+          : undefined;
+
       const now = Date.now();
       const newChat: Chat = {
         id: crypto.randomUUID(),
@@ -527,14 +538,19 @@ function createChatStore() {
         updatedAt: now,
         lastUserMessageAt: now,
         wordCount: calculateChatWordCount(branchedMessages),
-        modelId: sourceChat.modelId,
+        modelId,
       };
 
+      let saved = false;
       update((chats) => {
         const updated = [...chats, newChat];
-        saveToStorage(updated);
-        return updated;
+        saved = saveToStorage(updated);
+        // Keep the in-memory list in sync with storage. Otherwise every later
+        // save, including deleting chats to free up space, fails again because
+        // the unpersisted branch is serialized along with everything else.
+        return saved ? updated : chats;
       });
+      if (!saved) return null;
 
       currentChatId.set(newChat.id);
       saveCurrentChatId(newChat.id);

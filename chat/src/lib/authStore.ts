@@ -128,6 +128,19 @@ function withAttribution(target: string): string {
   return url.toString();
 }
 
+/**
+ * URL of the portal's organization creation step. The portal sends the user
+ * back here once the organization exists, so a new account does not have to
+ * find its way back to the chat. The portal only honors known origins.
+ */
+function createOrganizationUrl(): string {
+  const url = new URL(
+    withAttribution('https://portal.privatemode.ai/create-organization'),
+  );
+  url.searchParams.set('return_to', `${window.location.origin}/`);
+  return url.toString();
+}
+
 export async function initializeAuth(): Promise<void> {
   // Read the landing URL before Clerk is fetched and anything can navigate.
   getLandingAttribution();
@@ -182,9 +195,7 @@ export async function initializeAuth(): Promise<void> {
               // The hop that matters for attribution. Signing up happens in a
               // Clerk modal on this origin, so a new account reaches the portal
               // for the first time right here, with no organization yet.
-              window.location.href = withAttribution(
-                'https://portal.privatemode.ai/create-organization',
-              );
+              window.location.href = createOrganizationUrl();
             }
           })
           .catch((err: unknown) => {

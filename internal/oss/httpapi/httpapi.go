@@ -17,10 +17,15 @@ import (
 var ErrUnauthorized = errors.New(http.StatusText(http.StatusUnauthorized))
 
 // Do performs an HTTP request to the Privatemode API.
-func Do(ctx context.Context, client *http.Client, method, url string, reqBody []byte, cred auth.Credential) ([]byte, error) {
+func Do(ctx context.Context, client *http.Client, method, url string, reqBody []byte, cred auth.Credential, extraHTTPHeaders http.Header) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	for key, values := range extraHTTPHeaders {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
 	}
 	cred.Apply(req.Header)
 	req.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())

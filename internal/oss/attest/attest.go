@@ -26,17 +26,19 @@ var ErrManifestMismatch = errors.New("active manifest does not match expected ma
 
 // Getter is a client that gets the mesh CA of the Privatemode deployment.
 type Getter struct {
-	httpClient     *http.Client
-	contrastClient *contrastsdk.Client
-	endpoint       string
+	httpClient       *http.Client
+	contrastClient   *contrastsdk.Client
+	endpoint         string
+	extraHTTPHeaders http.Header
 }
 
 // NewGetter creates a new Getter.
-func NewGetter(httpClient *http.Client, endpoint string, contrastClient *contrastsdk.Client) Getter {
+func NewGetter(httpClient *http.Client, endpoint string, contrastClient *contrastsdk.Client, extraHTTPHeaders http.Header) Getter {
 	return Getter{
-		httpClient:     httpClient,
-		contrastClient: contrastClient,
-		endpoint:       endpoint,
+		httpClient:       httpClient,
+		contrastClient:   contrastClient,
+		endpoint:         endpoint,
+		extraHTTPHeaders: extraHTTPHeaders,
 	}
 }
 
@@ -51,7 +53,7 @@ func (c Getter) GetAttestedMeshCA(ctx context.Context, expectedMfBytes []byte, c
 	if err != nil {
 		return nil, fmt.Errorf("marshaling attest request: %w", err)
 	}
-	attestResp, err := httpapi.Do(ctx, c.httpClient, http.MethodPost, "https://"+c.endpoint+"/privatemode/v1/attest", attestReq, cred)
+	attestResp, err := httpapi.Do(ctx, c.httpClient, http.MethodPost, "https://"+c.endpoint+"/privatemode/v1/attest", attestReq, cred, c.extraHTTPHeaders)
 	if err != nil {
 		return nil, fmt.Errorf("doing attest request: %w", err)
 	}

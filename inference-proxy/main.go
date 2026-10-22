@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter"
@@ -159,7 +160,11 @@ func run(ctx context.Context, cfg runConfig, log *slog.Logger) error {
 	// Wrap the transport so outbound calls to vLLM get a client span
 	// and the W3C traceparent header is injected automatically.
 	workloadClient := &http.Client{Transport: otelhttp.NewTransport(httputil.NewTransport())}
-	forwarder := forwarder.New(workloadClient, net.JoinHostPort(cfg.workloadAddress, cfg.workloadPort), forwarder.SchemeHTTP, log)
+	upstream := forwarder.UpstreamModel
+	if slices.Contains(cfg.adapterTypes, adapter.InferenceAPIUnstructured) {
+		upstream = forwarder.UpstreamDocuments
+	}
+	forwarder := forwarder.New(workloadClient, net.JoinHostPort(cfg.workloadAddress, cfg.workloadPort), forwarder.SchemeHTTP, upstream, log)
 
 	mtlsIdentity, err := mtls.LoadIdentity(cfg.identityCertPath, cfg.identityKeyPath, cfg.identityCAPath)
 	if err != nil {

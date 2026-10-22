@@ -139,6 +139,7 @@ func (e *encForwarder) ForwardEncrypted(
 	)
 }
 
+// validatePromptTokens checks the client's token estimate header against the decrypted body.
 func validatePromptTokens(r *http.Request) error {
 	clientVersion := r.Header.Get(constants.PrivatemodeVersionHeader)
 	isCompletion := slices.Contains(
@@ -153,7 +154,7 @@ func validatePromptTokens(r *http.Request) error {
 
 	reported, err := strconv.ParseInt(r.Header.Get(constants.PrivatemodeContentLengthTokensHeader), 10, 64)
 	if err != nil || reported < 0 {
-		return fmt.Errorf("%s must be a non-negative integer", constants.PrivatemodeContentLengthTokensHeader)
+		return forwarder.NewError("", fmt.Errorf("%s must be a non-negative integer", constants.PrivatemodeContentLengthTokensHeader), http.StatusBadRequest)
 	}
 	body, err := persist.ReadBodyUnlimited(r)
 	if err != nil {
@@ -164,8 +165,8 @@ func validatePromptTokens(r *http.Request) error {
 		return fmt.Errorf("estimating content tokens: %w", err)
 	}
 	if reported != estimated {
-		return fmt.Errorf("%s does not match the estimated inference usage: reported %d, estimated %d",
-			constants.PrivatemodeContentLengthTokensHeader, reported, estimated)
+		return forwarder.NewError("", fmt.Errorf("%s does not match the estimated inference usage: reported %d, estimated %d",
+			constants.PrivatemodeContentLengthTokensHeader, reported, estimated), http.StatusBadRequest)
 	}
 	return nil
 }

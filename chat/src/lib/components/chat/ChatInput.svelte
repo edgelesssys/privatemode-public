@@ -1,5 +1,13 @@
 <script lang="ts">
-  import { Image, Paperclip, Square, ArrowUp, Mic } from 'lucide-svelte';
+  import {
+    Image,
+    Paperclip,
+    Square,
+    ArrowUp,
+    Mic,
+    LockKeyhole,
+    Info,
+  } from 'lucide-svelte';
   import ModelPicker from './ModelPicker.svelte';
   import Tooltip from '../common/Tooltip.svelte';
   import ImagePreviewModal from '../common/ImagePreviewModal.svelte';
@@ -14,7 +22,8 @@
   import { chatStore } from '#lib/chatStore.js';
   import type { AttachedFile, AttachedImage, Message } from '#lib/chatStore.js';
   import { countWords } from '#lib/chatStore.js';
-  import { modelConfig } from '#lib/models.js';
+  import { ANONYMOUS_MAX_CHARACTERS, modelConfig } from '#lib/models.js';
+  import { isLimitedMode, signIn } from '#lib/authStore.js';
   import {
     models as modelsStore,
     modelsLoaded,
@@ -41,12 +50,14 @@
   export let currentChatId: string | null;
   export let onChatCreated: (chatId: string) => void = () => {};
   export let draftMessage: Message | null = null;
+  export let message = '';
+  export let anonymousCharacterCount: number;
+  export let anonymousConversationExhausted: boolean;
 
   const EXTENDED_THINKING_KEY = 'privatemode_extended_thinking';
   const THINKING_ENABLED_KEY = 'privatemode_thinking_enabled';
   const THINKING_ENABLED_KEY_PREFIX = 'privatemode_thinking_enabled_';
 
-  let message = '';
   let textarea: HTMLTextAreaElement;
   let selectedModel = '';
   let extendedThinking = false;
@@ -80,6 +91,7 @@
     if (savedThinkingEnabled) {
       thinkingEnabled = savedThinkingEnabled === 'true';
     }
+    requestAnimationFrame(autoResize);
 
     return () => {
       mounted = false;
@@ -104,7 +116,6 @@
   $: currentChat = currentChatId
     ? $chatStore.find((c) => c.id === currentChatId)
     : null;
-  $: chatHasMessages = (currentChat?.messages.length ?? 0) > 0;
   $: activeModel = currentChat?.modelId ?? selectedModel;
   $: chatHasError = currentChat?.hasError ?? false;
   $: chatModelUnavailable =
@@ -128,11 +139,25 @@
   $: wouldExceedLimit = totalWordCount > maxWords;
   $: hasMessageText = message.trim().length > 0;
   $: hasAttachments = attachedFiles.length > 0 || attachedImages.length > 0;
+  $: anonymousHistoryBlocked =
+    currentChat?.messages.some(
+      (msg) =>
+        msg.role === 'system' ||
+        msg.attachedFiles?.length ||
+        msg.attachedImages?.length,
+    ) ?? false;
+  $: anonymousBlocked =
+    $isLimitedMode &&
+    (anonymousCharacterCount > ANONYMOUS_MAX_CHARACTERS ||
+      anonymousConversationExhausted ||
+      hasAttachments ||
+      anonymousHistoryBlocked);
   $: canSend =
     (hasMessageText || hasAttachments) &&
     !!activeModel &&
     !isGenerating &&
     !wouldExceedLimit &&
+    !anonymousBlocked &&
     !chatDisabled &&
     !isUploading &&
     !!privatemodeAIClient;
@@ -184,29 +209,35 @@
     )?.id ??
     availableTranscriptionModels[0]?.id ??
     null;
-  $: attachButtonTitle = isUploadingDocuments
-    ? $t('chat.uploadingDocuments')
+  $: attachButtonTitle = $isLimitedMode
+    ? $t('chat.signInUploads')
+    : isUploadingDocuments
+      ? $t('chat.uploadingDocuments')
+      : isGenerating
+        ? $t('chat.cannotAttachDocumentsGenerating')
+        : !supportsFileUploads
+          ? $t('chat.noDocumentUploadSupport')
+          : $t('chat.attachDocuments');
+  $: imageButtonTitle = $isLimitedMode
+    ? $t('chat.signInUploads')
     : isGenerating
-      ? $t('chat.cannotAttachDocumentsGenerating')
-      : !supportsFileUploads
-        ? $t('chat.noDocumentUploadSupport')
-        : $t('chat.attachDocuments');
-  $: imageButtonTitle = isGenerating
-    ? $t('chat.cannotAttachImagesGenerating')
-    : !supportsVision
-      ? $t('chat.noImageSupport')
-      : $t('chat.attachImages');
-  $: audioButtonTitle = isUploadingAudio
-    ? $t('chat.uploadingAudio')
-    : isGenerating
-      ? $t('chat.cannotAttachAudioGenerating')
-      : !supportsFileUploads
-        ? $t('chat.noAudioUploadSupport')
-        : !selectedTranscriptionModel
-          ? $modelsLoaded
-            ? $t('chat.noTranscriptionModel')
-            : $t('chat.transcriptionModelsLoading')
-          : $t('chat.attachAudio');
+      ? $t('chat.cannotAttachImagesGenerating')
+      : !supportsVision
+        ? $t('chat.noImageSupport')
+        : $t('chat.attachImages');
+  $: audioButtonTitle = $isLimitedMode
+    ? $t('chat.signInUploads')
+    : isUploadingAudio
+      ? $t('chat.uploadingAudio')
+      : isGenerating
+        ? $t('chat.cannotAttachAudioGenerating')
+        : !supportsFileUploads
+          ? $t('chat.noAudioUploadSupport')
+          : !selectedTranscriptionModel
+            ? $modelsLoaded
+              ? $t('chat.noTranscriptionModel')
+              : $t('chat.transcriptionModelsLoading')
+            : $t('chat.attachAudio');
 
   function autoResize() {
     if (textarea) {
@@ -307,6 +338,7 @@
   }
 
   function readImageFile(file: globalThis.File, fallbackName?: string) {
+    if ($isLimitedMode) return;
     loadingImageCount++;
     readImageAsAttached(file, fallbackName)
       .then((image) => {
@@ -326,7 +358,7 @@
   }
 
   async function uploadAudioFiles(files: globalThis.File[]) {
-    if (files.length === 0) return;
+    if ($isLimitedMode || files.length === 0) return;
     const client = privatemodeAIClient;
     if (!client) {
       showErrorToast($t('error.connecting'));
@@ -361,7 +393,7 @@
   }
 
   async function uploadDocumentFiles(files: globalThis.File[]) {
-    if (files.length === 0) return;
+    if ($isLimitedMode || files.length === 0) return;
     const client = privatemodeAIClient;
     if (!client) {
       showErrorToast($t('error.connecting'));
@@ -398,6 +430,10 @@
     }
     if (files.length === 0) return;
     event.preventDefault();
+    if ($isLimitedMode) {
+      showToast($t('chat.signInUploads'));
+      return;
+    }
 
     const { images, audio, documents, unsupportedImages } = classifyFiles(
       files,
@@ -482,6 +518,10 @@
   async function handleDroppedFiles(files: globalThis.File[]) {
     if (isGenerating || isUploading) return;
     if (files.length === 0) return;
+    if ($isLimitedMode) {
+      showToast($t('chat.signInUploads'));
+      return;
+    }
 
     const { images, audio, documents, unsupportedImages } = classifyFiles(
       files,
@@ -511,6 +551,7 @@
 {#if chatDisabled}
   <div
     class="chat-input-wrapper"
+    data-models-loaded={$modelsLoaded}
     role="region"
     aria-label={$t('chat.messageInput')}
   >
@@ -526,6 +567,7 @@
 {:else}
   <div
     class="chat-input-wrapper"
+    data-models-loaded={$modelsLoaded}
     role="region"
     aria-label={$t('chat.messageInput')}
   >
@@ -561,6 +603,7 @@
       class="chat-input"
       rows="1"
       disabled={isGenerating}
+      aria-describedby={anonymousBlocked ? 'anonymous-limits' : undefined}
     ></textarea>
     <div class="button-row">
       <!--
@@ -593,53 +636,69 @@
         style="display: none;"
       />
       <div class="left-buttons">
-        <Tooltip text={attachButtonTitle}>
-          <button
-            class="attach-button"
-            type="button"
-            disabled={isGenerating ||
-              isUploadingDocuments ||
-              !supportsFileUploads}
-            onclick={() => fileInput?.click()}
-          >
-            <Paperclip size={18} />
-            <span class="attach-label"
-              >{isUploadingDocuments
-                ? $t('chat.uploading')
-                : $t('chat.attachDocuments')}</span
+        {#if $isLimitedMode}
+          <Tooltip text={$t('chat.signInUploads')}>
+            <button
+              class="attach-button guest-attach"
+              type="button"
+              onclick={signIn}
+              disabled={isGenerating}
+              aria-label={$t('chat.signInUploads')}
             >
-          </button>
-        </Tooltip>
-        <Tooltip text={audioButtonTitle}>
-          <button
-            class="attach-button"
-            type="button"
-            disabled={isGenerating ||
-              isUploadingAudio ||
-              !supportsFileUploads ||
-              !selectedTranscriptionModel}
-            onclick={() => audioInput?.click()}
-          >
-            <Mic size={18} />
-            <span class="attach-label"
-              >{isUploadingAudio
-                ? $t('chat.uploading')
-                : $t('chat.attachAudio')}</span
-            >
-          </button>
-        </Tooltip>
-        {#if supportsVision}
-          <Tooltip text={imageButtonTitle}>
+              <Paperclip size={18} />
+              <span class="attach-label">{$t('chat.attachFiles')}</span>
+              <LockKeyhole size={12} />
+            </button>
+          </Tooltip>
+        {:else}
+          <Tooltip text={attachButtonTitle}>
             <button
               class="attach-button"
               type="button"
-              disabled={isGenerating}
-              onclick={() => imageInput?.click()}
+              disabled={isGenerating ||
+                isUploadingDocuments ||
+                !supportsFileUploads}
+              onclick={() => fileInput?.click()}
             >
-              <Image size={18} />
-              <span class="attach-label">{$t('chat.attachImages')}</span>
+              <Paperclip size={18} />
+              <span class="attach-label"
+                >{isUploadingDocuments
+                  ? $t('chat.uploading')
+                  : $t('chat.attachDocuments')}</span
+              >
             </button>
           </Tooltip>
+          <Tooltip text={audioButtonTitle}>
+            <button
+              class="attach-button"
+              type="button"
+              disabled={isGenerating ||
+                isUploadingAudio ||
+                !supportsFileUploads ||
+                !selectedTranscriptionModel}
+              onclick={() => audioInput?.click()}
+            >
+              <Mic size={18} />
+              <span class="attach-label"
+                >{isUploadingAudio
+                  ? $t('chat.uploading')
+                  : $t('chat.attachAudio')}</span
+              >
+            </button>
+          </Tooltip>
+          {#if supportsVision}
+            <Tooltip text={imageButtonTitle}>
+              <button
+                class="attach-button"
+                type="button"
+                disabled={isGenerating}
+                onclick={() => imageInput?.click()}
+              >
+                <Image size={18} />
+                <span class="attach-label">{$t('chat.attachImages')}</span>
+              </button>
+            </Tooltip>
+          {/if}
         {/if}
         {#if supportsExtendedThinking || supportsThinkingToggle}
           <ThinkingToggle
@@ -658,7 +717,7 @@
           <ModelPicker
             {privatemodeAIClient}
             bind:selectedModel
-            disabled={chatHasMessages}
+            disabled={!!currentChat?.modelId}
             lockedModel={currentChat?.modelId}
           />
         </div>
@@ -675,9 +734,11 @@
           </Tooltip>
         {:else}
           <Tooltip
-            text={wouldExceedLimit
-              ? $t('chat.tokenLimit')
-              : $t('chat.sendMessage')}
+            text={anonymousBlocked
+              ? $t('chat.signInContinue')
+              : wouldExceedLimit
+                ? $t('chat.tokenLimit')
+                : $t('chat.sendMessage')}
           >
             <button
               class="send-button"
@@ -693,6 +754,23 @@
       </div>
     </div>
   </div>
+  {#if anonymousBlocked}
+    <div
+      id="anonymous-limits"
+      class="anonymous-limits"
+    >
+      <Info size={14} />
+      <span
+        >{hasAttachments || anonymousHistoryBlocked
+          ? $t('chat.guestAttachments')
+          : $t('chat.guestLimitReached')}.</span
+      >
+      <button
+        type="button"
+        onclick={signIn}>{$t('chat.signInContinue')}</button
+      >
+    </div>
+  {/if}
 {/if}
 
 {#if previewImage}
@@ -753,6 +831,31 @@
   .chat-input::placeholder {
     color: var(--color-text-secondary);
     opacity: 1;
+  }
+
+  .anonymous-limits {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0 0.25rem;
+    margin-bottom: 8px;
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+  }
+
+  .anonymous-limits button {
+    border: none;
+    padding: 0;
+    background: none;
+    color: var(--color-accent);
+    text-decoration: underline;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .guest-attach {
+    gap: 0.375rem;
   }
 
   .button-row {

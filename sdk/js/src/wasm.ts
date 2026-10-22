@@ -51,12 +51,14 @@ interface WasmClientExports {
     authValue: string,
     apiBaseURL: string,
     enableLogging: boolean,
+    extraHTTPHeaders: Record<string, string>,
   ): Promise<void>;
   initializeOffline(
     authType: string,
     authValue: string,
     apiBaseURL: string,
     enableLogging: boolean,
+    extraHTTPHeaders: Record<string, string>,
   ): void;
   setAuth(authType: string, authValue: string): void;
   updateSecret(): Promise<void>;
@@ -241,6 +243,7 @@ export class WasmClient {
     authValue: string,
     apiBaseURL: string,
     enableLogging: boolean,
+    extraHTTPHeaders: Record<string, string> = {},
   ): Promise<void> {
     return this.exports.initialize(
       manifest,
@@ -248,6 +251,7 @@ export class WasmClient {
       authValue,
       apiBaseURL,
       enableLogging,
+      extraHTTPHeaders,
     );
   }
 
@@ -256,12 +260,14 @@ export class WasmClient {
     authValue: string,
     apiBaseURL: string,
     enableLogging: boolean,
+    extraHTTPHeaders: Record<string, string> = {},
   ): void {
     this.exports.initializeOffline(
       authType,
       authValue,
       apiBaseURL,
       enableLogging,
+      extraHTTPHeaders,
     );
   }
 

@@ -10,7 +10,7 @@ You are allowed to inspect the code and build it for auditing and verification p
 
 ## Build and verify the container images
 
-See the [Verification from source code](https://docs.privatemode.ai/guides/verify-source) guide in the Privatemode documentation.
+See the [Verification from source code](https://docs.privatemode.ai/cookbook/verify-source/) guide in the Privatemode documentation.
 
 ## Build and verify the web app
 

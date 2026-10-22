@@ -117,7 +117,7 @@ func benchmarkServe(b *testing.B, apiType string) {
 
 func setup(b *testing.B, apiType, workloadEndpoint string, log *slog.Logger) (secret, payload []byte, server *Server) {
 	require := require.New(b)
-	fw := forwarder.New(http.DefaultClient, workloadEndpoint, forwarder.SchemeHTTP, log)
+	fw := forwarder.New(http.DefaultClient, workloadEndpoint, forwarder.SchemeHTTP, forwarder.UpstreamModel, log)
 
 	secret = []byte(strings.Repeat("a", 32))
 	secrets := secrets.New(stubSecretGetter{})

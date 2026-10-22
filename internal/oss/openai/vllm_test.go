@@ -67,7 +67,7 @@ func TestRequestMutationValidationStatus(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(tc.body))
 			resp := httptest.NewRecorder()
-			fwd := forwarder.New(nil, "upstream", forwarder.SchemeHTTP, log)
+			fwd := forwarder.New(nil, "upstream", forwarder.SchemeHTTP, forwarder.UpstreamModel, log)
 			fwd.Forward(resp, req, tc.mutator, forwarder.PassthroughResponseMapper)
 			assert.Equal(t, http.StatusBadRequest, resp.Code)
 		})

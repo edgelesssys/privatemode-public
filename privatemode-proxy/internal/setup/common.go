@@ -19,20 +19,25 @@ import (
 // Flags are flags that are common to all setups.
 type Flags struct {
 	ContrastFlags
-	Workspace                    string
-	ManifestPath                 string
-	InsecureAPIConnection        bool
-	APIEndpoint                  string
-	APIKey                       *string
-	APIKeyFallback               server.APIKeyFallback
-	PromptCacheSalt              string
-	PromptCacheSaltFromAPIKey    bool
-	NvidiaOCSPAllowUnknown       bool
-	NvidiaOCSPRevokedGracePeriod time.Duration
-	DumpRequestsDir              string
-	CORSAllowedOrigins           []string
-	ClientID                     string
-	ModelsDocument               *server.ModelsDocument
+	Workspace                     string
+	ManifestPath                  string
+	InsecureAPIConnection         bool
+	APIEndpoint                   string
+	APIKey                        *string
+	APIKeyFallback                server.APIKeyFallback
+	TimeoutRead                   time.Duration
+	TimeoutReadHeader             time.Duration
+	TimeoutWrite                  time.Duration
+	TimeoutIdle                   time.Duration
+	TimeoutUpstreamResponseHeader time.Duration
+	PromptCacheSalt               string
+	PromptCacheSaltFromAPIKey     bool
+	NvidiaOCSPAllowUnknown        bool
+	NvidiaOCSPRevokedGracePeriod  time.Duration
+	DumpRequestsDir               string
+	CORSAllowedOrigins            []string
+	ClientID                      string
+	ModelsDocument                *server.ModelsDocument
 }
 
 // ContrastFlags holds the configuration for the Contrast deployment.
@@ -43,9 +48,7 @@ type ContrastFlags struct {
 // NewServer creates a new server instance.
 func NewServer(flags Flags, manager *secretmanager.SecretManager, log *slog.Logger) *server.Server {
 	transport := httputil.NewTransport()
-	// Non-streaming inference can be silent for more than ten minutes. Allow one hour,
-	// consistent with the load balancer's tunnel timeout, without limiting response body duration.
-	transport.ResponseHeaderTimeout = time.Hour
+	transport.ResponseHeaderTimeout = flags.TimeoutUpstreamResponseHeader
 	if flags.InsecureAPIConnection {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
@@ -56,6 +59,10 @@ func NewServer(flags Flags, manager *secretmanager.SecretManager, log *slog.Logg
 		APIKey:                       flags.APIKey,
 		APIKeyFallback:               flags.APIKeyFallback,
 		ProtocolScheme:               forwarder.SchemeHTTPS,
+		TimeoutRead:                  flags.TimeoutRead,
+		TimeoutReadHeader:            flags.TimeoutReadHeader,
+		TimeoutWrite:                 flags.TimeoutWrite,
+		TimeoutIdle:                  flags.TimeoutIdle,
 		PromptCacheSalt:              flags.PromptCacheSalt,
 		PromptCacheSaltFromAPIKey:    flags.PromptCacheSaltFromAPIKey,
 		NvidiaOCSPAllowUnknown:       flags.NvidiaOCSPAllowUnknown,

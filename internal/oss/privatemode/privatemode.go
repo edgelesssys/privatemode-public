@@ -108,6 +108,9 @@ type Client struct {
 	// but can be overridden with [Client.WithAPIBaseURL].
 	apiBaseURL string
 
+	// extraHTTPHeaders contains additional headers sent with API requests.
+	extraHTTPHeaders http.Header
+
 	// cred is the credential used for authentication with the
 	// Privatemode deployment. It may be an API key, a Clerk JWT, or
 	// an anonymous credential, and can be updated at runtime with
@@ -178,6 +181,12 @@ func (c *Client) WithAPIBaseURL(url string) *Client {
 	return c
 }
 
+// WithExtraHTTPHeaders sets additional headers on API requests.
+func (c *Client) WithExtraHTTPHeaders(extraHTTPHeaders http.Header) *Client {
+	c.extraHTTPHeaders = extraHTTPHeaders
+	return c
+}
+
 // SetCredential updates the authentication credential used for subsequent
 // requests. This can be called at any time, including after [Client.Initialize],
 // to rotate short-lived credentials such as JWTs.
@@ -244,9 +253,9 @@ func (c *Client) Initialize(ctx context.Context, expectedManifest []byte) error 
 	apiHost := apiURL.Host
 
 	contrastClient := contrastsdk.New().WithSlog(c.log.WithGroup("contrast-sdk"))
-	meshCAGetter := attest.NewGetter(c.httpClient, apiHost, contrastClient)
+	meshCAGetter := attest.NewGetter(c.httpClient, apiHost, contrastClient, c.extraHTTPHeaders)
 	meshCAAdapter := attestedMeshCAAdapter{meshCAGetter, expectedManifest}
-	secretClient := secretclient.New(c.httpClient, apiHost)
+	secretClient := secretclient.New(c.httpClient, apiHost, c.extraHTTPHeaders)
 	secretUpdater := updater.New(secretClient, meshCAAdapter, c.log.WithGroup("secret-updater"))
 
 	// Creating a [Client] already requires an API key, so there's
@@ -349,11 +358,16 @@ func cloneRequestHeader(header http.Header) http.Header {
 // returns the response. The caller is responsible for closing the
 // response body. An [ResponseError] is returned for non-2xx status codes.
 func (c *Client) doAPIRequest(req *http.Request) (*http.Response, error) {
+	for name, values := range c.extraHTTPHeaders {
+		if _, ok := req.Header[http.CanonicalHeaderKey(name)]; ok {
+			continue
+		}
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
+	}
 	c.cred.Apply(req.Header)
 	req.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
-	if req.Header.Get(constants.PrivatemodeClientHeader) == "" {
-		req.Header.Set(constants.PrivatemodeClientHeader, constants.PrivatemodeClientSDK)
-	}
 	req.Header.Set(constants.PrivatemodeSecretIDHeader, c.currentSecret.ID)
 	req.Header.Set(requestid.UserHeader, "sdk_"+requestid.New())
 

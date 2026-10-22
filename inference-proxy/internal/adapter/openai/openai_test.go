@@ -52,7 +52,7 @@ func TestSetRawBytes(t *testing.T) {
 	assert.Equal(t, replace, gjson.GetBytes(res, "messages").String())
 }
 
-func TestForwardModelsRequest(t *testing.T) {
+func TestForwardListModelsRequest(t *testing.T) {
 	testCases := map[string]struct {
 		workloadTasks  []string
 		path           string
@@ -159,14 +159,14 @@ func TestForwardModelsRequest(t *testing.T) {
 			require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
 
 			log := slog.Default()
-			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
+			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, log)
 			adapter, err := New(tc.workloadTasks, nil, ocspFile, adaptertest.EncForwarder{Inner: forwarder}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
 			responseRecorder := httptest.NewRecorder()
 
-			adapter.forwardModelsRequest(responseRecorder, request)
+			adapter.forwardListModelsRequest(responseRecorder, request)
 			t.Log(responseRecorder.Body.String())
 			assert.JSONEq(tc.wantResponse, responseRecorder.Body.String())
 			if tc.serverStatus != 0 {
@@ -176,7 +176,7 @@ func TestForwardModelsRequest(t *testing.T) {
 	}
 }
 
-func TestForwardSpecificModelRequest(t *testing.T) {
+func TestForwardRetrieveModelRequest(t *testing.T) {
 	testCases := map[string]struct {
 		workloadTasks  []string
 		path           string
@@ -254,14 +254,14 @@ func TestForwardSpecificModelRequest(t *testing.T) {
 			require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
 
 			log := slog.Default()
-			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
+			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, log)
 			adapter, err := New(tc.workloadTasks, nil, ocspFile, adaptertest.EncForwarder{Inner: forwarder}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
 			responseRecorder := httptest.NewRecorder()
 
-			adapter.forwardSpecificModelRequest(responseRecorder, request)
+			adapter.forwardRetrieveModelRequest(responseRecorder, request)
 			t.Log(responseRecorder.Body.String())
 			assert.JSONEq(tc.wantResponse, responseRecorder.Body.String())
 			if tc.serverStatus != 0 {
@@ -387,7 +387,7 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 			require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
 
 			log := slog.Default()
-			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
+			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, log)
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: forwarder}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
@@ -448,7 +448,7 @@ func TestForwardChatCompletionsRequestDuplicatesReasoningContent(t *testing.T) {
 			require.NoError(os.WriteFile(ocspFile, ocspStatus, 0o644))
 
 			log := slog.Default()
-			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)
+			forwarder := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, log)
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: forwarder}, &adaptertest.UsageReporter{}, log)
 			require.NoError(err)
 
@@ -599,7 +599,7 @@ func TestUsageExtraction(t *testing.T) {
 			require.NoError(t, os.WriteFile(ocspFile, ocspStatus, 0o644))
 
 			reporter := &adaptertest.UsageReporter{}
-			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default())
+			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, slog.Default())
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: fwd}, reporter, slog.Default())
 			require.NoError(t, err)
 
@@ -711,7 +711,7 @@ func TestTranscriptionUsageExtraction(t *testing.T) {
 			require.NoError(t, os.WriteFile(ocspFile, ocspStatus, 0o644))
 
 			reporter := &adaptertest.UsageReporter{}
-			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default())
+			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, slog.Default())
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: fwd}, reporter, slog.Default())
 			require.NoError(t, err)
 
@@ -816,7 +816,7 @@ func TestTranscriptionDurationCompat(t *testing.T) {
 			ocspFile := filepath.Join(t.TempDir(), "ocsp.json")
 			require.NoError(t, os.WriteFile(ocspFile, ocspStatus, 0o644))
 
-			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default())
+			fwd := forwarder.New(http.DefaultClient, srv.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, slog.Default())
 			adapter, err := New([]string{constants.WorkloadTaskGenerate}, &adaptertest.Secrets{}, ocspFile, adaptertest.EncForwarder{Inner: fwd}, &adaptertest.UsageReporter{}, slog.Default())
 			require.NoError(t, err)
 

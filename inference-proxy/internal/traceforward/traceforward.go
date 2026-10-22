@@ -48,7 +48,7 @@ func NewServer(endpoint string, log *slog.Logger) *Server {
 	mux := http.NewServeMux()
 	s := &Server{
 		handler:   mux,
-		forwarder: forwarder.New(client, endpoint, forwarder.SchemeHTTP, log),
+		forwarder: forwarder.New(client, endpoint, forwarder.SchemeHTTP, forwarder.UpstreamTraceCollector, log),
 		transport: transport,
 		log:       log,
 	}

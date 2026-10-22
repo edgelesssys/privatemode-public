@@ -47,7 +47,7 @@ func TestNewModelsDocument(t *testing.T) {
 	}
 }
 
-func TestModelsDocumentServeHTTP(t *testing.T) {
+func TestModelsDocumentListModels(t *testing.T) {
 	const first = `{"data":[{"id":"first"}]}`
 	const second = `{"data":[{"id":"second"}]}`
 	const sameSize = `{"data":[{"id":"FIRST"}]}` // same length as first
@@ -94,7 +94,7 @@ func TestModelsDocumentServeHTTP(t *testing.T) {
 
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, constants.OpenAIModelsEndpoint, http.NoBody)
 			resp := httptest.NewRecorder()
-			doc.ServeHTTP(resp, req)
+			doc.ListModels(resp, req)
 
 			assert.Equal(http.StatusOK, resp.Code)
 			assert.Equal("application/json", resp.Header().Get("Content-Type"))
@@ -108,11 +108,15 @@ func TestModelsEndpointRouting(t *testing.T) {
 	const forwarded = `{"data":[{"id":"forwarded"}]}`
 
 	testCases := map[string]struct {
-		withDocument bool
-		wantBody     string
+		withDocument    bool
+		modelPathSuffix string
+		wantCode        int
+		wantBody        string
 	}{
-		"document configured":                           {withDocument: true, wantBody: doc},
-		"document not configured, request is forwarded": {wantBody: forwarded},
+		"document configured":                           {withDocument: true, wantCode: http.StatusOK, wantBody: doc},
+		"document not configured, request is forwarded": {wantCode: http.StatusOK, wantBody: forwarded},
+		"retrieve model from document":                  {withDocument: true, modelPathSuffix: "/static", wantCode: http.StatusOK, wantBody: `{"id":"static"}`},
+		"nonexistent model in document returns 404":     {withDocument: true, modelPathSuffix: "/does-not-exist", wantCode: http.StatusNotFound},
 	}
 
 	for name, tc := range testCases {
@@ -121,6 +125,7 @@ func TestModelsEndpointRouting(t *testing.T) {
 			assert := assert.New(t)
 
 			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				assert.False(tc.withDocument, "document requests must not be forwarded")
 				_, _ = w.Write([]byte(forwarded))
 			}))
 			defer backend.Close()
@@ -135,12 +140,14 @@ func TestModelsEndpointRouting(t *testing.T) {
 				require.NoError(err)
 			}
 
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, constants.OpenAIModelsEndpoint, http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, constants.OpenAIModelsEndpoint+tc.modelPathSuffix, http.NoBody)
 			resp := httptest.NewRecorder()
 			sut.GetHandler().ServeHTTP(resp, req)
 
-			assert.Equal(http.StatusOK, resp.Code)
-			assert.Equal(tc.wantBody, resp.Body.String())
+			assert.Equal(tc.wantCode, resp.Code)
+			if tc.wantCode == http.StatusOK {
+				assert.Equal(tc.wantBody, resp.Body.String())
+			}
 		})
 	}
 }

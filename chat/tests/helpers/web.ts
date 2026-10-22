@@ -21,6 +21,11 @@ export async function clearStorage(page: Page): Promise<void> {
 }
 
 export async function waitForAppReady(page: Page): Promise<void> {
+  // The input renders before the model list loads; only then does a chat whose
+  // model the deployment doesn't serve swap it for the unavailable banner.
+  await page
+    .locator('.chat-input-wrapper[data-models-loaded="true"]')
+    .waitFor({ timeout: 60000 });
   await page.getByPlaceholder('Type a message...').waitFor({
     state: 'visible',
     timeout: 60000,

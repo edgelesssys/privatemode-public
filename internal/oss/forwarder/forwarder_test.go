@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -44,7 +46,7 @@ func TestForwardStreaming(t *testing.T) {
 	}))
 	defer stubServer.Close()
 
-	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, UpstreamInference, slog.Default())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	resp := httptest.NewRecorder()
@@ -83,7 +85,7 @@ func TestForwardStreamingAborted(t *testing.T) {
 	}))
 	defer stubServer.Close()
 
-	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, UpstreamInference, slog.Default())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	// Wrap req.Context() in a cancelable context
@@ -124,7 +126,7 @@ func TestForwardCancelledBeforeResponseReportsClientClosed(t *testing.T) {
 	defer stubServer.Close()
 	defer close(release)
 
-	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, UpstreamInference, slog.Default())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	ctx, cancel := context.WithCancel(req.Context())
@@ -157,6 +159,7 @@ func TestForwardStreamingUpstreamAborts(t *testing.T) {
 
 	var logs bytes.Buffer
 	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP,
+		UpstreamInference,
 		slog.New(slog.NewJSONHandler(&logs, nil)))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
@@ -182,7 +185,7 @@ func TestForwardNonStreaming(t *testing.T) {
 	}))
 	defer stubServer.Close()
 
-	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, UpstreamInference, slog.Default())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	resp := httptest.NewRecorder()
@@ -212,7 +215,7 @@ func TestForwardMutationError(t *testing.T) {
 	}))
 	defer stubServer.Close()
 
-	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+	forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, UpstreamInference, slog.Default())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	resp := httptest.NewRecorder()
@@ -338,7 +341,7 @@ func TestForwardMaxBodyBytes(t *testing.T) {
 	}))
 	defer stubServer.Close()
 
-	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, UpstreamInference, slog.Default())
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
@@ -367,7 +370,7 @@ func TestForwardMutationErrorStatus(t *testing.T) {
 						return false, 0
 					}
 				}
-				fwd := New(nil, "upstream", SchemeHTTP, slog.Default())
+				fwd := New(nil, "upstream", SchemeHTTP, UpstreamInference, slog.Default())
 				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
 				resp := httptest.NewRecorder()
 				fwd.Forward(resp, req, func(*http.Request) error {
@@ -391,6 +394,7 @@ func TestForwardLogsOmitSensitiveInput(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			var logs bytes.Buffer
 			fwd := New(upstream.Client(), upstream.Listener.Addr().String(), SchemeHTTP,
+				UpstreamInference,
 				slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 				constants.OpenAIChatCompletionsEndpoint+"?prompt=secret-query", strings.NewReader("secret-prompt"))
@@ -473,7 +477,7 @@ func TestForwardRetry(t *testing.T) {
 			}))
 			defer stubServer.Close()
 
-			forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+			forwarder := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, UpstreamInference, slog.Default())
 
 			callbackCount := 0
 			retryCallback := func(statusCode int, errMsg string, attempt int) (bool, time.Duration) {
@@ -550,7 +554,7 @@ func TestForwardDoesNotStripTraceparent(t *testing.T) {
 
 	// Use a plain http.Client (no otelhttp) - we only want to assert the
 	// header survives the forwarder's hop-by-hop pruning.
-	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, slog.Default())
+	fwd := New(http.DefaultClient, stubServer.Listener.Addr().String(), SchemeHTTP, UpstreamInference, slog.Default())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	req.Header.Set("traceparent", inbound)
@@ -575,7 +579,7 @@ func TestForwardDeletesHopHeaders(t *testing.T) {
 	defer stubServer.Close()
 
 	upstreamHost := stubServer.Listener.Addr().String()
-	fwd := New(http.DefaultClient, upstreamHost, SchemeHTTP, slog.Default())
+	fwd := New(http.DefaultClient, upstreamHost, SchemeHTTP, UpstreamInference, slog.Default())
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 	req.Host = "endpoint.intranet.example.com"
@@ -605,6 +609,50 @@ func TestForwardDeletesHopHeaders(t *testing.T) {
 	assert.Equal("kept", got.Header.Get("X-App-Header"))
 }
 
+func TestForwardReusesUpstreamConnection(t *testing.T) {
+	testCases := map[string]struct {
+		downstreamClose bool
+	}{
+		"keep-alive downstream":        {downstreamClose: false},
+		"Connection: close downstream": {downstreamClose: true},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+
+			var conns atomic.Int64
+			stubServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.WriteString(w, r.Proto)
+			}))
+			stubServer.EnableHTTP2 = true
+			stubServer.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+				if state == http.StateNew {
+					conns.Add(1)
+				}
+			}
+			stubServer.StartTLS()
+			defer stubServer.Close()
+
+			fwd := New(stubServer.Client(), stubServer.Listener.Addr().String(), SchemeHTTPS, UpstreamInference, slog.Default())
+
+			for range 5 {
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, strings.NewReader("{}"))
+				if tc.downstreamClose {
+					req.Header.Set("Connection", "close")
+					req.Close = true
+				}
+				resp := httptest.NewRecorder()
+				fwd.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
+
+				assert.Equal(http.StatusOK, resp.Code)
+				assert.Equal("HTTP/2.0", resp.Body.String())
+			}
+			assert.EqualValues(1, conns.Load())
+		})
+	}
+}
+
 // roundTripFunc adapts a function to an [http.RoundTripper] to inject transport errors.
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
@@ -618,32 +666,94 @@ func (timeoutError) Timeout() bool   { return true }
 func (timeoutError) Temporary() bool { return true }
 
 func TestForwardTransportErrorStatus(t *testing.T) {
+	refused := &net.OpError{Op: "dial", Err: errors.New("connection refused")}
 	tests := map[string]struct {
 		transportErr error
+		mutatorErr   error
+		upstream     Upstream
 		wantStatus   int
+		wantMessage  string
+		wantCode     string
+		wantLog      string
 	}{
 		"connection failure -> 502 Bad Gateway": {
-			transportErr: &net.OpError{Op: "dial", Err: errors.New("connection refused")},
+			transportErr: refused,
+			upstream:     UpstreamInference,
 			wantStatus:   http.StatusBadGateway,
+			wantMessage:  "connection to the inference backend failed",
+			wantCode:     "inference_connection_failed",
+			wantLog:      `"upstream":"inference"`,
 		},
 		"timeout -> 504 Gateway Timeout": {
 			transportErr: &net.OpError{Op: "dial", Err: timeoutError{}},
+			upstream:     UpstreamModel,
 			wantStatus:   http.StatusGatewayTimeout,
+			wantMessage:  "connection to the model timed out",
+			wantCode:     "model_connection_failed",
+			wantLog:      `"upstream":"model"`,
+		},
+		"API shows the transport error": {
+			transportErr: refused,
+			upstream:     UpstreamAPI,
+			wantStatus:   http.StatusBadGateway,
+			wantMessage:  `connection to the Privatemode API failed: Post "https://upstream.invalid:443/v1/chat/completions": dial: connection refused`,
+			wantCode:     "api_connection_failed",
+			wantLog:      `"upstream":"api"`,
+		},
+		"model hides the upstream address": {
+			transportErr: refused,
+			upstream:     UpstreamModel,
+			wantStatus:   http.StatusBadGateway,
+			wantMessage:  "connection to the model failed",
+			wantCode:     "model_connection_failed",
+			wantLog:      `"upstream":"model"`,
+		},
+		"documents name the document service": {
+			transportErr: refused,
+			upstream:     UpstreamDocuments,
+			wantStatus:   http.StatusBadGateway,
+			wantMessage:  "connection to the document service failed",
+			wantCode:     "document_connection_failed",
+			wantLog:      `"upstream":"document"`,
+		},
+		"zero value names no upstream and hides the transport error": {
+			transportErr: refused,
+			wantStatus:   http.StatusBadGateway,
+			wantMessage:  "connection to the upstream failed",
+			wantCode:     "upstream_connection_failed",
+			wantLog:      `"upstream":"upstream"`,
+		},
+		"mutator error wrapping a transport error is not a connection error": {
+			mutatorErr:  fmt.Errorf("getting latest secret: %w", &url.Error{Op: "Get", URL: "https://secret.invalid", Err: refused}),
+			upstream:    UpstreamAPI,
+			wantStatus:  http.StatusInternalServerError,
+			wantMessage: `forwarding request: mutating request: getting latest secret: Get "https://secret.invalid": dial: connection refused`,
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+
 			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 				return nil, tc.transportErr
 			})}
-			fwd := New(client, "upstream.invalid:443", SchemeHTTPS, slog.Default())
+			var logs bytes.Buffer
+			fwd := New(client, "upstream.invalid:443", SchemeHTTPS, tc.upstream, slog.New(slog.NewJSONHandler(&logs, nil)))
+			mutator := func(*http.Request) error { return tc.mutatorErr }
 
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, nil)
 			resp := httptest.NewRecorder()
-			fwd.Forward(resp, req, NoRequestMutation, PassthroughResponseMapper)
+			fwd.Forward(resp, req, mutator, PassthroughResponseMapper)
 
-			assert.Equal(t, tc.wantStatus, resp.Code)
+			var body openAIAPIErrorResponse
+			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &body))
+			assert.Equal(tc.wantStatus, resp.Code)
+			assert.Equal(tc.wantMessage, body.Error.Message)
+			assert.Equal(tc.wantCode, body.Error.Code)
+			if tc.wantLog != "" {
+				assert.Contains(logs.String(), tc.wantLog)
+			}
 		})
 	}
 }

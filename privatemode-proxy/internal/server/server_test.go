@@ -270,6 +270,7 @@ func TestChatCompletionsPromptEncryption(t *testing.T) {
 			defer stubAuthBackendServer.Close()
 
 			sut := newTestServer(tc.proxyAPIKey, secret, stubAuthBackendServer.Listener.Addr().String(), tc.proxyCacheSalt)
+			sut.clientID = constants.PrivatemodeClientProxy
 			if tc.apiKeyFallback != "" {
 				sut.apiKeyFallback = tc.apiKeyFallback
 			}
@@ -443,7 +444,7 @@ func TestInvalidSecretRetry(t *testing.T) {
 		apiKeyFallback:               APIKeyFallbackAlways,
 		defaultCacheSalt:             "",
 		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secretInvalid, secretValid}},
-		forwarder:                    forwarder.New(http.DefaultClient, stubAuthBackendServer.Listener.Addr().String(), forwarder.SchemeHTTP, slog.Default()),
+		forwarder:                    forwarder.New(http.DefaultClient, stubAuthBackendServer.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamAPI, slog.Default()),
 		log:                          slog.Default(),
 		nvidiaOCSPAllowUnknown:       true,
 		nvidiaOCSPRevokedGracePeriod: 24 * time.Hour,
@@ -972,26 +973,15 @@ func TestAPIKeyFallback(t *testing.T) {
 }
 
 func TestClientHeader(t *testing.T) {
-	testCases := map[string]struct {
-		clientID string
-		want     string
-	}{
-		"proxy default":      {want: constants.PrivatemodeClientProxy},
-		"clientID overrides": {clientID: "OpenRouter", want: "OpenRouter"},
-	}
+	const clientID = "OpenRouter"
+	secret := secretmanager.Secret{ID: "123", Data: bytes.Repeat([]byte{0x42}, 32)}
+	sut := newTestServer(nil, secret, "192.0.2.1:8080", "")
+	sut.clientID = clientID
 
-	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			secret := secretmanager.Secret{ID: "123", Data: bytes.Repeat([]byte{0x42}, 32)}
-			sut := newTestServer(nil, secret, "192.0.2.1:8080", "")
-			sut.clientID = tc.clientID
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", http.NoBody)
+	sut.setStaticRequestHeaders(req)
 
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", http.NoBody)
-			sut.setStaticRequestHeaders(req)
-
-			assert.Equal(t, tc.want, req.Header.Get(constants.PrivatemodeClientHeader))
-		})
-	}
+	assert.Equal(t, clientID, req.Header.Get(constants.PrivatemodeClientHeader))
 }
 
 func TestReadinessHandler(t *testing.T) {
@@ -1015,7 +1005,7 @@ func newTestServer(apiKey *string, secret secretmanager.Secret, backendAddr stri
 		apiKeyFallback:               APIKeyFallbackAlways,
 		defaultCacheSalt:             defaultCacheSalt,
 		sm:                           &stubSecretManager{secrets: []secretmanager.Secret{secret}},
-		forwarder:                    forwarder.New(http.DefaultClient, backendAddr, forwarder.SchemeHTTP, slog.Default()),
+		forwarder:                    forwarder.New(http.DefaultClient, backendAddr, forwarder.SchemeHTTP, forwarder.UpstreamAPI, slog.Default()),
 		log:                          slog.Default(),
 		nvidiaOCSPAllowUnknown:       true,
 		nvidiaOCSPRevokedGracePeriod: time.Hour * 24,

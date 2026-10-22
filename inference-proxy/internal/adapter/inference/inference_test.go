@@ -64,7 +64,7 @@ func TestForwardEncryptedRemoteResourceURLError(t *testing.T) {
 			defer srv.Close()
 			log := slog.Default()
 			adapter := &Adapter{
-				EncForwarder: adaptertest.EncForwarder{Inner: forwarder.New(srv.Client(), srv.Listener.Addr().String(), forwarder.SchemeHTTP, log)},
+				EncForwarder: adaptertest.EncForwarder{Inner: forwarder.New(srv.Client(), srv.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, log)},
 				Log:          log,
 			}
 			body := `{"stream":false}`

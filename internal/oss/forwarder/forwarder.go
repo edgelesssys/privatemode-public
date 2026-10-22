@@ -99,15 +99,64 @@ type Forwarder struct {
 	log            *slog.Logger
 	host           string
 	protocolScheme ProtocolScheme
+	upstream       Upstream
+}
+
+// Upstream names what a [Forwarder] connects to, in the errors it returns when it cannot reach it.
+type Upstream int
+
+const (
+	// upstreamUnnamed is the zero value: its errors name no upstream and hide the transport error.
+	upstreamUnnamed Upstream = iota
+	// UpstreamAPI is the Privatemode API, as seen from the privatemode-proxy.
+	UpstreamAPI
+	// UpstreamInference is the inference backend, as seen from the apigateway.
+	UpstreamInference
+	// UpstreamSecrets is the secret store, as seen from the apigateway.
+	UpstreamSecrets
+	// UpstreamModel is the model server, as seen from the inference-proxy.
+	UpstreamModel
+	// UpstreamDocuments is the document processing service, as seen from the inference-proxy.
+	UpstreamDocuments
+	// UpstreamTraceCollector is the trace collector, as seen from the inference-proxy.
+	UpstreamTraceCollector
+)
+
+type upstreamInfo struct {
+	key  string // the log attr; the error code is "<key>_connection_failed"
+	name string // completes "connection to <name> failed" (or "timed out")
+	// showError appends the transport error, which names the upstream's address.
+	// Only for the client-side proxy.
+	showError bool
+}
+
+// Keys and names must not reveal the deployment's internals.
+var upstreams = map[Upstream]upstreamInfo{
+	upstreamUnnamed:        {key: "upstream", name: "the upstream"},
+	UpstreamAPI:            {key: "api", name: "the Privatemode API", showError: true},
+	UpstreamInference:      {key: "inference", name: "the inference backend"},
+	UpstreamSecrets:        {key: "secret", name: "the secret store"},
+	UpstreamModel:          {key: "model", name: "the model"},
+	UpstreamDocuments:      {key: "document", name: "the document service"},
+	UpstreamTraceCollector: {key: "trace", name: "the trace collector"},
+}
+
+func (u Upstream) info() upstreamInfo {
+	if info, ok := upstreams[u]; ok {
+		return info
+	}
+	return upstreams[upstreamUnnamed]
 }
 
 // New sets up a new forwarding proxy with a custom http client.
-func New(client *http.Client, address string, scheme ProtocolScheme, log *slog.Logger) *Forwarder {
+// upstream is what its connection errors name.
+func New(client *http.Client, address string, scheme ProtocolScheme, upstream Upstream, log *slog.Logger) *Forwarder {
 	return &Forwarder{
 		client:         client,
 		log:            log,
 		host:           address,
 		protocolScheme: scheme,
+		upstream:       upstream,
 	}
 }
 
@@ -142,6 +191,8 @@ func (f *Forwarder) Forward(
 	// Prepare request for forwarding to upstream server
 	baseReq.RequestURI = ""
 	delHopHeaders(baseReq.Header)
+	// A downstream "Connection: close" must not make the upstream connection single-use.
+	baseReq.Close = false
 
 	// Not setting the host here leads to "no Host in request URL" errors.
 	baseReq.URL.Host = options.host
@@ -162,6 +213,21 @@ func (f *Forwarder) Forward(
 		}
 		// Use the mutator's status or a gateway status for upstream failures.
 		status := StatusFromError(err)
+		if connErr, ok := errors.AsType[*connectionError](err); ok {
+			// Transport errors carry no request content, only the upstream's address.
+			info := f.upstream.info()
+			log.ErrorContext(ctx, "Failed to connect to upstream", "upstream", info.key, "status", status, "error", connErr)
+			outcome := "failed"
+			if status == http.StatusGatewayTimeout {
+				outcome = "timed out"
+			}
+			msg := fmt.Sprintf("connection to %s %s", info.name, outcome)
+			if info.showError {
+				msg += ": " + connErr.Error()
+			}
+			writeError(w, req, status, msg, info.key+"_connection_failed")
+			return
+		}
 		// Error details may contain plaintext input or upstream error text.
 		log.ErrorContext(ctx, "Failed to forward request", "status", status)
 		HTTPError(w, req, status, "forwarding request: %s", err)
@@ -285,7 +351,7 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 	resp, err := f.client.Do(req)
 	if err != nil {
 		// Transport error contacting the upstream: report as a gateway error, not a 500.
-		upErr := newTransportError(err)
+		upErr := newTransportError(&connectionError{err: err})
 		// No upstream status is available; pass -1 to the retry callback.
 		shouldRetry, retryErr := f.shouldRetry(req.Context(), retryCallback, err.Error(), -1, attempt)
 		return shouldRetry, nil, errors.Join(upErr, retryErr)
@@ -313,6 +379,15 @@ func (f *Forwarder) trySend(req *http.Request, requestMutator RequestMutator, at
 	shouldRetry, retryErr := f.shouldRetry(req.Context(), retryCallback, string(bodyBytes), resp.StatusCode, attempt)
 	return shouldRetry, resp, errors.Join(readErr, retryErr)
 }
+
+// connectionError is a failed round trip to the upstream.
+type connectionError struct {
+	err error
+}
+
+func (e *connectionError) Error() string { return e.err.Error() }
+
+func (e *connectionError) Unwrap() error { return e.err }
 
 // newTransportError maps upstream transport failures to gateway statuses.
 func newTransportError(err error) *Error {
@@ -395,17 +470,22 @@ type openAIAPIError struct {
 // HTTPError writes an error response to the client.
 // Functions similarly to [http.Error], but also handles error reporting for SSE requests.
 func HTTPError(w http.ResponseWriter, r *http.Request, code int, msg string, args ...any) {
+	writeError(w, r, code, fmt.Sprintf(msg, args...), "")
+}
+
+// writeError writes an error response with message msg and OpenAI error code errCode.
+func writeError(w http.ResponseWriter, r *http.Request, code int, msg string, errCode string) {
 	errObj := openAIAPIError{
-		Message: fmt.Sprintf(msg, args...),
+		Message: msg,
 		Type:    "",
 		Param:   "",
-		Code:    "",
+		Code:    errCode,
 	}
 	formattedMsgBytes, err := json.Marshal(openAIAPIErrorResponse{Error: errObj})
 	formattedMsg := string(formattedMsgBytes)
 	if err != nil {
 		// Only fall back to non-JSON error when we cannot even marshal the error (which is pretty bad)
-		formattedMsg = fmt.Sprintf(msg, args...)
+		formattedMsg = msg
 	}
 	if expectedContentType := r.Header.Get("accept"); expectedContentType == "text/event-stream" {
 		// If the client requested streaming we need to return the error correctly encoded.

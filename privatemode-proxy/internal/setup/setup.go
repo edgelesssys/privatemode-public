@@ -7,10 +7,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"path/filepath"
 
 	"github.com/edgelesssys/continuum/internal/oss/attest"
 	"github.com/edgelesssys/continuum/internal/oss/auth"
+	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/httputil"
 	"github.com/edgelesssys/continuum/internal/oss/secretclient"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
@@ -36,8 +38,9 @@ func SecretManager(ctx context.Context, flags Flags, log *slog.Logger) (*secretm
 		WithFSStore(afero.NewBasePathFs(afero.NewOsFs(), filepath.Join(flags.Workspace, contrastSubDir)))
 
 	fs := afero.Afero{Fs: afero.NewOsFs()}
-	ssClient := secretclient.New(httpClient, flags.APIEndpoint)
-	caUpdater := attest.NewGetter(httpClient, flags.APIEndpoint, contrastClient)
+	extraHTTPHeaders := http.Header{constants.PrivatemodeClientHeader: {flags.ClientID}}
+	ssClient := secretclient.New(httpClient, flags.APIEndpoint, extraHTTPHeaders)
+	caUpdater := attest.NewGetter(httpClient, flags.APIEndpoint, contrastClient, extraHTTPHeaders)
 
 	var caGetter updater.CAGetter
 	var currentManifest func() string

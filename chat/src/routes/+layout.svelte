@@ -6,14 +6,7 @@
   import { initTheme } from '#lib/themeStore.js';
   import { initLocale, t } from '#lib/i18n.js';
   import { initializeClient } from '#lib/clientStore.js';
-  import {
-    initializeAuth,
-    isLimitedMode,
-    isSignedIn,
-    authIdentity,
-    signIn,
-    clerkLoaded,
-  } from '#lib/authStore.js';
+  import { initializeAuth, authIdentity, clerkLoaded } from '#lib/authStore.js';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import '@fontsource-variable/inter/wght.css';
@@ -193,49 +186,14 @@
     class="content"
     class:collapsed-sidebar={sidebarCollapsed}
   >
-    {#if !$isLimitedMode}
-      <button
-        class="mobile-menu-btn"
-        type="button"
-        aria-label={$t('layout.openSidebar')}
-        onclick={() => (sidebarOpen = true)}
-      >
-        <Menu size={24} />
-      </button>
-    {/if}
-    {#if $isLimitedMode}
-      <div class="limited-banner">
-        <button
-          class="hamburger-btn"
-          type="button"
-          aria-label={$t('layout.openSidebar')}
-          onclick={() => (sidebarOpen = true)}
-        >
-          <Menu size={24} />
-        </button>
-        <span>{$t('layout.limitedMode')}</span>
-        {#if $isSignedIn}
-          <span>
-            <a
-              class="sign-in-link"
-              href="https://portal.privatemode.ai/api-keys"
-              target="_blank"
-              rel="noopener noreferrer">{$t('layout.createApiKey')}</a
-            >
-            {$t('layout.organizationFullAccess')}
-          </span>
-        {:else}
-          <span>
-            <button
-              class="sign-in-link"
-              type="button"
-              onclick={signIn}>{$t('layout.signIn')}</button
-            >
-            {$t('layout.forFullAccess')}
-          </span>
-        {/if}
-      </div>
-    {/if}
+    <button
+      class="mobile-menu-btn"
+      type="button"
+      aria-label={$t('layout.openSidebar')}
+      onclick={() => (sidebarOpen = true)}
+    >
+      <Menu size={24} />
+    </button>
     <main
       class="page"
       id="main-content"
@@ -341,55 +299,6 @@
     text-align: center;
   }
 
-  .limited-banner {
-    flex-shrink: 0;
-    position: relative;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    background-color: var(--color-accent);
-    color: var(--color-text-inverse);
-    text-align: center;
-    padding: 8px 16px;
-    font-size: 0.875rem;
-    font-weight: 500;
-    gap: 4px;
-  }
-
-  .sign-in-link {
-    background: none;
-    border: none;
-    color: var(--color-text-inverse);
-    font-size: 0.875rem;
-    font-weight: 700;
-    cursor: pointer;
-    padding: 0;
-    text-decoration: underline;
-    font-family: 'Inter Variable', sans-serif;
-  }
-
-  .sign-in-link:hover {
-    opacity: 0.85;
-  }
-
-  .hamburger-btn {
-    display: none;
-    background: none;
-    border: none;
-    color: var(--color-text-primary);
-    cursor: pointer;
-    padding: 4px;
-    align-items: center;
-    justify-content: center;
-    position: absolute;
-    left: 12px;
-  }
-
-  .limited-banner .hamburger-btn {
-    color: var(--color-text-inverse);
-  }
-
   .mobile-menu-btn {
     display: none;
     position: absolute;
@@ -416,15 +325,6 @@
     .content,
     .content.collapsed-sidebar {
       margin-left: 0;
-    }
-
-    .hamburger-btn {
-      display: flex;
-    }
-
-    .limited-banner {
-      padding-left: 48px;
-      padding-right: 48px;
     }
 
     .mobile-menu-btn {
