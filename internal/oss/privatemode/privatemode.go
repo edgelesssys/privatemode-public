@@ -22,6 +22,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/httputil"
+	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/edgelesssys/continuum/internal/oss/secretclient"
@@ -93,6 +94,17 @@ func decryptResponseErrorBody(respErr *ResponseError, ce *encbody.ClientExchange
 	}, nil
 }
 
+// NvidiaOCSPPolicy configures accepted NVIDIA attestation certificate statuses.
+// Its zero value accepts only good statuses.
+type NvidiaOCSPPolicy struct {
+	// AllowUnknown permits unknown OCSP statuses, including an unreachable OCSP service.
+	AllowUnknown bool
+	// RevokedGracePeriod permits revoked certificates for this long after revocation.
+	// It must be nonnegative. Zero rejects revoked certificates immediately.
+	// The revocation cutoff is recalculated for each encrypted request.
+	RevokedGracePeriod time.Duration
+}
+
 // Client is a client for interacting with a Privatemode deployment.
 //
 // It is not thread-safe.
@@ -110,6 +122,9 @@ type Client struct {
 
 	// extraHTTPHeaders contains additional headers sent with API requests.
 	extraHTTPHeaders http.Header
+
+	// nvidiaOCSPPolicy defaults to accepting only good statuses.
+	nvidiaOCSPPolicy NvidiaOCSPPolicy
 
 	// cred is the credential used for authentication with the
 	// Privatemode deployment. It may be an API key, a Clerk JWT, or
@@ -206,6 +221,13 @@ func (c *Client) WithLogger(log *slog.Logger) *Client {
 // WithHTTPClient sets the HTTP client for the client.
 func (c *Client) WithHTTPClient(httpClient *http.Client) *Client {
 	c.httpClient = httpClient
+	return c
+}
+
+// WithNvidiaOCSPPolicy sets the policy used for subsequent requests.
+// A negative grace period causes encrypted requests to fail.
+func (c *Client) WithNvidiaOCSPPolicy(policy NvidiaOCSPPolicy) *Client {
+	c.nvidiaOCSPPolicy = policy
 	return c
 }
 
@@ -325,10 +347,22 @@ func (c *Client) ListModels(ctx context.Context) ([]byte, error) {
 	return resp.Body, nil
 }
 
-// ListModelsWithOptions fetches the list of available models from the API and
-// preserves the response headers.
+// ListModelsWithOptions fetches the list of available models from GET /v1/models
+// and preserves the response headers.
 func (c *Client) ListModelsWithOptions(ctx context.Context, opts RequestOptions) (*Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBaseURL+constants.OpenAIModelsEndpoint, nil)
+	return c.doGETAPIRequest(ctx, constants.OpenAIModelsEndpoint, opts)
+}
+
+// RetrieveModelWithOptions fetches a model from GET /v1/models/{model}
+// and preserves the response headers.
+func (c *Client) RetrieveModelWithOptions(ctx context.Context, model string, opts RequestOptions) (*Response, error) {
+	return c.doGETAPIRequest(ctx, constants.OpenAIModelsEndpoint+"/"+url.PathEscape(model), opts)
+}
+
+// doGETAPIRequest constructs and sends an API GET request, then reads its response body,
+// preserving response headers.
+func (c *Client) doGETAPIRequest(ctx context.Context, path string, opts RequestOptions) (*Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.apiBaseURL+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -402,7 +436,23 @@ func (c *Client) doEncryptedAPIRequest(req *http.Request) (*forwarder.StreamingR
 	if err != nil {
 		return nil, fmt.Errorf("initializing encrypted exchange: %w", err)
 	}
-	if err := ce.EncryptRequest(req); err != nil {
+	if c.nvidiaOCSPPolicy.RevokedGracePeriod < 0 {
+		return nil, fmt.Errorf("NVIDIA OCSP revoked grace period must be nonnegative")
+	}
+	statuses := []ocspheader.AllowStatus{ocspheader.AllowStatusGood}
+	if c.nvidiaOCSPPolicy.RevokedGracePeriod > 0 {
+		statuses = append(statuses, ocspheader.AllowStatusRevoked)
+	}
+	if c.nvidiaOCSPPolicy.AllowUnknown {
+		statuses = append(statuses, ocspheader.AllowStatusUnknown)
+	}
+	header := ocspheader.NewHeader(statuses, time.Now().Add(-c.nvidiaOCSPPolicy.RevokedGracePeriod))
+	policy, err := header.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("marshaling NVIDIA OCSP policy: %w", err)
+	}
+	err = ce.EncryptRequest(req, map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: policy})
+	if err != nil {
 		return nil, fmt.Errorf("encrypting request: %w", err)
 	}
 

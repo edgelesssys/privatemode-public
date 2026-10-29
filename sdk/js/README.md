@@ -71,7 +71,7 @@ status can no longer represent them.
 | `client.embeddings.create()`            | `/v1/embeddings`             |
 | `client.audio.transcriptions.create()`  | `/v1/audio/transcriptions`   |
 | `client.models.list()`                  | `/v1/models`                 |
-| `client.models.retrieve()`              | `/v1/models` (from the list) |
+| `client.models.retrieve()`              | `/v1/models/{model}`         |
 
 Unsupported OpenAI resources fail closed with a non-retryable
 `OpenAI.InternalServerError` whose `code` is `unsupported_endpoint`. Requests

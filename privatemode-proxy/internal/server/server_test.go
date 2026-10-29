@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/model"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
+	"github.com/edgelesssys/continuum/internal/oss/persist"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 	"github.com/edgelesssys/continuum/privatemode-proxy/internal/server/stub"
@@ -416,7 +418,7 @@ func TestInvalidSecretRetry(t *testing.T) {
 	}
 	secretValid := secretmanager.Secret{
 		ID:   "456",
-		Data: bytes.Repeat([]byte{0x42}, 32),
+		Data: bytes.Repeat([]byte{0x43}, 32),
 	}
 
 	// setup a server with secretValid and check that there are two requests
@@ -425,6 +427,29 @@ func TestInvalidSecretRetry(t *testing.T) {
 	var capturedHeaders []http.Header
 	stubAuthBackendServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		capturedHeaders = append(capturedHeaders, r.Header.Clone())
+		assert.Empty(r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyHeader))
+		assert.Empty(r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyMACHeader))
+		clone, err := persist.CloneRequestUnlimited(r)
+		if !assert.NoError(err) {
+			return
+		}
+		secret := secretInvalid
+		if r.Header.Get(constants.PrivatemodeSecretIDHeader) == secretValid.ID {
+			secret = secretValid
+		}
+		exchange, err := encbody.InitializeServerExchange(secret.Data, clone)
+		if !assert.NoError(err) {
+			return
+		}
+		headers, err := exchange.DecryptRequest(clone)
+		if !assert.NoError(err) {
+			return
+		}
+		policy, err := ocspheader.Unmarshal(headers[constants.PrivatemodeNvidiaOCSPPolicyHeader])
+		if !assert.NoError(err) {
+			return
+		}
+		assert.ElementsMatch([]ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusUnknown, ocspheader.AllowStatusRevoked}, policy.AllowedStatuses)
 		token := r.Header.Get("Authorization")
 		if token == "" {
 			forwarder.HTTPError(w, r, http.StatusUnauthorized, "no auth found: expected Authorization header with 'Bearer <auth>'")
@@ -510,6 +535,58 @@ func TestUnencryptedUpstreamErrorKeepsRetryAfter(t *testing.T) {
 
 			assert.Equal(tc.status, resp.Code)
 			assert.Equal("42", resp.Header().Get("Retry-After"))
+		})
+	}
+}
+
+// Error responses from the inference-proxy after decryption are encrypted and reach the client decrypted.
+func TestEncryptedUpstreamErrorIsDecrypted(t *testing.T) {
+	testCases := map[string]struct {
+		accept string
+	}{
+		"json": {accept: "application/json"},
+		"sse":  {accept: "text/event-stream"},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+
+			secret := secretmanager.Secret{ID: "123", Data: bytes.Repeat([]byte{0x42}, 32)}
+			var wantBody []byte
+			stubBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				se, err := encbody.InitializeServerExchange(secret.Data, r)
+				if !assert.NoError(err) {
+					return
+				}
+				_, err = se.DecryptRequest(r)
+				if !assert.NoError(err) {
+					return
+				}
+				rec := httptest.NewRecorder()
+				forwarder.HTTPError(rec, r, http.StatusBadRequest, "rejected request")
+				wantBody = rec.Body.Bytes()
+				resp := &forwarder.UnaryResponse{StatusCode: rec.Code, Header: rec.Header(), Body: wantBody}
+				if !assert.NoError(se.EncryptUnaryResponse(resp)) {
+					return
+				}
+				assert.NoError(forwarder.SendResponse(w, resp))
+			}))
+			defer stubBackend.Close()
+
+			apiKey := testAPIKey
+			sut := newTestServer(&apiKey, secret, stubBackend.Listener.Addr().String(), "")
+
+			prompt := "Hello"
+			req := prepareChatRequest(t.Context(), require, &prompt, nil, "")
+			req.Header.Set("Accept", tc.accept)
+			resp := httptest.NewRecorder()
+			sut.GetHandler().ServeHTTP(resp, req)
+
+			assert.Equal(http.StatusBadRequest, resp.Code)
+			assert.Equal(tc.accept, resp.Header().Get("Content-Type"))
+			assert.Equal(string(wantBody), resp.Body.String())
 		})
 	}
 }
@@ -735,79 +812,26 @@ func TestUnstructuredEncrypted(t *testing.T) {
 	}
 }
 
-func TestGetOCSPHeaders(t *testing.T) {
-	testCases := map[string]struct {
-		OCSPAllowedStatuses []ocspheader.AllowStatus
-		revocNbf            time.Time
-		secret              [32]byte
-		wantErr             bool
+func TestOCSPPolicyHeaders(t *testing.T) {
+	for name, tc := range map[string]struct {
+		allowUnknown bool
+		gracePeriod  time.Duration
+		statuses     []ocspheader.AllowStatus
 	}{
-		"ok": {
-			OCSPAllowedStatuses: []ocspheader.AllowStatus{
-				ocspheader.AllowStatusGood, ocspheader.AllowStatusRevoked,
-			},
-			revocNbf: time.Now().Add(24 * time.Hour),
-			secret:   [32]byte{0x42},
-		},
-	}
-
-	for name, tc := range testCases {
+		"good only":        {statuses: []ocspheader.AllowStatus{ocspheader.AllowStatusGood}},
+		"unknown":          {allowUnknown: true, statuses: []ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusUnknown}},
+		"revocation grace": {gracePeriod: 24 * time.Hour, statuses: []ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusRevoked}},
+	} {
 		t.Run(name, func(t *testing.T) {
-			require := require.New(t)
-			assert := assert.New(t)
-
-			policyHeader, macHeader, err := getOcspHeaders(tc.OCSPAllowedStatuses, tc.revocNbf, tc.secret)
-			if tc.wantErr {
-				require.Error(err)
-			} else {
-				require.NoError(err)
-				assert.NotEmpty(policyHeader)
-				assert.NotEmpty(macHeader)
-			}
-		})
-	}
-}
-
-func TestSetDynamicHeaders(t *testing.T) {
-	testCases := map[string]struct {
-		secret  secretmanager.Secret
-		wantErr bool
-	}{
-		"ok": {
-			secret: secretmanager.Secret{
-				ID:   "123",
-				Data: bytes.Repeat([]byte{0x42}, 32),
-			},
-		},
-		"too short secret": {
-			secret: secretmanager.Secret{
-				ID:   "123",
-				Data: bytes.Repeat([]byte{0x42}, 8),
-			},
-			wantErr: true,
-		},
-	}
-
-	for name, tc := range testCases {
-		t.Run(name, func(t *testing.T) {
-			require := require.New(t)
-			assert := assert.New(t)
-
-			server := newTestServer(nil, tc.secret, "", "")
-
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
-			requestID := requestid.New()
-			attempt := 1
-			err := server.setEncryptionHeaders(req, tc.secret, requestID, attempt)
-			if tc.wantErr {
-				require.Error(err)
-			} else {
-				require.NoError(err)
-				assert.Equal(req.Header.Get(constants.PrivatemodeSecretIDHeader), tc.secret.ID)
-				assert.NotEmpty(req.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyHeader))
-				assert.NotEmpty(req.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyMACHeader))
-				assert.Equal(fmt.Sprintf("proxy_%s_%d", requestID, attempt), req.Header.Get(requestid.UserHeader))
-			}
+			s := &Server{nvidiaOCSPAllowUnknown: tc.allowUnknown, nvidiaOCSPRevokedGracePeriod: tc.gracePeriod}
+			before := time.Now().Add(-tc.gracePeriod).Truncate(time.Second)
+			headers, err := s.ocspPolicyHeaders()
+			require.NoError(t, err)
+			policy, err := ocspheader.Unmarshal(headers[constants.PrivatemodeNvidiaOCSPPolicyHeader])
+			require.NoError(t, err)
+			assert.Equal(t, tc.statuses, policy.AllowedStatuses)
+			assert.False(t, policy.RevokedNbf.Before(before))
+			assert.False(t, policy.RevokedNbf.After(time.Now().Add(-tc.gracePeriod)))
 		})
 	}
 }
@@ -916,7 +940,30 @@ func TestInferenceHeaders(t *testing.T) {
 				assert.Equal(tc.expectedModel, r.Header.Get(constants.PrivatemodeTargetModel))
 				assert.Equal(tc.expectedUsage, r.Header.Get(constants.PrivatemodeContentLengthTokensHeader))
 
-				stub.EchoHandler(secret.Map(), slog.Default()).ServeHTTP(w, r)
+				assert.Empty(r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyHeader))
+				assert.Empty(r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyMACHeader))
+				assert.Equal(secret.ID, r.Header.Get(constants.PrivatemodeSecretIDHeader))
+				assert.Contains(r.Header.Get(requestid.UserHeader), "proxy_")
+				se, err := encbody.InitializeServerExchange(secret.Data, r)
+				if !assert.NoError(err) {
+					return
+				}
+				headers, err := se.DecryptRequest(r)
+				if !assert.NoError(err) {
+					return
+				}
+				policy, err := ocspheader.Unmarshal(headers[constants.PrivatemodeNvidiaOCSPPolicyHeader])
+				if !assert.NoError(err) {
+					return
+				}
+				assert.ElementsMatch([]ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusUnknown, ocspheader.AllowStatusRevoked}, policy.AllowedStatuses)
+				resp := &forwarder.UnaryResponse{Header: http.Header{"Content-Type": []string{"application/json"}}, Body: []byte(`{}`)}
+				if !assert.NoError(se.EncryptUnaryResponse(resp)) {
+					return
+				}
+				maps.Copy(w.Header(), resp.Header)
+				_, err = w.Write(resp.Body)
+				assert.NoError(err)
 			}))
 			defer stubBackend.Close()
 
@@ -1021,7 +1068,8 @@ func fullEncryptionStubServer(secret secretmanager.Secret, handler func(r *http.
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if err := se.DecryptRequest(r); err != nil {
+		_, err = se.DecryptRequest(r)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

@@ -17,6 +17,25 @@ export type AuthCredential =
  */
 export type AuthProvider = () => AuthCredential | Promise<AuthCredential>;
 
+/** Structured NVIDIA OCSP policy. */
+export interface NvidiaOCSPPolicy {
+  /**
+   * Whether to accept unknown OCSP statuses for NVIDIA attestation certificates.
+   * @default false
+   */
+  allowUnknown?: boolean;
+
+  /**
+   * Grace period for revoked certificates, in hours. Fractional hours are allowed.
+   * Must be finite, nonnegative, and less than 2**63 / 3_600_000_000_000.
+   * Zero rejects revoked certificates immediately.
+   * A positive value accepts certificates revoked within this period,
+   * with the cutoff recalculated for every request.
+   * @default 0
+   */
+  revokedGracePeriodHours?: number;
+}
+
 /** Options for configuring {@link PrivatemodeCore}. */
 export interface PrivatemodeCoreOptions {
   /**
@@ -37,6 +56,12 @@ export interface PrivatemodeCoreOptions {
    * @default 'https://api.privatemode.ai'
    */
   apiBaseURL?: string;
+
+  /**
+   * NVIDIA OCSP policy authenticated with each encrypted inference request.
+   * Defaults to accepting only good statuses, with no revocation grace period.
+   */
+  nvidiaOCSPPolicy?: NvidiaOCSPPolicy;
 
   /**
    * Override for the manifest used to verify the Privatemode
@@ -147,6 +172,7 @@ export class PrivatemodeCore {
   private wasmURL: string | URL;
   private browserWasmURL: string;
   private enableWasmLogging: boolean;
+  private nvidiaOCSPPolicy: Required<NvidiaOCSPPolicy>;
   private expectedWasmHash: string | undefined;
   private onManifestUpdate?: (manifestBytes: Uint8Array) => void;
   private onSecretUpdate?: (secret: ExportedSecret) => void;
@@ -193,6 +219,13 @@ export class PrivatemodeCore {
       );
     }
     this.authProvider = auth;
+
+    const { allowUnknown = false, revokedGracePeriodHours = 0 } =
+      options.nvidiaOCSPPolicy ?? {};
+    this.nvidiaOCSPPolicy = {
+      allowUnknown,
+      revokedGracePeriodHours,
+    };
 
     this.apiBaseURL = options.apiBaseURL ?? 'https://api.privatemode.ai';
     const extraHTTPHeaders = new Headers(options.extraHTTPHeaders);
@@ -258,6 +291,7 @@ export class PrivatemodeCore {
       this.apiBaseURL,
       this.enableWasmLogging,
       this.extraHTTPHeaders,
+      this.nvidiaOCSPPolicy,
     );
     this._manifestBytes = manifestBytes;
     this.initialized = true;
@@ -668,6 +702,30 @@ export class PrivatemodeCore {
   }
 
   /**
+   * Retrieve a model. The response is not encrypted and only
+   * requires authentication.
+   *
+   * {@link verify} must have been called first.
+   *
+   * @param model - The model ID to retrieve.
+   * @param options - Optional request headers and abort signal.
+   * @returns The parsed model response body and response headers.
+   * @throws If the request fails.
+   */
+  public async retrieveModel(
+    model: string,
+    options?: PrivatemodeRequestOptions,
+  ): Promise<PrivatemodeResponse> {
+    await this.applyCredential();
+    const resp = await this.wasm.retrieveModel(
+      model,
+      headersToRecord(options?.headers),
+      options?.signal,
+    );
+    return { body: JSON.parse(resp.body), headers: resp.headers };
+  }
+
+  /**
    * Export the current encryption secret so it can be cached and
    * restored later with {@link importSecret}, avoiding a full HPKE
    * handshake on reload.
@@ -812,6 +870,7 @@ export class PrivatemodeCore {
         this.apiBaseURL,
         this.enableWasmLogging,
         this.extraHTTPHeaders,
+        this.nvidiaOCSPPolicy,
       );
     } catch (error) {
       if (
@@ -832,6 +891,7 @@ export class PrivatemodeCore {
           this.apiBaseURL,
           this.enableWasmLogging,
           this.extraHTTPHeaders,
+          this.nvidiaOCSPPolicy,
         );
         this._manifestBytes = manifestBytes;
         if (this.onManifestUpdate) {

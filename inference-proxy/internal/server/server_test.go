@@ -93,7 +93,7 @@ func benchmarkServe(b *testing.B, apiType string) {
 				req.Header.Set(constants.PrivatemodeSecretIDHeader, secretID)
 				exchange, err := encbody.InitializeClientExchange(secret)
 				require.NoError(err)
-				require.NoError(exchange.EncryptRequest(req))
+				require.NoError(exchange.EncryptRequest(req, nil))
 
 				resp, err := http.DefaultClient.Do(req)
 				require.NoError(err)

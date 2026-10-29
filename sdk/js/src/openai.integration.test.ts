@@ -78,21 +78,34 @@ describe.skipIf(!runIntegrationTests)('OpenAI-compatible client', () => {
     expect(content.toLowerCase()).toContain('hello');
   }, 120_000);
 
-  it('lists the available models', async () => {
+  it('lists available models and retrieves a model matching its list entry', async () => {
     const client = createClient();
 
     const models = await client.models.list();
 
     expect(models.data.length).toBeGreaterThan(0);
     expect(models.data.map((model) => model.id)).toContain('gpt-oss-120b');
+
+    const listedModel = models.data[0];
+    const model = await client.models.retrieve(listedModel.id);
+
+    expect(model).toStrictEqual(listedModel);
   }, 120_000);
 
-  it('retrieves a single model', async () => {
+  it('preserves OpenAI error details when retrieving an unknown model', async () => {
     const client = createClient();
+    const model = client.models.retrieve('this-model-does-not-exist');
 
-    const model = await client.models.retrieve('gpt-oss-120b');
-
-    expect(model.id).toBe('gpt-oss-120b');
+    await expect(model).rejects.toBeInstanceOf(OpenAI.NotFoundError);
+    await expect(model).rejects.toMatchObject({
+      status: 404,
+      code: 'model_not_found',
+      message: expect.stringContaining(
+        "The model 'this-model-does-not-exist' does not exist.",
+      ),
+      param: 'model',
+      type: 'invalid_request_error',
+    });
   }, 120_000);
 
   it('creates embeddings through the public OpenAI-compatible client', async () => {

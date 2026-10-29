@@ -34,6 +34,8 @@
             allowUnfree = true;
           };
           overlays = [
+            # Default to the latest Node version
+            (_final: prev: { nodejs = prev.nodejs_26; })
             # Cross-platform packages that may also be built for and run on MacOS.
             # Examples: Dev tools, Client-side software such as the PM proxy.
             (_final: prev: (import ./nix/packages { inherit (prev) lib callPackage; }))

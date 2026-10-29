@@ -175,6 +175,17 @@ func TestMediaContentValidator(t *testing.T) {
 				return errors.Is(err, mutators.ErrRemoteResourceURL)
 			},
 		},
+		"image/unparsable url": {
+			request: newRequest([]map[string]any{
+				{
+					"type":      "image_url",
+					"image_url": map[string]string{"url": "http://[SECRET-MARKER"},
+				},
+			}),
+			validateErr: func(err error) bool {
+				return err != nil && !strings.Contains(err.Error(), "SECRET-MARKER")
+			},
+		},
 		"image/data url": {
 			request: newRequest([]map[string]any{
 				{
@@ -227,7 +238,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "not allowed")
+				return err != nil && strings.Contains(err.Error(), "not allowed") && !strings.Contains(err.Error(), "example.com")
 			},
 		},
 		"video without type in concise schema": {
@@ -237,7 +248,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "not allowed")
+				return err != nil && strings.Contains(err.Error(), "not allowed") && !strings.Contains(err.Error(), "example.com")
 			},
 		},
 		"audio": {
@@ -248,7 +259,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "not allowed")
+				return err != nil && strings.Contains(err.Error(), "not allowed") && !strings.Contains(err.Error(), "example.com")
 			},
 		},
 		"audio without type in concise schema": {
@@ -259,7 +270,7 @@ func TestMediaContentValidator(t *testing.T) {
 				},
 			}),
 			validateErr: func(err error) bool {
-				return err != nil && strings.Contains(err.Error(), "not allowed")
+				return err != nil && strings.Contains(err.Error(), "not allowed") && !strings.Contains(err.Error(), "example.com")
 			},
 		},
 	}

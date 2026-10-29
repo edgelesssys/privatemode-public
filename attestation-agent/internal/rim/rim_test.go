@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/edgelesssys/continuum/attestation-agent/internal/gpu"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,7 +16,7 @@ func TestIntegrationFetchRIM(t *testing.T) {
 
 	client := New(&http.Client{}, "https://rim.attestation.nvidia.com/", slog.Default())
 
-	identity, err := client.FetchRIM(t.Context(), "NV_GPU_DRIVER_GH100_580.105.08")
+	identity, err := client.FetchDriverRIM(t.Context(), gpu.ArchHopper, "", "580.105.08")
 	require.NoError(err)
 	require.NotNil(identity)
 }

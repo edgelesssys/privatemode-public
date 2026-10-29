@@ -169,7 +169,7 @@ func verifyAndEnable(ctx context.Context, log *slog.Logger) ([]internalOCSP.Stat
 		if err != nil {
 			return nil, fmt.Errorf("getting VBIOS version: %w", err)
 		}
-		vbiosRIM, err := rimClient.FetchVBIOSRIM(ctx, parsedReport.Project(), parsedReport.ProjectSKU(), parsedReport.ChipSKU(), vbiosVersion)
+		vbiosRIM, err := rimClient.FetchVBIOSRIM(ctx, driverRIM.Meta.Product, parsedReport.Project(), parsedReport.ProjectSKU(), parsedReport.ChipSKU(), vbiosVersion)
 		if err != nil {
 			return nil, fmt.Errorf("fetching VBIOS RIM: %w", err)
 		}

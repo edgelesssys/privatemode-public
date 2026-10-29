@@ -5,6 +5,7 @@ package forwarder
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log/slog"
 	"mime"
@@ -83,7 +84,11 @@ func WithFormRequestMutation(mutate func(*multipart.Form, *multipart.Writer) (bo
 		reader := multipart.NewReader(bytes.NewReader(body), boundary)
 		form, err := reader.ReadForm(constants.MaxFileSizeBytes)
 		if err != nil {
-			return fmt.Errorf("parsing form: %w", err)
+			if errors.Is(err, multipart.ErrMessageTooLarge) {
+				return fmt.Errorf("parsing form: %w", err)
+			}
+			// Parse errors quote lines of the body, which is request content.
+			return errors.New("parsing form failed")
 		}
 		defer func() { _ = form.RemoveAll() }()
 

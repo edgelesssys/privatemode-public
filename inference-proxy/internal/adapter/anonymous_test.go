@@ -138,7 +138,7 @@ func TestAnonymousLimits(t *testing.T) {
 			}
 			client, err := encbody.InitializeClientExchange(secret)
 			require.NoError(t, err)
-			require.NoError(t, client.EncryptRequest(r))
+			require.NoError(t, client.EncryptRequest(r, nil))
 			w := httptest.NewRecorder()
 			mux.ServeHTTP(w, r)
 			if tc.allowed {
@@ -160,8 +160,13 @@ func TestAnonymousLimits(t *testing.T) {
 					assert.Equal(t, wantBody, body)
 				}
 			} else {
-				assert.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
-				assert.Contains(t, w.Body.String(), "sign in")
+				assert.Equal(t, http.StatusForbidden, w.Code)
+				// Rejections after decryption are encrypted.
+				resp, err := client.DecryptResponse(w.Result(), constants.MaxEncryptedFrameSize)
+				require.NoError(t, err)
+				body, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				assert.Contains(t, string(body), "sign in")
 				assert.Empty(t, upstreamBodies, "rejected requests must not reach the workload")
 			}
 		})

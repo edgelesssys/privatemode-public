@@ -466,12 +466,17 @@ func TestForwardChatCompletionsRequestDuplicatesReasoningContent(t *testing.T) {
 // This is an OpenAI-specific behavior since /v1/models is used for health checks and shouldn't require GPU attestation.
 func TestModelsEndpointExcludedFromOCSP(t *testing.T) {
 	assert := assert.New(t)
+	workload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer workload.Close()
 
 	// Create adapter with bad OCSP status - would normally fail verification
 	a := &Adapter{
 		Adapter: &inference.Adapter{
 			Secrets:       &adaptertest.Secrets{},
-			EncForwarder:  adaptertest.EncForwarder{},
+			EncForwarder:  adaptertest.EncForwarder{Inner: forwarder.New(workload.Client(), workload.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, slog.Default())},
 			WorkloadTasks: []string{constants.WorkloadTaskGenerate},
 			Log:           slog.Default(),
 			OCSPStatus:    []ocsp.StatusInfo{{GPU: ocsp.StatusUnknown, VBIOS: ocsp.StatusGood, Driver: ocsp.StatusGood}},
@@ -483,17 +488,17 @@ func TestModelsEndpointExcludedFromOCSP(t *testing.T) {
 		},
 	}
 
-	// Build handler like the server does - middleware is applied per-route by RegisterRoutes
+	// Build the same routes as the server.
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
 
-	// Models endpoint should succeed despite bad OCSP status (not wrapped with OCSP middleware)
+	// Model requests bypass the encrypted inference path and its OCSP check.
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, constants.OpenAIModelsEndpoint, http.NoBody)
 	responseRecorder := httptest.NewRecorder()
 	mux.ServeHTTP(responseRecorder, request)
 	assert.Equal(http.StatusOK, responseRecorder.Code)
 
-	// Other endpoints should fail with bad OCSP status (wrapped with OCSP middleware)
+	// Inference requests fail the OCSP check before reaching the workload.
 	request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, http.NoBody)
 	responseRecorder = httptest.NewRecorder()
 	mux.ServeHTTP(responseRecorder, request)

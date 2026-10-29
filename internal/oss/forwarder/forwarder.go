@@ -82,6 +82,14 @@ func WithMaxBodyBytes(n int64, msg string) Opts {
 	}
 }
 
+// WithErrorMapper maps the error responses that [Forwarder.Forward] writes itself, e.g. to encrypt
+// them. If the mapper fails, a generic error without details is sent instead.
+func WithErrorMapper(m func(*UnaryResponse) (Response, error)) Opts {
+	return func(o *opts) {
+		o.errorMapper = m
+	}
+}
+
 // NoRequestMutation skips any mutation on the [*http.Request].
 func NoRequestMutation(*http.Request) error { return nil }
 
@@ -208,7 +216,7 @@ func (f *Forwarder) Forward(
 				ctx,
 				"Downstream request cancelled (connection lost) before request could be fully forwarded",
 			)
-			HTTPError(w, req, StatusClientClosedRequest, "forwarding request: %s", err)
+			writeError(w, req, options, log, StatusClientClosedRequest, fmt.Sprintf("forwarding request: %s", err), "")
 			return
 		}
 		// Use the mutator's status or a gateway status for upstream failures.
@@ -225,12 +233,12 @@ func (f *Forwarder) Forward(
 			if info.showError {
 				msg += ": " + connErr.Error()
 			}
-			writeError(w, req, status, msg, info.key+"_connection_failed")
+			writeError(w, req, options, log, status, msg, info.key+"_connection_failed")
 			return
 		}
 		// Error details may contain plaintext input or upstream error text.
 		log.ErrorContext(ctx, "Failed to forward request", "status", status)
-		HTTPError(w, req, status, "forwarding request: %s", err)
+		writeError(w, req, options, log, status, fmt.Sprintf("forwarding request: %s", err), "")
 		return
 	}
 	// Response body closing happens below, dependent on the mapper.
@@ -244,7 +252,7 @@ func (f *Forwarder) Forward(
 	if err != nil {
 		_ = resp.Body.Close()
 		log.ErrorContext(ctx, "Failed to map upstream response to downstream response")
-		HTTPError(w, req, http.StatusInternalServerError, "mapping response: %s", err)
+		writeError(w, req, options, log, http.StatusInternalServerError, fmt.Sprintf("mapping response: %s", err), "")
 		return
 	}
 	switch r := dsResp.(type) {
@@ -294,6 +302,23 @@ func (f *Forwarder) Forward(
 	)
 }
 
+// writeError sends an error response produced by Forward, mapped by [opts.errorMapper] if set.
+func writeError(w http.ResponseWriter, req *http.Request, options *opts, log *slog.Logger, status int, msg, errorCode string) {
+	resp := newErrorResponse(req, status, msg, "", "", errorCode)
+	var dsResp Response = resp
+	if options.errorMapper != nil {
+		mapped, err := options.errorMapper(resp)
+		if err != nil {
+			log.ErrorContext(req.Context(), "Failed to map error response", "error", err)
+			mapped = newErrorResponse(req, status, "internal error: mapping error response failed", "", "", "")
+		}
+		dsResp = mapped
+	}
+	if err := SendResponse(w, dsResp); err != nil {
+		log.WarnContext(req.Context(), "Failed to send error response", "error", err)
+	}
+}
+
 // applyBackoffDelay applies the configured backoff delay before retrying.
 func (f *Forwarder) applyBackoffDelay(ctx context.Context, delay time.Duration, attempt int) error {
 	if delay <= 0 {
@@ -323,10 +348,10 @@ func (f *Forwarder) cloneIncomingRequest(w http.ResponseWriter, req *http.Reques
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				log.WarnContext(ctx, "Request body too large", "error", err)
-				HTTPError(w, req, http.StatusRequestEntityTooLarge, "%s", options.maxBodyExceededMsg)
+				writeError(w, req, options, log, http.StatusRequestEntityTooLarge, options.maxBodyExceededMsg, "")
 			} else {
 				log.ErrorContext(ctx, "Failed to read request body", "error", err)
-				HTTPError(w, req, http.StatusInternalServerError, "reading request body: %s", err)
+				writeError(w, req, options, log, http.StatusInternalServerError, fmt.Sprintf("reading request body: %s", err), "")
 			}
 			return nil, false
 		}
@@ -334,7 +359,7 @@ func (f *Forwarder) cloneIncomingRequest(w http.ResponseWriter, req *http.Reques
 		baseReq, err = persist.CloneRequestUnlimited(req)
 		if err != nil {
 			log.ErrorContext(ctx, "Failed to read request body", "error", err)
-			HTTPError(w, req, http.StatusInternalServerError, "reading request body: %s", err)
+			writeError(w, req, options, log, http.StatusInternalServerError, fmt.Sprintf("reading request body: %s", err), "")
 			return nil, false
 		}
 	}
@@ -470,16 +495,26 @@ type openAIAPIError struct {
 // HTTPError writes an error response to the client.
 // Functions similarly to [http.Error], but also handles error reporting for SSE requests.
 func HTTPError(w http.ResponseWriter, r *http.Request, code int, msg string, args ...any) {
-	writeError(w, r, code, fmt.Sprintf(msg, args...), "")
+	HTTPErrorWithDetails(w, r, code, fmt.Sprintf(msg, args...), "", "", "")
 }
 
-// writeError writes an error response with message msg and OpenAI error code errCode.
-func writeError(w http.ResponseWriter, r *http.Request, code int, msg string, errCode string) {
+// HTTPErrorWithDetails writes an error response with explicit OpenAI error details.
+// Like [HTTPError], it also handles error reporting for SSE requests.
+func HTTPErrorWithDetails(w http.ResponseWriter, r *http.Request, status int, msg, errorType, param, errorCode string) {
+	resp := newErrorResponse(r, status, msg, errorType, param, errorCode)
+	writeHeaderTo(w.Header(), resp.Header)
+	w.WriteHeader(status)
+	_, _ = w.Write(resp.Body)
+}
+
+// newErrorResponse builds the error response [HTTPErrorWithDetails] writes: an OpenAI error
+// object, as an SSE error event if r accepts only text/event-stream.
+func newErrorResponse(r *http.Request, status int, msg, errorType, param, errorCode string) *UnaryResponse {
 	errObj := openAIAPIError{
 		Message: msg,
-		Type:    "",
-		Param:   "",
-		Code:    errCode,
+		Type:    errorType,
+		Param:   param,
+		Code:    errorCode,
 	}
 	formattedMsgBytes, err := json.Marshal(openAIAPIErrorResponse{Error: errObj})
 	formattedMsg := string(formattedMsgBytes)
@@ -487,16 +522,16 @@ func writeError(w http.ResponseWriter, r *http.Request, code int, msg string, er
 		// Only fall back to non-JSON error when we cannot even marshal the error (which is pretty bad)
 		formattedMsg = msg
 	}
+	header := http.Header{}
 	if expectedContentType := r.Header.Get("accept"); expectedContentType == "text/event-stream" {
 		// If the client requested streaming we need to return the error correctly encoded.
-		w.Header().Set("Content-Type", "text/event-stream")
-		formattedMsg = fmt.Sprintf("event: error\n\ndata: %s\n\n", formattedMsg)
+		header.Set("Content-Type", "text/event-stream")
+		formattedMsg = fmt.Sprintf("event: error\ndata: %s\n\n", formattedMsg)
 	} else {
-		w.Header().Set("Content-Type", "application/json")
+		header.Set("Content-Type", "application/json")
 	}
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.WriteHeader(code)
-	fmt.Fprint(w, formattedMsg)
+	header.Set("X-Content-Type-Options", "nosniff")
+	return &UnaryResponse{StatusCode: status, Header: header, Body: []byte(formattedMsg)}
 }
 
 // delHopHeaders deletes hop-by-hop headers which should not be forwarded. It mirrors the behaviour
@@ -533,6 +568,7 @@ type opts struct {
 	retryCallback      RetryCallback
 	maxBodyBytes       int64
 	maxBodyExceededMsg string
+	errorMapper        func(*UnaryResponse) (Response, error)
 }
 
 func defaultOpts(fw *Forwarder) *opts {

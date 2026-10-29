@@ -29,7 +29,6 @@ type Adapter struct {
 
 // New creates a new [Adapter] for the Anthropic API.
 func New(workloadTasks []string, secrets inference.SecretGetter, ocspStatusFile string, encForwarder encforward.Forwarder, reporter inference.UsageReporter, log *slog.Logger) (*Adapter, error) {
-	// No endpoints are excluded from OCSP verification for Anthropic
 	baseAdapter, err := inference.New(workloadTasks, secrets, ocspStatusFile, encForwarder, reporter, log)
 	if err != nil {
 		return nil, err
@@ -44,10 +43,9 @@ func New(workloadTasks []string, secrets inference.SecretGetter, ocspStatusFile 
 }
 
 // RegisterRoutes registers the Anthropic API handlers on the given ServeMux.
-// Each handler is wrapped with OCSP verification middleware.
 func (a *Adapter) RegisterRoutes(mux *http.ServeMux) {
 	// Create message: https://docs.anthropic.com/en/api/messages
-	mux.Handle("POST "+constants.AnthropicMessagesEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardMessagesRequest)))
+	mux.HandleFunc("POST "+constants.AnthropicMessagesEndpoint, a.forwardMessagesRequest)
 }
 
 // HandlesCatchAll returns false because Anthropic adapter only handles specific endpoints.

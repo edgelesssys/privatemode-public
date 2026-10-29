@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { PrivatemodeAPIError } from './errors.js';
+import type { NvidiaOCSPPolicy } from './privatemode-ai.js';
 import {
   createWasmClient,
   initWasm,
@@ -83,6 +84,120 @@ describe('wasm', () => {
   });
 
   describe('initialize', () => {
+    it.each([
+      { authType: 'invalid', policy: {}, error: /unknown auth type/ },
+      {
+        authType: 'apiKey',
+        policy: { revokedGracePeriodHours: -1 },
+        error: /revokedGracePeriodHours/,
+      },
+    ])(
+      'returns offline initialization errors without stopping Wasm: $error',
+      ({ authType, policy, error }) => {
+        const healthy = createWasmClient();
+        const failing = createWasmClient();
+        try {
+          healthy.initializeOffline(
+            'apiKey',
+            'test-key',
+            'https://example.com',
+            false,
+          );
+          healthy.importSecret(
+            'healthy',
+            btoa('test-secret'),
+            Math.floor(Date.now() / 1000) + 60,
+          );
+
+          expect(() =>
+            failing.initializeOffline(
+              authType,
+              'test-key',
+              'https://example.com',
+              false,
+              {},
+              policy,
+            ),
+          ).toThrow(error);
+          expect(JSON.parse(healthy.exportSecret())).toMatchObject({
+            id: 'healthy',
+          });
+          failing.initializeOffline(
+            'apiKey',
+            'test-key',
+            'https://example.com',
+            false,
+          );
+        } finally {
+          healthy.close();
+          failing.close();
+        }
+      },
+    );
+
+    it.each([
+      {
+        name: 'circular object',
+        policy: () => {
+          const policy: Record<string, unknown> = {};
+          policy.self = policy;
+          return policy;
+        },
+        error: /circular/i,
+      },
+      {
+        name: 'BigInt',
+        policy: () => ({ revokedGracePeriodHours: 1n }),
+        error: /BigInt/i,
+      },
+      {
+        name: 'throwing serializer',
+        policy: () => ({
+          toJSON() {
+            throw new Error('broken serializer');
+          },
+        }),
+        error: /broken serializer/,
+      },
+    ])('handles a $name without stopping Wasm', async ({ policy, error }) => {
+      const invalidPolicy = policy() as unknown as NvidiaOCSPPolicy;
+      await expect(
+        client.initialize(
+          manifest,
+          'apiKey',
+          'test-key',
+          'https://example.com',
+          false,
+          {},
+          invalidPolicy,
+        ),
+      ).rejects.toThrow(error);
+      expect(() =>
+        client.initializeOffline(
+          'apiKey',
+          'test-key',
+          'https://example.com',
+          false,
+          {},
+          invalidPolicy,
+        ),
+      ).toThrow(error);
+
+      const healthy = createWasmClient();
+      healthy.initializeOffline(
+        'apiKey',
+        'test-key',
+        'https://example.com',
+        false,
+        {},
+        {
+          allowUnknown: true,
+          revokedGracePeriodHours: 1.5,
+        },
+      );
+      healthy.close();
+    });
+
     it('fails with illegal base64 data', async () => {
       const invalidBase64 = '!!!';
       await expect(

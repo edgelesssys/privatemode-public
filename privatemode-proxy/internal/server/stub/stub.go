@@ -45,7 +45,7 @@ func encryptedStaticResponseHandler(secrets map[string][]byte, response []byte) 
 			forwarder.HTTPError(w, r, http.StatusInternalServerError, "%s", err.Error())
 			return
 		}
-		if err := se.DecryptRequest(r); err != nil {
+		if _, err = se.DecryptRequest(r); err != nil {
 			forwarder.HTTPError(w, r, http.StatusInternalServerError, "%s", err.Error())
 			return
 		}
@@ -160,7 +160,7 @@ func decryptRequest(secrets map[string][]byte, r *http.Request, log *slog.Logger
 	if err != nil {
 		return nil, fmt.Errorf("initializing server exchange: %w", err)
 	}
-	if err := se.DecryptRequest(r); err != nil {
+	if _, err = se.DecryptRequest(r); err != nil {
 		return nil, fmt.Errorf("decrypting request: %w", err)
 	}
 

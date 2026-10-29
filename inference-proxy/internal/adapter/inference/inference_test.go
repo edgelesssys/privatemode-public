@@ -3,18 +3,24 @@ package inference
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/adapter/adaptertest"
+	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/oss/ocspheader"
+	"github.com/edgelesssys/continuum/internal/oss/persist"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -230,12 +236,6 @@ func TestVerifyOCSP(t *testing.T) {
 				OCSPStatus:    []ocsp.StatusInfo{tc.ocspStatus},
 			}
 
-			// Create a simple handler that returns 200 OK
-			innerHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusOK)
-			})
-			handler := a.VerifyOCSP(innerHandler)
-
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/test", http.NoBody)
 
 			if tc.acceptedStatus != nil {
@@ -254,11 +254,14 @@ func TestVerifyOCSP(t *testing.T) {
 				request.Header.Set(constants.PrivatemodeSecretIDHeader, sentSecretID)
 			}
 
-			responseRecorder := httptest.NewRecorder()
-			handler.ServeHTTP(responseRecorder, request)
-
-			assert.Equal(tc.expectedCode, responseRecorder.Code)
-			assert.Contains(responseRecorder.Body.String(), tc.expectedBody)
+			err := a.verifyOCSP(request, nil)
+			assert.Equal(tc.expectedCode, forwarder.StatusFromError(err))
+			if tc.expectedBody != "" {
+				require.Error(err)
+				assert.Contains(err.Error(), tc.expectedBody)
+			} else {
+				require.NoError(err)
+			}
 		})
 	}
 }
@@ -277,4 +280,109 @@ func TestUnsupportedEndpoint(t *testing.T) {
 
 	assert.Equal(http.StatusNotImplemented, responseRecorder.Code)
 	assert.Contains(responseRecorder.Body.String(), "unsupported endpoint")
+}
+
+func TestAuthenticatedOCSPPolicy(t *testing.T) {
+	secret := bytes.Repeat([]byte{1}, 32)
+	now := time.Now().Truncate(time.Second)
+	marshalPolicy := func(statuses []ocspheader.AllowStatus, revokedNbf time.Time) string {
+		policy, err := ocspheader.NewHeader(statuses, revokedNbf).Marshal()
+		require.NoError(t, err)
+		return policy
+	}
+	good := marshalPolicy([]ocspheader.AllowStatus{ocspheader.AllowStatusGood}, time.Time{})
+	unknown := marshalPolicy([]ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusUnknown}, time.Time{})
+	revoked := marshalPolicy([]ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusRevoked}, now.Add(-time.Hour))
+	legacy := ocspheader.NewHeader([]ocspheader.AllowStatus{ocspheader.AllowStatusGood, ocspheader.AllowStatusUnknown}, time.Time{})
+	legacyMAC, err := legacy.MarshalMACHeader([32]byte(secret))
+	require.NoError(t, err)
+
+	for name, tc := range map[string]struct {
+		clientVersion string
+		headers       map[string]string
+		outerPolicy   string
+		outerMAC      string
+		gpu           ocsp.Status
+		code          int
+		tamper        bool
+	}{
+		"v1.59 uses legacy policy":                         {clientVersion: "v1.59.9", outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"v1.59 without policy defaults to good":            {clientVersion: "v1.59.9", gpu: ocsp.StatusGood, code: http.StatusOK},
+		"v1.60 uses legacy policy":                         {clientVersion: "v1.60.0", outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"v1.60 without policy defaults to good":            {clientVersion: "v1.60.9", gpu: ocsp.StatusGood, code: http.StatusOK},
+		"short v1.60 uses legacy policy":                   {clientVersion: "v1.60", outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"v1.60 prerelease uses legacy policy":              {clientVersion: "v1.60.0-pre", outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"missing version uses legacy policy":               {outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"invalid version uses legacy policy":               {clientVersion: "invalid", outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"v1.61 requires authenticated policy":              {clientVersion: "v1.61.0", gpu: ocsp.StatusGood, code: http.StatusBadRequest},
+		"v1.61 cannot use legacy policy":                   {clientVersion: "v1.61.0", outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusBadRequest},
+		"short v1.61 requires authenticated policy":        {clientVersion: "v1.61", gpu: ocsp.StatusGood, code: http.StatusBadRequest},
+		"v1.61 prerelease requires authenticated policy":   {clientVersion: "v1.61.0-pre", gpu: ocsp.StatusGood, code: http.StatusBadRequest},
+		"newer minor requires authenticated policy":        {clientVersion: "v1.62.0", gpu: ocsp.StatusGood, code: http.StatusBadRequest},
+		"newer major requires authenticated policy":        {clientVersion: "v2.0.0", gpu: ocsp.StatusGood, code: http.StatusBadRequest},
+		"good only default":                                {gpu: ocsp.StatusGood, code: http.StatusOK},
+		"default rejects unknown":                          {gpu: ocsp.StatusUnknown, code: http.StatusInternalServerError},
+		"authenticated unknown":                            {clientVersion: "v1.61.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: unknown}, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"authenticated overrides restrictive outer policy": {clientVersion: "v1.61.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: unknown}, outerPolicy: good, outerMAC: "invalid", gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"authenticated overrides permissive legacy policy": {clientVersion: "v1.61.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: good}, outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusInternalServerError},
+		"downgraded version respects authenticated policy": {clientVersion: "v1.60.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: good}, outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusInternalServerError},
+		"missing version respects authenticated policy":    {headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: good}, outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusInternalServerError},
+		"old version accepts authenticated unknown":        {clientVersion: "v1.60.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: unknown}, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"old version rejects empty authenticated policy":   {clientVersion: "v1.60.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: ""}, outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusBadRequest},
+		"old version rejects invalid authenticated policy": {clientVersion: "v1.60.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: "invalid"}, outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusBadRequest},
+		"empty authenticated policy cannot fall back":      {clientVersion: "v1.61.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: ""}, outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusBadRequest},
+		"malformed authenticated policy cannot fall back":  {clientVersion: "v1.61.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: "invalid"}, outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusBadRequest},
+		"unsigned outer policy rejected":                   {outerPolicy: unknown, gpu: ocsp.StatusUnknown, code: http.StatusBadRequest},
+		"legacy MAC remains supported":                     {outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"invalid legacy MAC rejected":                      {outerPolicy: unknown, outerMAC: "invalid", gpu: ocsp.StatusUnknown, code: http.StatusBadRequest},
+		"revoked within grace period":                      {clientVersion: "v1.61.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: revoked}, gpu: ocsp.StatusRevoked(now), code: http.StatusOK},
+		"revoked outside grace period":                     {clientVersion: "v1.61.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: revoked}, gpu: ocsp.StatusRevoked(now.Add(-2 * time.Hour)), code: http.StatusInternalServerError},
+		"tampered ciphertext":                              {clientVersion: "v1.61.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: unknown}, gpu: ocsp.StatusUnknown, code: http.StatusBadRequest, tamper: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var forwarded atomic.Bool
+			workload := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				forwarded.Store(true)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer workload.Close()
+			secrets := &adaptertest.Secrets{SecretMap: map[string][]byte{"test": secret}}
+			log := slog.Default()
+			a := &Adapter{
+				Secrets:      secrets,
+				EncForwarder: encforward.New(forwarder.New(workload.Client(), workload.Listener.Addr().String(), forwarder.SchemeHTTP, forwarder.UpstreamModel, log), secrets),
+				OCSPStatus:   []ocsp.StatusInfo{{GPU: tc.gpu, Driver: ocsp.StatusGood, VBIOS: ocsp.StatusGood}},
+				Log:          log,
+			}
+			client, err := encbody.InitializeClientExchange(secret)
+			require.NoError(t, err)
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, constants.OpenAIChatCompletionsEndpoint, strings.NewReader(`{}`))
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set(constants.PrivatemodeVersionHeader, tc.clientVersion)
+			require.NoError(t, mutators.ContentLengthTokensInjector(r))
+			r.Header.Set(constants.PrivatemodeSecretIDHeader, "test")
+			r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyHeader, tc.outerPolicy)
+			r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyMACHeader, tc.outerMAC)
+			require.NoError(t, client.EncryptRequest(r, tc.headers))
+			if tc.tamper {
+				wire, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				require.NoError(t, r.Body.Close())
+				wire[len(wire)-1] ^= 1
+				persist.SetBody(r, wire)
+			}
+			w := httptest.NewRecorder()
+			mutated := false
+			mutator := func(*http.Request) error {
+				mutated = true
+				return nil
+			}
+			noUsage := func([]byte) (usage.Stats, error) { return usage.Stats{}, ErrNoUsage }
+			a.ForwardEncrypted(w, r, mutator, nil, nil, noUsage, noUsage)
+			assert.Equal(t, tc.code, w.Code, w.Body.String())
+			assert.Equal(t, tc.code == http.StatusOK, forwarded.Load())
+			assert.Equal(t, tc.code == http.StatusOK, mutated)
+		})
+	}
 }

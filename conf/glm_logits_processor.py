@@ -1,4 +1,3 @@
-import time
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -26,11 +25,6 @@ TOOL_CALL_START = "<tool_call>"
 END_OF_TURN = ("<|endoftext|>", "<|user|>", "<|observation|>")
 # Tokens that start a turn in a rendered prompt; the prompt scan stops at them.
 TURN_BOUNDARIES = ("<|system|>", "<|user|>", "<|assistant|>", "<|observation|>")
-# Seconds between log lines with the probability mass each rule removed.
-STATS_INTERVAL_S = 60.0
-# The mass is measured on every STATS_EVERY-th step and scaled up: it costs a full softmax.
-STATS_EVERY = 16
-STATS = ("turn_end_in_think", "turn_end_before_answer")
 
 
 class _Phase(Enum):
@@ -105,9 +99,6 @@ class GlmLogitsProcessor(LogitsProcessor):
         self._whitespace: dict[int, bool] = {}
         self._row_cache: dict[str, tuple[list[int], torch.Tensor]] = {}
         self._states: dict[int, _RequestState] = {}
-        self._removed_mass = torch.zeros(len(STATS), dtype=torch.float32, device=device)
-        self._stats_since = time.monotonic()
-        self._step = 0
 
     def _is_whitespace(self, tok: int) -> bool:
         cached = self._whitespace.get(tok)
@@ -197,59 +188,33 @@ class GlmLogitsProcessor(LogitsProcessor):
             elif state.phase == _Phase.ANSWER_START:
                 answer_rows.append(index)
 
-        if not (think_rows or answer_rows):
-            self._log_stats()
-            return logits
         eot = self._eot_idx
-        count = self._step % STATS_EVERY == 0
-        self._step += 1
+        # Neither rule overrides an earlier mask (grammar, client ban): a token the grammar
+        # rejects ends the request.
         if think_rows:
             rows = self._rows("think", think_rows)
-            if count:
-                self._count(0, logits, rows, eot)
+            eot_logits = logits[rows.unsqueeze(1), eot]
+            think_end = logits[rows, m.think_end]
+            applies = torch.isfinite(think_end)
             # Where the model would end its turn, close the think block instead. max, not
             # logaddexp: no stop pressure beyond the model's own.
-            eot_max = logits[rows.unsqueeze(1), eot].max(dim=1).values
-            logits[rows, m.think_end] = torch.maximum(
-                logits[rows, m.think_end], eot_max
+            logits[rows, m.think_end] = torch.where(
+                applies,
+                torch.maximum(think_end, eot_logits.max(dim=1).values),
+                think_end,
             )
-            logits[rows.unsqueeze(1), eot] = float("-inf")
+            logits[rows.unsqueeze(1), eot] = torch.where(
+                applies.unsqueeze(1), float("-inf"), eot_logits
+            )
         if answer_rows:
             rows = self._rows("answer", answer_rows)
-            if count:
-                self._count(1, logits, rows, eot)
-            logits[rows.unsqueeze(1), eot] = float("-inf")
-        self._log_stats()
-        return logits
-
-    def _count(
-        self,
-        stat: int,
-        logits: torch.Tensor,
-        rows: torch.Tensor,
-        toks: torch.Tensor,
-    ) -> None:
-        """Add the probability (before temperature and top-p) of the tokens a rule removes, scaled.
-
-        Called before the rule changes its rows; the rule groups are disjoint.
-        """
-        removed = torch.logsumexp(logits[rows.unsqueeze(1), toks], dim=1)
-        mass = torch.exp(removed - torch.logsumexp(logits[rows], dim=1))
-        self._removed_mass[stat] += torch.nan_to_num(mass).sum() * STATS_EVERY
-
-    def _log_stats(self) -> None:
-        now = time.monotonic()
-        if now - self._stats_since < STATS_INTERVAL_S:
-            return
-        self._stats_since = now
-        mass = self._removed_mass.tolist()
-        self._removed_mass.zero_()
-        if any(mass):
-            logger.info(
-                "GLM logits processor, expected interventions in the last %.0f s: %s",
-                STATS_INTERVAL_S,
-                ", ".join(f"{k}={v:.4f}" for k, v in zip(STATS, mass)),
+            eot_logits = logits[rows.unsqueeze(1), eot]
+            allowed = torch.isfinite(logits[rows]).sum(dim=1)
+            applies = allowed > torch.isfinite(eot_logits).sum(dim=1)
+            logits[rows.unsqueeze(1), eot] = torch.where(
+                applies.unsqueeze(1), float("-inf"), eot_logits
             )
+        return logits
 
     def _rows(self, key: str, rows: list[int]) -> torch.Tensor:
         """Row indices as a device tensor, rebuilt only when the set changes."""

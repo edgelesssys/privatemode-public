@@ -287,13 +287,16 @@ func (s *Server) forwardEncrypted(
 			return fmt.Errorf("applying endpoint-specific mutator: %w", err)
 		}
 
-		if err := ce.EncryptRequest(req); err != nil {
+		authenticatedHeaders, err := s.ocspPolicyHeaders()
+		if err != nil {
+			return fmt.Errorf("generating OCSP policy: %w", err)
+		}
+		if err = ce.EncryptRequest(req, authenticatedHeaders); err != nil {
 			return fmt.Errorf("encrypting request: %w", err)
 		}
 
-		if err := s.setEncryptionHeaders(req, secret, requestID, attempt); err != nil {
-			return fmt.Errorf("setting headers on upstream request: %w", err)
-		}
+		req.Header.Set(constants.PrivatemodeSecretIDHeader, secret.ID)
+		req.Header.Set(requestid.UserHeader, fmt.Sprintf("proxy_%s_%d", requestID, attempt))
 
 		return nil
 	}
@@ -445,8 +448,8 @@ func (s *Server) setStaticRequestHeaders(r *http.Request) {
 	r.Header.Set(constants.PrivatemodeClientHeader, s.clientID)
 }
 
-// setEncryptionHeaders sets the encryption-related headers for the request.
-func (s *Server) setEncryptionHeaders(r *http.Request, secret secretmanager.Secret, requestID string, attempt int) error {
+// ocspPolicyHeaders builds the authenticated policy metadata for an inference request.
+func (s *Server) ocspPolicyHeaders() (map[string]string, error) {
 	ocspAllowedStatuses := []ocspheader.AllowStatus{ocspheader.AllowStatusGood}
 	if s.nvidiaOCSPRevokedGracePeriod > 0 {
 		// In theory, we could always add the `revoked` status, since it will render
@@ -459,22 +462,12 @@ func (s *Server) setEncryptionHeaders(r *http.Request, secret secretmanager.Secr
 		ocspAllowedStatuses = append(ocspAllowedStatuses, ocspheader.AllowStatusUnknown)
 	}
 
-	if len(secret.Data) < 32 {
-		return fmt.Errorf("secret data too short: got %d bytes, need at least 32", len(secret.Data))
-	}
-	ocspPolicyHeader, ocspMACHeader, err := getOcspHeaders(
-		ocspAllowedStatuses, time.Now().Add(-s.nvidiaOCSPRevokedGracePeriod),
-		[32]byte(secret.Data[:32]),
-	)
+	header := ocspheader.NewHeader(ocspAllowedStatuses, time.Now().Add(-s.nvidiaOCSPRevokedGracePeriod))
+	policy, err := header.Marshal()
 	if err != nil {
-		return fmt.Errorf("generating OCSP headers: %w", err)
+		return nil, fmt.Errorf("marshaling OCSP policy: %w", err)
 	}
-
-	r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyHeader, ocspPolicyHeader)
-	r.Header.Set(constants.PrivatemodeNvidiaOCSPPolicyMACHeader, ocspMACHeader)
-	r.Header.Set(constants.PrivatemodeSecretIDHeader, secret.ID)
-	r.Header.Set(requestid.UserHeader, fmt.Sprintf("proxy_%s_%d", requestID, attempt))
-	return nil
+	return map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: policy}, nil
 }
 
 func (s *Server) noSecretForIDCallback(ctx context.Context) (bool, time.Duration) {
@@ -486,25 +479,6 @@ func (s *Server) noSecretForIDCallback(ctx context.Context) (bool, time.Duration
 
 	// Retry immediately
 	return true, 0
-}
-
-// getOcspHeaders generates the OCSP headers based on the allowed statuses and revocation time.
-// It returns the policy header and the MAC header.
-func getOcspHeaders(allowedStatuses []ocspheader.AllowStatus, revocNbf time.Time, secret [32]byte) (
-	ocspPolicyHeader string, ocspMACHeader string, err error,
-) {
-	header := ocspheader.NewHeader(allowedStatuses, revocNbf)
-	policyHeader, err := header.Marshal()
-	if err != nil {
-		return "", "", fmt.Errorf("marshaling OCSP header: %w", err)
-	}
-
-	policyMACHeader, err := header.MarshalMACHeader(secret)
-	if err != nil {
-		return "", "", fmt.Errorf("marshaling OCSP MAC header: %w", err)
-	}
-
-	return policyHeader, policyMACHeader, nil
 }
 
 // unmarshalJSONBody uses [persist.ReadBodyUnlimited] to read r's body and then unmarshals it.

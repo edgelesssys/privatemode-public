@@ -59,6 +59,7 @@ export type PrivatemodeTransportClient = Pick<
   | 'chatCompletions'
   | 'embeddings'
   | 'listModels'
+  | 'retrieveModel'
   | 'streamChatCompletions'
   | 'transcribeAudio'
 >;
@@ -338,30 +339,15 @@ export class PrivatemodeOpenAITransport {
     );
   }
 
-  /** Serve a single-model lookup from the model list. */
   private async retrieveModel(
     request: Request,
     modelID: string,
   ): Promise<Response> {
-    const models = await this.listModels(request);
-    const data = (models.body as { data?: unknown }).data;
-    const model = Array.isArray(data)
-      ? (data as Array<{ id?: unknown }>).find((m) => m?.id === modelID)
-      : undefined;
-    if (!model) {
-      return jsonResponse(
-        {
-          error: {
-            code: 'model_not_found',
-            message: `The model '${modelID}' does not exist.`,
-            param: 'model',
-            type: 'invalid_request_error',
-          },
-        },
-        { status: 404 },
-      );
-    }
-    return jsonResponse(model, { headers: models.headers });
+    const model = await withAbort(
+      this.privatemode.retrieveModel(modelID, requestOptions(request)),
+      request.signal,
+    );
+    return jsonResponse(model.body, { headers: model.headers });
   }
 
   private async chatCompletions(request: Request): Promise<Response> {

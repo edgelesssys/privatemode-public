@@ -65,6 +65,7 @@ func newWasmWrapper() *privatemodeWasmWrapper {
 //   - args[3]: API base URL for the Privatemode API (string)
 //   - args[4]: whether to enable logging (bool)
 //   - args[5]: optional additional HTTP headers (object)
+//   - args[6]: optional NVIDIA OCSP policy (JSON string)
 //
 // The returned Promise resolves with undefined on success, or rejects
 // with a JS Error on failure.
@@ -87,6 +88,13 @@ func (w *privatemodeWasmWrapper) initialize(this js.Value, args []js.Value) any 
 	if len(args) > 5 {
 		client = client.WithExtraHTTPHeaders(requestOptionsFromArg(args, 5).Header)
 	}
+	policy, err := nvidiaOCSPPolicyFromArg(args, 6)
+	if err != nil {
+		return promiseConstructor.Call("reject",
+			js.Global().Get("Error").New(err.Error()))
+	}
+	client = client.WithNvidiaOCSPPolicy(policy)
+
 	if enableLogging {
 		client = client.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	}
@@ -129,8 +137,9 @@ func (w *privatemodeWasmWrapper) initialize(this js.Value, args []js.Value) any 
 //   - args[2]: API base URL for the Privatemode API (string)
 //   - args[3]: whether to enable logging (bool)
 //   - args[4]: optional additional HTTP headers (object)
+//   - args[5]: optional NVIDIA OCSP policy (JSON string)
 //
-// Throws a JS Error if the authentication method is unknown.
+// Returns a JS Error if the authentication method is unknown or an invalid OCSP policy is provided.
 func (w *privatemodeWasmWrapper) initializeOffline(this js.Value, args []js.Value) any {
 	authType := args[0].String()
 	authValue := args[1].String()
@@ -139,18 +148,50 @@ func (w *privatemodeWasmWrapper) initializeOffline(this js.Value, args []js.Valu
 
 	cred, err := credentialFromArgs(authType, authValue)
 	if err != nil {
-		panic(js.Global().Get("Error").New(fmt.Sprintf("building credential: %s", err)))
+		return js.Global().Get("Error").New(fmt.Sprintf("building credential: %s", err))
 	}
 
 	client := privatemode.New(cred).WithAPIBaseURL(apiBaseURL)
 	if len(args) > 4 {
 		client = client.WithExtraHTTPHeaders(requestOptionsFromArg(args, 4).Header)
 	}
+	policy, err := nvidiaOCSPPolicyFromArg(args, 5)
+	if err != nil {
+		return js.Global().Get("Error").New(err.Error())
+	}
+	client = client.WithNvidiaOCSPPolicy(policy)
+
 	if enableLogging {
 		client = client.WithLogger(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	}
 	w.client = client
 	return js.Undefined()
+}
+
+// nvidiaOCSPPolicyFromArg decodes the JSON string into an OCSP policy.
+func nvidiaOCSPPolicyFromArg(args []js.Value, index int) (privatemode.NvidiaOCSPPolicy, error) {
+	var policy privatemode.NvidiaOCSPPolicy
+	if len(args) <= index || args[index].IsUndefined() {
+		return policy, nil
+	}
+	value := args[index]
+	if value.Type() != js.TypeString {
+		return policy, fmt.Errorf("NVIDIA OCSP policy must be a JSON string")
+	}
+	var input struct {
+		AllowUnknown            bool    `json:"allowUnknown"`
+		RevokedGracePeriodHours float64 `json:"revokedGracePeriodHours"`
+	}
+	if err := json.Unmarshal([]byte(value.String()), &input); err != nil {
+		return policy, fmt.Errorf("decoding NVIDIA OCSP policy: %w", err)
+	}
+	nanoseconds := input.RevokedGracePeriodHours * float64(time.Hour)
+	if input.RevokedGracePeriodHours < 0 || nanoseconds >= 1<<63 {
+		return policy, fmt.Errorf("NVIDIA OCSP revokedGracePeriodHours must be nonnegative and fit in a Go duration")
+	}
+	policy.AllowUnknown = input.AllowUnknown
+	policy.RevokedGracePeriod = time.Duration(nanoseconds)
+	return policy, nil
 }
 
 // setAuth updates the authentication credential used for subsequent requests.
@@ -774,6 +815,25 @@ func audioTranscriptionOptionsFromJSON(optsJSON string) (privatemode.AudioTransc
 func (w *privatemodeWasmWrapper) listModels(this js.Value, args []js.Value) any {
 	opts := requestOptionsFromArg(args, 0)
 	abortSignal := abortSignalFromArg(args, 1)
+	return modelsRequest(abortSignal, "listing models", func(ctx context.Context) (*privatemode.Response, error) {
+		return w.client.ListModelsWithOptions(ctx, opts)
+	})
+}
+
+// retrieveModel returns a JS Promise with the body and headers from /v1/models/{model}.
+// Arguments: model ID, optional request headers, optional AbortSignal.
+// Like listModels, initialize must have been called first.
+func (w *privatemodeWasmWrapper) retrieveModel(_ js.Value, args []js.Value) any {
+	model := args[0].String()
+	opts := requestOptionsFromArg(args, 1)
+	abortSignal := abortSignalFromArg(args, 2)
+	return modelsRequest(abortSignal, "retrieving model", func(ctx context.Context) (*privatemode.Response, error) {
+		return w.client.RetrieveModelWithOptions(ctx, model, opts)
+	})
+}
+
+// modelsRequest wraps a model request in a JS Promise with a timeout and AbortSignal cancellation.
+func modelsRequest(abortSignal js.Value, errorPrefix string, request func(context.Context) (*privatemode.Response, error)) any {
 	promiseConstructor := js.Global().Get("Promise")
 
 	promiseFunc := func(_ js.Value, promiseArgs []js.Value) any {
@@ -789,13 +849,13 @@ func (w *privatemodeWasmWrapper) listModels(this js.Value, args []js.Value) any 
 				reject.Invoke(newDOMAbortError())
 				return
 			}
-			resp, err := w.client.ListModelsWithOptions(ctx, opts)
+			resp, err := request(ctx)
 			if err != nil {
 				if errors.Is(ctx.Err(), context.Canceled) {
 					reject.Invoke(newDOMAbortError())
 					return
 				}
-				reject.Invoke(newJSError(err, "listing models: %s", err))
+				reject.Invoke(newJSError(err, "%s: %s", errorPrefix, err))
 				return
 			}
 			resolve.Invoke(newJSResponse(resp))
@@ -891,6 +951,7 @@ func newClient(_ js.Value, _ []js.Value) any {
 	register("transcribeAudio", w.transcribeAudio)
 	register("streamTranscribeAudio", w.streamTranscribeAudio)
 	register("listModels", w.listModels)
+	register("retrieveModel", w.retrieveModel)
 	register("exportSecret", w.exportSecret)
 	register("importSecret", w.importSecret)
 	// close releases the Go function references backing this client so that

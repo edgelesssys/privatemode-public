@@ -7,12 +7,16 @@ import (
 	"crypto"
 	"crypto/x509"
 	_ "embed"
+	"encoding/asn1"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"net/http"
+	"slices"
+	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/httputil"
 	internalOCSP "github.com/edgelesssys/continuum/internal/oss/ocsp"
@@ -69,27 +73,42 @@ func (c *Client) VerifyCertChain(ctx context.Context,
 		return internalOCSP.StatusUnknown, errors.New("certificate chain must contain at least two certificates")
 	}
 
-	// Set root CA to a known good trust anchor
+	// Require the presented root to match the pinned trust anchor without
+	// modifying the caller's certificate chain.
+	var root *x509.Certificate
 	switch mode {
 	case VerificationModeGPUAttestation:
-		certChain[(len(certChain) - 1)] = gpuDeviceIdentityCACert
+		root = gpuDeviceIdentityCACert
 	case VerificationModeVBIOSRIM, VerificationModeDriverRIM:
-		certChain[(len(certChain) - 1)] = rimSigningRootCACert
+		root = rimSigningRootCACert
+	default:
+		return internalOCSP.StatusUnknown, fmt.Errorf("unknown verification mode: %q", mode)
+	}
+	if !certChain[len(certChain)-1].Equal(root) {
+		return internalOCSP.StatusUnknown, errors.New("presented root does not match pinned trust anchor")
 	}
 
 	rootPool := x509.NewCertPool()
-	rootPool.AddCert(certChain[len(certChain)-1])
+	rootPool.AddCert(root)
 	intermediatePool := x509.NewCertPool()
 	for _, cert := range certChain[1 : len(certChain)-1] {
 		intermediatePool.AddCert(cert)
 	}
 
 	c.log.InfoContext(ctx, "Verifying certificate chain", "mode", mode)
-	if _, err := certChain[0].Verify(x509.VerifyOptions{
+	verifiedChains, err := certChain[0].Verify(x509.VerifyOptions{
 		Roots:         rootPool,
 		Intermediates: intermediatePool,
-	}); err != nil {
+	})
+	if err != nil {
 		return internalOCSP.StatusUnknown, fmt.Errorf("verifying certificate chain: %w", err)
+	}
+	// Verify may ignore presented certificates. Require the full chain in the
+	// same order so every certificate and issuer used below has been verified.
+	if !slices.ContainsFunc(verifiedChains, func(chain []*x509.Certificate) bool {
+		return slices.EqualFunc(chain, certChain, (*x509.Certificate).Equal)
+	}) {
+		return internalOCSP.StatusUnknown, errors.New("verified certificate chain does not match presented certificate chain")
 	}
 
 	// The leaf certificate of the GPU attestation cert chain is not registered in the OCSP responder,
@@ -142,9 +161,39 @@ func (c *Client) verifyCertificate(ctx context.Context, cert, issuer *x509.Certi
 		return internalOCSP.StatusUnknown, fmt.Errorf("unexpected status code %s: %s", resp.Status, string(respBody))
 	}
 
-	ocspResp, err := ocsp.ParseResponse(respBody, issuer)
+	ocspResp, err := ocsp.ParseResponseForCert(respBody, cert, issuer)
 	if err != nil {
 		return internalOCSP.StatusUnknown, fmt.Errorf("failed to parse OCSP response: %w", err)
+	}
+	if err := verifyCertID(ocspResp, cert, issuer); err != nil {
+		return internalOCSP.StatusUnknown, fmt.Errorf("verifying OCSP certificate identity: %w", err)
+	}
+
+	now := time.Now()
+	// Allow bounded responder clock skew, but never extend the signed expiry.
+	const clockSkew = 5 * time.Minute
+	if ocspResp.ThisUpdate.IsZero() || ocspResp.ThisUpdate.After(now.Add(clockSkew)) ||
+		!ocspResp.NextUpdate.After(now) || !ocspResp.NextUpdate.After(ocspResp.ThisUpdate) {
+		return internalOCSP.StatusUnknown, fmt.Errorf("OCSP response is outside its validity interval: now=%s thisUpdate=%s nextUpdate=%s allowedClockSkew=%s",
+			now.UTC().Format(time.RFC3339Nano), ocspResp.ThisUpdate.UTC().Format(time.RFC3339Nano),
+			ocspResp.NextUpdate.UTC().Format(time.RFC3339Nano), clockSkew)
+	}
+	// ParseResponseForCert checks signatures, but not the delegated responder's
+	// authorization or certificate validity. The issuing CA itself needs no EKU.
+	if responder := ocspResp.Certificate; responder != nil && !responder.Equal(issuer) {
+		if !slices.Contains(responder.ExtKeyUsage, x509.ExtKeyUsageOCSPSigning) {
+			return internalOCSP.StatusUnknown, errors.New("OCSP responder lacks OCSP signing authorization")
+		}
+		if responder.KeyUsage != 0 && responder.KeyUsage&x509.KeyUsageDigitalSignature == 0 {
+			return internalOCSP.StatusUnknown, errors.New("OCSP responder key does not permit signing")
+		}
+		roots := x509.NewCertPool()
+		roots.AddCert(issuer)
+		if _, err := responder.Verify(x509.VerifyOptions{
+			Roots: roots, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageOCSPSigning},
+		}); err != nil {
+			return internalOCSP.StatusUnknown, fmt.Errorf("verifying OCSP responder certificate: %w", err)
+		}
 	}
 
 	status := internalOCSP.StatusGood
@@ -165,6 +214,53 @@ func (c *Client) verifyCertificate(ctx context.Context, cert, issuer *x509.Certi
 	}
 
 	return status, nil
+}
+
+// verifyCertID completes ParseResponseForCert's serial-number check with the
+// issuer hashes, which x/crypto/ocsp does not expose or verify. Only call this
+// after ParseResponseForCert has validated the response and its signature.
+func verifyCertID(response *ocsp.Response, cert, issuer *x509.Certificate) error {
+	// Decode just the prefixes needed from the already-validated ResponseData
+	// and SingleResponse sequences (RFC 6960 section 4.2.1).
+	var data struct {
+		Version     int `asn1:"optional,default:0,explicit,tag:0"`
+		ResponderID asn1.RawValue
+		ProducedAt  time.Time `asn1:"generalized"`
+		Responses   []struct {
+			CertID struct {
+				HashAlgorithm asn1.RawValue
+				NameHash      []byte
+				KeyHash       []byte
+				SerialNumber  *big.Int
+			}
+		}
+	}
+	if _, err := asn1.Unmarshal(response.TBSResponseData, &data); err != nil {
+		return err
+	}
+	// Reuse the OCSP request encoder to calculate the expected issuer hashes.
+	// The responder may use a different hash algorithm from our request.
+	encoded, err := ocsp.CreateRequest(cert, issuer, &ocsp.RequestOptions{Hash: response.IssuerHash})
+	if err != nil {
+		return err
+	}
+	expected, err := ocsp.ParseRequest(encoded)
+	if err != nil {
+		return err
+	}
+	for _, single := range data.Responses {
+		id := single.CertID
+		if id.SerialNumber.Cmp(cert.SerialNumber) != 0 {
+			continue
+		}
+		// Match the FIRST equal serial, exactly as ParseResponseForCert does;
+		// a later matching CertID must not authenticate an earlier status.
+		if !bytes.Equal(id.NameHash, expected.IssuerNameHash) || !bytes.Equal(id.KeyHash, expected.IssuerKeyHash) {
+			return errors.New("OCSP response issuer does not match certificate issuer")
+		}
+		return nil
+	}
+	return errors.New("OCSP response does not identify certificate")
 }
 
 func mustParseCertificate(pemData []byte) *x509.Certificate {

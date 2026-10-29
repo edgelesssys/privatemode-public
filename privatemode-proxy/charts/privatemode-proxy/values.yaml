@@ -5,7 +5,7 @@ podLabels: {}
 podAnnotations: {}
 initContainers: []
 image:
-  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.60.1-pre
+  image: ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.61.1-pre
   pullPolicy: IfNotPresent
   restartPolicy: Always
 service:

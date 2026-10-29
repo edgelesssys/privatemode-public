@@ -3,22 +3,22 @@ kind: Deployment
 metadata:
   name: privatemode-proxy
   labels:
-    helm.sh/chart: privatemode-proxy-1.60.0
+    helm.sh/chart: privatemode-proxy-1.61.0
     app.kubernetes.io/name: privatemode-proxy
-    app.kubernetes.io/instance: continuum-application-continuum-551e7c
+    app.kubernetes.io/instance: continuum-application-continuum-e8a714
     app.kubernetes.io/managed-by: Helm
-  namespace: continuum-551e7c
+  namespace: continuum-e8a714
 spec:
   replicas: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: privatemode-proxy
-      app.kubernetes.io/instance: continuum-application-continuum-551e7c
+      app.kubernetes.io/instance: continuum-application-continuum-e8a714
   template:
     metadata:
       labels:
         app.kubernetes.io/name: privatemode-proxy
-        app.kubernetes.io/instance: continuum-application-continuum-551e7c
+        app.kubernetes.io/instance: continuum-application-continuum-e8a714
         privatemode.edgeless.systems/environment: production
       annotations:
         contrast.edgeless.systems/skip-initializer: "true"
@@ -34,7 +34,7 @@ spec:
           command:
             - /bin/sh
             - -ec
-          image: debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
+          image: debian:trixie-slim@sha256:89c1ea91e897f0fe0a3731595330bc45b8bdef4047464a07116f891a94054b31
           name: allow-ingress
           securityContext:
             capabilities:
@@ -42,7 +42,7 @@ spec:
                 - NET_ADMIN
       containers:
         - name: privatemode-proxy
-          image: "ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.60.0@sha256:ea044948f9ee427ba8eff07a489e1105f20170e3e8c42b9800d8adaf065b24b3"
+          image: "ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.61.0@sha256:ec97e6a3cd4867bdedc0c928672926e1f15b15c3ec204534dffb9beb8dbf93df"
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

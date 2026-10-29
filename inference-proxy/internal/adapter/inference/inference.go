@@ -15,6 +15,7 @@ import (
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/encforward"
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
+	"github.com/edgelesssys/continuum/internal/oss/compat"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
@@ -89,79 +90,86 @@ func New(workloadTasks []string, secrets SecretGetter, ocspStatusFile string,
 	}, nil
 }
 
-// VerifyOCSP returns OCSP verification middleware that wraps the given handler.
-// This should be applied per-route by adapters that require OCSP verification.
-func (a *Adapter) VerifyOCSP(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !a.verifyOCSP(w, r) {
-			return
-		}
-		h.ServeHTTP(w, r)
-	})
-}
-
-// verifyOCSP checks the workload's OCSP statuses against the client's accepted policy.
-// It returns false and writes an HTTP error response if verification fails.
-func (a *Adapter) verifyOCSP(w http.ResponseWriter, r *http.Request) bool {
+// verifyOCSP checks the workload's OCSP statuses against the client's authenticated policy.
+// It must run after decryption and before forwarding to the workload.
+func (a *Adapter) verifyOCSP(r *http.Request, authenticatedHeaders map[string]string) error {
 	ctx, span := otel.Tracer("inference-proxy/ocsp").Start(r.Context(), "verify-ocsp")
 	defer span.End()
 
-	ocspPolicy := r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyHeader)
-	ocspMAC := r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyMACHeader)
-	secretID := r.Header.Get(constants.PrivatemodeSecretIDHeader)
-
-	var acceptedStatuses []ocsp.Status
-	if ocspPolicy == "" && ocspMAC == "" {
-		acceptedStatuses = []ocsp.Status{ocsp.StatusGood} // Old clients won't set the header, only accept good status
-	} else {
-		secret, err := a.Secrets.Get(ctx, secretID)
-		if err != nil {
-			if errors.Is(err, secrets.ErrSecretNotFound) {
-				forwarder.HTTPError(w, r, http.StatusBadRequest, "getting secret for OCSP verification: %s %q: %v", constants.ErrorNoSecretForID, secretID, err)
-			} else {
-				forwarder.HTTPError(w, r, http.StatusInternalServerError, "getting secret for OCSP verification: id %q: %v", secretID, err)
-			}
-			return false
-		}
-		if len(secret) != 32 {
-			forwarder.HTTPError(w, r, http.StatusBadRequest, "invalid secret length for OCSP verification: expected 32 bytes, got %d", len(secret))
-			return false
-		}
-
-		requestedOCSPStatus, err := ocspheader.UnmarshalAndVerify(ocspPolicy, ocspMAC, [32]byte(secret))
-		if err != nil {
-			forwarder.HTTPError(w, r, http.StatusBadRequest, "verifying OCSP header: %s", err)
-			return false
-		}
-
-		for _, allowedStatus := range requestedOCSPStatus.AllowedStatuses {
+	policy, err := a.requestOCSPPolicy(ctx, r, authenticatedHeaders)
+	if err != nil {
+		return err
+	}
+	acceptedStatuses := []ocsp.Status{ocsp.StatusGood}
+	if policy != nil {
+		acceptedStatuses = nil
+		for _, allowedStatus := range policy.AllowedStatuses {
 			switch allowedStatus {
 			case ocspheader.AllowStatusGood:
 				acceptedStatuses = append(acceptedStatuses, ocsp.StatusGood)
 			case ocspheader.AllowStatusUnknown:
 				acceptedStatuses = append(acceptedStatuses, ocsp.StatusUnknown)
 			case ocspheader.AllowStatusRevoked:
-				acceptedStatuses = append(acceptedStatuses, ocsp.StatusRevoked(requestedOCSPStatus.RevokedNbf))
+				acceptedStatuses = append(acceptedStatuses, ocsp.StatusRevoked(policy.RevokedNbf))
 			}
 		}
 	}
 
 	for _, status := range a.OCSPStatus {
 		if !status.Driver.AcceptedBy(acceptedStatuses) {
-			forwarder.HTTPError(w, r, http.StatusInternalServerError, "GPU attestation returned a driver OCSP status that is not accepted by the client: %s", status.Driver)
-			return false
+			return fmt.Errorf("GPU attestation returned a driver OCSP status that is not accepted by the client: %s", status.Driver)
 		}
 		if !status.GPU.AcceptedBy(acceptedStatuses) {
-			forwarder.HTTPError(w, r, http.StatusInternalServerError, "GPU attestation returned a GPU OCSP status that is not accepted by the client: %s", status.GPU)
-			return false
+			return fmt.Errorf("GPU attestation returned a GPU OCSP status that is not accepted by the client: %s", status.GPU)
 		}
 		if !status.VBIOS.AcceptedBy(acceptedStatuses) {
-			forwarder.HTTPError(w, r, http.StatusInternalServerError, "GPU attestation returned a VBIOS OCSP status that is not accepted by the client: %s", status.VBIOS)
-			return false
+			return fmt.Errorf("GPU attestation returned a VBIOS OCSP status that is not accepted by the client: %s", status.VBIOS)
 		}
 	}
+	return nil
+}
 
-	return true
+// requestOCSPPolicy parses the OCSP policy of the request.
+func (a *Adapter) requestOCSPPolicy(ctx context.Context, r *http.Request, authenticatedHeaders map[string]string) (*ocspheader.Header, error) {
+	// Authenticated metadata takes precedence over unauthenticated HTTP headers,
+	// including the client version used for legacy compatibility.
+	if policy, present := authenticatedHeaders[constants.PrivatemodeNvidiaOCSPPolicyHeader]; present {
+		parsed, err := ocspheader.Unmarshal(policy)
+		if err != nil {
+			return nil, forwarder.NewError("parsing authenticated OCSP policy", err, http.StatusBadRequest)
+		}
+		return parsed, nil
+	}
+	// At v1.61 clients must provide a policy in the authenticated headers of their encrypted request.
+	if compat.AtLeastMajorMinor(r.Header.Get(constants.PrivatemodeVersionHeader), 1, 61) {
+		return nil, forwarder.NewError("", errors.New("missing authenticated OCSP policy"), http.StatusBadRequest)
+	}
+
+	// Older clients either set dedicated HTTP headers, or omitted the policy
+	policy := r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyHeader)
+	mac := r.Header.Get(constants.PrivatemodeNvidiaOCSPPolicyMACHeader)
+	if policy == "" && mac == "" {
+		// Clients without a policy accept only good statuses.
+		return nil, nil
+	}
+	secretID := r.Header.Get(constants.PrivatemodeSecretIDHeader)
+	secret, err := a.Secrets.Get(ctx, secretID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, secrets.ErrSecretNotFound) {
+			err = fmt.Errorf("%s %q: %w", constants.ErrorNoSecretForID, secretID, err)
+			status = http.StatusBadRequest
+		}
+		return nil, forwarder.NewError("getting secret for OCSP verification", err, status)
+	}
+	if len(secret) != 32 {
+		return nil, forwarder.NewError("", fmt.Errorf("invalid secret length for OCSP verification: expected 32 bytes, got %d", len(secret)), http.StatusBadRequest)
+	}
+	parsed, err := ocspheader.UnmarshalAndVerify(policy, mac, [32]byte(secret))
+	if err != nil {
+		return nil, forwarder.NewError("verifying OCSP header", err, http.StatusBadRequest)
+	}
+	return parsed, nil
 }
 
 // UnsupportedEndpoint returns 501 Not Implemented.
@@ -330,7 +338,10 @@ func (a *Adapter) ForwardEncrypted(
 		return a.mapPlaintextUnaryResponse(ctx, resp, preEncryptMutateUnary, extractUnaryUsage, uc)
 	}
 
-	a.EncForwarder.ForwardEncrypted(w, r, postDecryptMutator, responseMapper)
+	verifyPolicy := func(req *http.Request) error {
+		return a.verifyOCSP(req, encforward.AuthenticatedHeaders(req.Context()))
+	}
+	a.EncForwarder.ForwardEncrypted(w, r, forwarder.RequestMutatorChain(verifyPolicy, postDecryptMutator), responseMapper)
 }
 
 func (a *Adapter) mapPlaintextUnaryResponse(

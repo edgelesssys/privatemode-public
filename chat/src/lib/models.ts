@@ -50,9 +50,8 @@ export const modelConfig: Record<string, ModelInfo> = {
     displayName: 'GLM-5.3',
     subtitle: 'Our largest model for your most ambitious tasks',
     systemPrompt: getSystemPrompt('glm-latest'),
-    // glm can't switch reasoning off: enable_thinking=false only empties
-    // reasoning_content while the model keeps reasoning inline in the answer at
-    // the same token cost. Offer the gpt-oss-style effort button instead.
+    // Normal mode uses low, not thinking off: without reasoning glm answers
+    // reasoning tasks less accurately.
     thinkingMode: 'extended',
     reasoningEffort: { normal: 'low', extended: 'max' },
     supportsFileUploads: true,

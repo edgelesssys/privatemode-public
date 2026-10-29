@@ -41,6 +41,7 @@ function createTransportClient(
     streamChatCompletions: async function* () {},
     transcribeAudio: vi.fn(async () => apiResponse({ text: '' })),
     listModels: vi.fn(async () => apiResponse({ data: [], object: 'list' })),
+    retrieveModel: vi.fn(async () => apiResponse({ id: 'test-model' })),
     ...overrides,
   };
 }
@@ -408,39 +409,60 @@ describe('OpenAI transport', () => {
     });
   });
 
-  it('serves model retrieval from the model list', async () => {
-    const listModels = vi.fn(async () =>
-      apiResponse(
-        {
-          data: [
-            {
-              created: 1,
-              id: 'test-model',
-              object: 'model',
-              owned_by: 'privatemode',
-            },
-          ],
-          object: 'list',
-        },
-        { 'x-request-id': 'req_model' },
-      ),
+  it('routes model retrieval through Privatemode', async () => {
+    const retrieveModel = vi.fn<PrivatemodeTransportClient['retrieveModel']>(
+      async () =>
+        apiResponse(
+          {
+            created: 1,
+            id: 'org/test-model',
+            object: 'model',
+            owned_by: 'privatemode',
+          },
+          { 'x-request-id': 'req_model' },
+        ),
     );
-    const client = createClient(createTransportClient({ listModels }));
+    const client = createClient(createTransportClient({ retrieveModel }));
 
     const { data: model, response } = await client.models
-      .retrieve('test-model')
+      .retrieve('org/test-model', { headers: { 'x-custom': 'retrieve' } })
       .withResponse();
 
-    expect(model.id).toBe('test-model');
+    expect(model.id).toBe('org/test-model');
     expect(response.headers.get('x-request-id')).toBe('req_model');
+    expect(retrieveModel).toHaveBeenCalledWith('org/test-model', {
+      headers: expect.any(Headers),
+      signal: expect.any(AbortSignal),
+    });
+    expect(
+      new Headers(retrieveModel.mock.calls[0]?.[1]?.headers).get('x-custom'),
+    ).toBe('retrieve');
   });
 
   it('returns an OpenAI error when retrieving an unknown model', async () => {
-    const client = createClient(createTransportClient());
+    const client = createClient(
+      createTransportClient({
+        retrieveModel: async () => {
+          throw new PrivatemodeAPIError('not found', 404, {
+            error: {
+              code: 'model_not_found',
+              message: 'Gateway model not found',
+              param: 'model',
+              type: 'invalid_request_error',
+            },
+          });
+        },
+      }),
+    );
 
+    // The adapter converts PrivatemodeAPIError into an HTTP response, which the
+    // OpenAI client turns into an OpenAI error.
+    // Check for the expected preserved error details.
     await expect(client.models.retrieve('unknown-model')).rejects.toMatchObject(
       {
         code: 'model_not_found',
+        message: expect.stringContaining('Gateway model not found'),
+        param: 'model',
         status: 404,
         type: 'invalid_request_error',
       },

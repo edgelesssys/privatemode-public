@@ -424,7 +424,8 @@ func validateStringQueryResults(document string, queries []string, validate func
 func validateImageURL(rawURL string) error {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("parsing image URL: %w", err)
+		// The parse error quotes the URL, which is request content.
+		return errors.New("parsing image URL failed")
 	}
 
 	if !strings.EqualFold(parsedURL.Scheme, "data") {
@@ -433,12 +434,12 @@ func validateImageURL(rawURL string) error {
 	return nil
 }
 
-func validateAudioURL(rawURL string) error {
-	return fmt.Errorf("audio URLs are not allowed: %q", rawURL)
+func validateAudioURL(string) error {
+	return errors.New("audio URLs are not allowed")
 }
 
-func validateVideoURL(rawURL string) error {
-	return fmt.Errorf("video URLs are not allowed: %q", rawURL)
+func validateVideoURL(string) error {
+	return errors.New("video URLs are not allowed")
 }
 
 // StreamUsageReportingInjector creates a [forwarder.RequestMutator] that ensures vLLM includes usage

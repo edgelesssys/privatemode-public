@@ -80,8 +80,8 @@ func (h *Header) MarshalMACHeader(secret [32]byte) (string, error) {
 	return hex.EncodeToString(mac), nil
 }
 
-// UnmarshalAndVerify parses the [constants.] string and verifies its integrity.
-func UnmarshalAndVerify(policyHeader, policyMACHeader string, secret [32]byte) (*Header, error) {
+// Unmarshal parses a policy that has already been authenticated by the caller.
+func Unmarshal(policyHeader string) (*Header, error) {
 	parts := strings.Split(policyHeader, "; ")
 	expectedPartCount := 2
 	if len(parts) != expectedPartCount {
@@ -129,7 +129,15 @@ func UnmarshalAndVerify(policyHeader, policyMACHeader string, secret [32]byte) (
 		allowedStatuses = append(allowedStatuses, status)
 	}
 
-	header := NewHeader(allowedStatuses, revocNbf)
+	return NewHeader(allowedStatuses, revocNbf), nil
+}
+
+// UnmarshalAndVerify parses a legacy policy and verifies its separate MAC.
+func UnmarshalAndVerify(policyHeader, policyMACHeader string, secret [32]byte) (*Header, error) {
+	header, err := Unmarshal(policyHeader)
+	if err != nil {
+		return nil, err
+	}
 	expectedMac, err := header.MarshalMACHeader(secret)
 	if err != nil {
 		return nil, fmt.Errorf("error generating expected MAC: %w", err)

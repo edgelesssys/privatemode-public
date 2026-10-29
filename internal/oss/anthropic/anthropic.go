@@ -13,7 +13,7 @@ package anthropic
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -131,7 +131,8 @@ func validateStringQueryResults(document string, queries []string, validate func
 func validateImageURL(rawURL string) error {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
-		return fmt.Errorf("parsing image URL: %w", err)
+		// The parse error quotes the URL, which is request content.
+		return errors.New("parsing image URL failed")
 	}
 
 	if !strings.EqualFold(parsedURL.Scheme, "data") {

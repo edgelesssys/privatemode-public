@@ -8,10 +8,13 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWithRequestMutation(t *testing.T) {
@@ -90,6 +93,22 @@ func TestWithRequestMutation(t *testing.T) {
 			assert.Equal(tc.expectedResponse, string(body))
 		})
 	}
+}
+
+func TestWithFormRequestMutationParseErrorOmitsBody(t *testing.T) {
+	body := "--b\r\nSECRET-MARKER\r\n\r\nvalue\r\n--b--\r\n"
+	r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
+	require.NoError(t, err)
+	r.Header.Set("Content-Type", "multipart/form-data; boundary=b")
+
+	mutator := WithFormRequestMutation(func(*multipart.Form, *multipart.Writer) (bool, error) {
+		t.Error("mutate must not be called for a malformed form")
+		return false, nil
+	}, slog.New(slog.DiscardHandler))
+
+	err = mutator(r)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "SECRET-MARKER")
 }
 
 func TestRequestMutatorChainError(t *testing.T) {

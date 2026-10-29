@@ -33,11 +33,12 @@ func handshake(t *testing.T, secret []byte) (*ClientExchange, *ServerExchange) {
 	require.NoError(t, err)
 
 	req := newPlainRequest(t, "text/plain", []byte("handshake"))
-	require.NoError(t, client.EncryptRequest(req))
+	require.NoError(t, client.EncryptRequest(req, nil))
 
 	server, err := InitializeServerExchange(secret, req)
 	require.NoError(t, err)
-	require.NoError(t, server.DecryptRequest(req))
+	_, err = server.DecryptRequest(req)
+	require.NoError(t, err)
 
 	return client, server
 }
@@ -116,7 +117,7 @@ func TestRequestRoundTrip(t *testing.T) {
 			require.NoError(t, err)
 
 			req := newPlainRequest(t, tc.contentType, tc.body)
-			require.NoError(t, client.EncryptRequest(req))
+			require.NoError(t, client.EncryptRequest(req, nil))
 
 			// Wire-level effects of encryption.
 			assert.Equal(t, ContentType, req.Header.Get("Content-Type"))
@@ -125,7 +126,8 @@ func TestRequestRoundTrip(t *testing.T) {
 
 			server, err := InitializeServerExchange(secret, req)
 			require.NoError(t, err)
-			require.NoError(t, server.DecryptRequest(req))
+			_, err = server.DecryptRequest(req)
+			require.NoError(t, err)
 
 			// The server recovers the plaintext and the original header state.
 			plaintext, err := io.ReadAll(req.Body)
@@ -226,8 +228,8 @@ func TestSingleUse(t *testing.T) {
 		"client EncryptRequest": func(t *testing.T) error {
 			client, err := InitializeClientExchange(testSecret())
 			require.NoError(t, err)
-			require.NoError(t, client.EncryptRequest(newPlainRequest(t, "application/json", []byte("first"))))
-			return client.EncryptRequest(newPlainRequest(t, "application/json", []byte("second")))
+			require.NoError(t, client.EncryptRequest(newPlainRequest(t, "application/json", []byte("first")), nil))
+			return client.EncryptRequest(newPlainRequest(t, "application/json", []byte("second")), nil)
 		},
 		"client DecryptResponse": func(t *testing.T) error {
 			client, server := handshake(t, testSecret())
@@ -251,12 +253,14 @@ func TestSingleUse(t *testing.T) {
 			client, err := InitializeClientExchange(secret)
 			require.NoError(t, err)
 			req := newPlainRequest(t, "application/json", []byte("payload"))
-			require.NoError(t, client.EncryptRequest(req))
+			require.NoError(t, client.EncryptRequest(req, nil))
 
 			server, err := InitializeServerExchange(secret, req)
 			require.NoError(t, err)
-			require.NoError(t, server.DecryptRequest(req))
-			return server.DecryptRequest(req)
+			_, err = server.DecryptRequest(req)
+			require.NoError(t, err)
+			_, err = server.DecryptRequest(req)
+			return err
 		},
 	}
 
@@ -311,4 +315,43 @@ func TestDecryptResponseRejectsPlain(t *testing.T) {
 
 	_, err = client.DecryptResponse(resp, testMaxFrameSize)
 	require.ErrorIs(t, err, ErrNotEncrypted)
+}
+
+func TestAuthenticatedRequestHeaders(t *testing.T) {
+	for _, corruption := range []string{"none", "header frame", "body frame", "truncated body"} {
+		t.Run(corruption, func(t *testing.T) {
+			secret := testSecret()
+			client, err := InitializeClientExchange(secret)
+			require.NoError(t, err)
+			req := newPlainRequest(t, "text/plain", []byte("request body"))
+			headers := map[string]string{"Policy": "authenticated", "Custom": "separate"}
+			require.NoError(t, client.EncryptRequest(req, headers))
+			req.Header.Set("Policy", "untrusted")
+			wire, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.NoError(t, req.Body.Close())
+			assert.NotContains(t, string(wire), "authenticated")
+			switch corruption {
+			case "header frame":
+				wire[5] ^= 1
+			case "body frame":
+				wire[len(wire)-1] ^= 1
+			case "truncated body":
+				wire = wire[:len(wire)-1]
+			}
+			req.Body = io.NopCloser(bytes.NewReader(wire))
+			server, err := InitializeServerExchange(secret, req)
+			require.NoError(t, err)
+			got, err := server.DecryptRequest(req)
+			if corruption != "none" {
+				require.Error(t, err)
+				assert.Nil(t, got, "metadata must not be exposed from an invalid request")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, headers, got)
+			assert.Equal(t, "untrusted", req.Header.Get("Policy"))
+			assert.Equal(t, "keepme", req.Header.Get("Custom"))
+		})
+	}
 }

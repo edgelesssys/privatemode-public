@@ -100,9 +100,10 @@ const (
 	PrivatemodeClientSDK = "SDK"
 	// PrivatemodeClientWebApp is the [PrivatemodeClientHeader] value for the web app.
 	PrivatemodeClientWebApp = "WebApp"
-	// PrivatemodeNvidiaOCSPPolicyHeader is the header used to allow specific NVIDIA OCSP status codes.
+	// PrivatemodeNvidiaOCSPPolicyHeader names the authenticated request metadata for allowed NVIDIA OCSP statuses.
+	// Older clients send it as an HTTP header with a separate MAC.
 	PrivatemodeNvidiaOCSPPolicyHeader = "Privatemode-NVIDIA-OCSP-Policy"
-	// PrivatemodeNvidiaOCSPPolicyMACHeader is the header used to verify the integrity of the Privatemode-NVIDIA-OCSP-Policy header.
+	// PrivatemodeNvidiaOCSPPolicyMACHeader authenticates the legacy HTTP OCSP policy header.
 	PrivatemodeNvidiaOCSPPolicyMACHeader = "Privatemode-NVIDIA-OCSP-Policy-MAC"
 	// PrivatemodeSecretIDHeader is the header used to pass the inference secret ID to the inference proxy from the client.
 	// Even though this information is already available in the request body if used, this serves as an additional hint for the proxy

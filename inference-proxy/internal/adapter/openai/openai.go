@@ -42,26 +42,23 @@ func New(workloadTasks []string, secrets inference.SecretGetter, ocspStatusFile 
 }
 
 // RegisterRoutes registers the OpenAI API handlers on the given ServeMux.
-// Each handler is wrapped with OCSP verification middleware, except for /v1/models
-// which is used for health checks and doesn't require GPU attestation.
 func (a *Adapter) RegisterRoutes(mux *http.ServeMux) {
 	// List models: https://platform.openai.com/docs/api-reference/models/list
-	// Not wrapped with OCSP verification - used for health checks
 	mux.HandleFunc("GET "+constants.OpenAIModelsEndpoint, a.forwardListModelsRequest)
 	// Retrieve model: https://platform.openai.com/docs/api-reference/models/retrieve
 	mux.HandleFunc("GET "+constants.OpenAIModelsEndpoint+"/{model}", a.forwardRetrieveModelRequest)
 
 	// Create chat completion: https://platform.openai.com/docs/api-reference/chat/create
-	mux.Handle(constants.OpenAIChatCompletionsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardChatCompletionsRequest)))
+	mux.HandleFunc(constants.OpenAIChatCompletionsEndpoint, a.forwardChatCompletionsRequest)
 
 	// Legacy chat completions endpoint: https://platform.openai.com/docs/api-reference/completions/create
 	// Reuse the same handler as for /v1/chat/completions since both endpoints require the same mutators.
-	mux.Handle(constants.OpenAILegacyCompletionsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardChatCompletionsRequest)))
+	mux.HandleFunc(constants.OpenAILegacyCompletionsEndpoint, a.forwardChatCompletionsRequest)
 
 	// Create embeddings: https://platform.openai.com/docs/api-reference/embeddings/create
-	mux.Handle("POST "+constants.OpenAIEmbeddingsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardEmbeddingsRequest)))
+	mux.HandleFunc("POST "+constants.OpenAIEmbeddingsEndpoint, a.forwardEmbeddingsRequest)
 
-	mux.Handle(constants.OpenAITranscriptionsEndpoint, a.VerifyOCSP(http.HandlerFunc(a.forwardTranscriptionsRequest)))
+	mux.HandleFunc(constants.OpenAITranscriptionsEndpoint, a.forwardTranscriptionsRequest)
 }
 
 // HandlesCatchAll returns false because OpenAI adapter only handles specific endpoints.

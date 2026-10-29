@@ -102,8 +102,10 @@ func InitializeClientExchange(secret []byte) (*ClientExchange, error) {
 }
 
 // EncryptRequest encrypts the body of r in place. The full body is read into memory, callers must
-// bound the body size (e.g. via [http.MaxBytesReader]). Headers are preserved.
-func (e *ClientExchange) EncryptRequest(r *http.Request) error {
+// bound the body size (e.g. via [http.MaxBytesReader]). HTTP headers are preserved.
+// authenticatedHeaders is carried inside the encrypted stream, separate from HTTP headers.
+// Its keys are case-sensitive metadata names.
+func (e *ClientExchange) EncryptRequest(r *http.Request, authenticatedHeaders map[string]string) error {
 	if e.reqStarted {
 		return ErrAlreadyStarted
 	}
@@ -112,7 +114,7 @@ func (e *ClientExchange) EncryptRequest(r *http.Request) error {
 	if err != nil {
 		return fmt.Errorf("reading body: %w", err)
 	}
-	appHeader := appHeader{ContentType: r.Header.Get("Content-Type")}
+	appHeader := appHeader{ContentType: r.Header.Get("Content-Type"), Headers: authenticatedHeaders}
 	encrypted, err := encryptWhole(body, e.sealer, appHeader)
 	if err != nil {
 		return fmt.Errorf("encrypting body: %w", err)
@@ -192,23 +194,24 @@ func InitializeServerExchange(secret []byte, r *http.Request) (*ServerExchange, 
 
 // DecryptRequest decrypts the body of r in place. On error r is left in an undefined state. The
 // full body is read into memory, callers must bound the body size (e.g. via
-// [http.MaxBytesReader]). Headers are preserved.
-func (e *ServerExchange) DecryptRequest(r *http.Request) error {
+// [http.MaxBytesReader]). HTTP headers are preserved. Authenticated metadata is returned
+// separately, only after the complete request has been successfully decrypted.
+func (e *ServerExchange) DecryptRequest(r *http.Request) (map[string]string, error) {
 	if e.reqStarted {
-		return ErrAlreadyStarted
+		return nil, ErrAlreadyStarted
 	}
 	e.reqStarted = true
 	dec, appHeader, err := openDecrypter(r.Body, e.opener, math.MaxUint32)
 	if err != nil {
-		return fmt.Errorf("initializing decrypter: %w", err)
+		return nil, fmt.Errorf("initializing decrypter: %w", err)
 	}
 	plaintext, err := io.ReadAll(dec)
 	if err != nil {
 		_ = dec.Close()
-		return fmt.Errorf("decrypting request: %w", err)
+		return nil, fmt.Errorf("decrypting request: %w", err)
 	}
 	if err := dec.Close(); err != nil {
-		return fmt.Errorf("closing decrypter: %w", err)
+		return nil, fmt.Errorf("closing decrypter: %w", err)
 	}
 
 	persist.SetBody(r, plaintext)
@@ -218,7 +221,7 @@ func (e *ServerExchange) DecryptRequest(r *http.Request) error {
 		r.Header.Del("Content-Type")
 	}
 	r.Header.Del(RequestOAEHeader)
-	return nil
+	return appHeader.Headers, nil
 }
 
 // EncryptUnaryResponse encrypts a buffered response body as a complete encrypted body. Headers are

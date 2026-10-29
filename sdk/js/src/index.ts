@@ -17,6 +17,7 @@ export type {
   AuthCredential,
   AuthProvider,
   ExportedSecret,
+  NvidiaOCSPPolicy,
   UnstructuredFile,
   UnstructuredOptions,
   VerifyResult,

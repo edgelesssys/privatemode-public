@@ -20,6 +20,15 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/persist"
 )
 
+type authenticatedHeadersKey struct{}
+
+// AuthenticatedHeaders returns request metadata verified during decryption.
+// The returned map is read-only and is separate from the request's HTTP headers.
+func AuthenticatedHeaders(ctx context.Context) map[string]string {
+	headers, _ := ctx.Value(authenticatedHeadersKey{}).(map[string]string)
+	return headers
+}
+
 // Forwarder forwards requests to the workload, either as plaintext or end-to-end encrypted.
 type Forwarder interface {
 	// ForwardPlain forwards the request and sends back the response without any encryption.
@@ -84,6 +93,8 @@ func (e *encForwarder) ForwardEncrypted(
 ) {
 	// Set by every successful execution of the request mutator.
 	var exchange *encbody.ServerExchange
+	// Whether the request was decrypted: from then on, error responses are encrypted too.
+	var decrypted bool
 
 	if !encbody.IsEncrypted(r.Header) {
 		forwarder.HTTPError(w, r, http.StatusBadRequest, "request must be encrypted")
@@ -109,6 +120,7 @@ func (e *encForwarder) ForwardEncrypted(
 	e.plainForwarder.Forward(
 		w, r,
 		func(r *http.Request) error {
+			decrypted = false
 			var err error
 			if exchange, err = encbody.InitializeServerExchange(secret, r); err != nil {
 				statusCode := http.StatusInternalServerError
@@ -117,9 +129,12 @@ func (e *encForwarder) ForwardEncrypted(
 				}
 				return forwarder.NewError("initializing server exchange", err, statusCode)
 			}
-			if err := exchange.DecryptRequest(r); err != nil {
+			authenticatedHeaders, err := exchange.DecryptRequest(r)
+			if err != nil {
 				return forwarder.NewError("decrypting request", err, http.StatusBadRequest)
 			}
+			decrypted = true
+			*r = *r.WithContext(context.WithValue(r.Context(), authenticatedHeadersKey{}, authenticatedHeaders))
 			err = validatePromptTokens(r)
 			if err != nil {
 				return fmt.Errorf("validating prompt tokens: %w", err)
@@ -136,6 +151,12 @@ func (e *encForwarder) ForwardEncrypted(
 			}
 			return encrypt(dsResp, exchange)
 		},
+		forwarder.WithErrorMapper(func(resp *forwarder.UnaryResponse) (forwarder.Response, error) {
+			if !decrypted {
+				return resp, nil
+			}
+			return encrypt(resp, exchange)
+		}),
 	)
 }
 

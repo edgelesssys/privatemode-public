@@ -41,7 +41,17 @@ func (c *Client) FetchDriverRIM(ctx context.Context, gpuArch gpu.Architecture, c
 		return nil, err
 	}
 
-	return c.FetchRIM(ctx, driverID)
+	identity, err := c.FetchRIM(ctx, driverID)
+	if err != nil {
+		return nil, err
+	}
+	if gpuArch == gpu.ArchHopper {
+		chip = "GH100"
+	}
+	if identity.Meta.Product != chip || identity.Meta.ColloquialVersion != version {
+		return nil, fmt.Errorf("RIM identity mismatch: expected %s %s, got %s %s", chip, version, identity.Meta.Product, identity.Meta.ColloquialVersion)
+	}
+	return identity, nil
 }
 
 func driverRIMID(gpuArch gpu.Architecture, chip, version string) (string, error) {
@@ -60,13 +70,24 @@ func driverRIMID(gpuArch gpu.Architecture, chip, version string) (string, error)
 	}
 }
 
-// FetchVBIOSRIM fetches reference values for the VBIOS of the given GPU architecture and version.
-func (c *Client) FetchVBIOSRIM(ctx context.Context, project, projectSku, chipSku, vbiosVersion string) (*SoftwareIdentity, error) {
+// FetchVBIOSRIM fetches reference values for the given GPU product and VBIOS version.
+// Product must come from the verified driver RIM. The signed VBIOS metadata binds
+// product and version, but does not authenticate the project or SKU lookup fields.
+func (c *Client) FetchVBIOSRIM(ctx context.Context, product, project, projectSku, chipSku, vbiosVersion string) (*SoftwareIdentity, error) {
 	vbiosRIMString := strings.ToUpper(strings.ReplaceAll(vbiosVersion, ".", ""))
-	return c.FetchRIM(ctx, "NV_GPU_VBIOS_"+project+"_"+projectSku+"_"+chipSku+"_"+vbiosRIMString)
+	identity, err := c.FetchRIM(ctx, "NV_GPU_VBIOS_"+project+"_"+projectSku+"_"+chipSku+"_"+vbiosRIMString)
+	if err != nil {
+		return nil, err
+	}
+	if identity.Meta.Product != product || !strings.EqualFold(identity.Meta.ColloquialVersion, vbiosVersion) {
+		return nil, fmt.Errorf("RIM identity mismatch: expected %s %s, got %s %s", product, vbiosVersion, identity.Meta.Product, identity.Meta.ColloquialVersion)
+	}
+	return identity, nil
 }
 
 // FetchRIM fetches the reference values for the given RIM ID.
+// Callers must bind the signed metadata to their expected product and version;
+// the response envelope's ID and SHA256 are controlled by the RIM service.
 func (c *Client) FetchRIM(ctx context.Context, id string) (*SoftwareIdentity, error) {
 	c.log.InfoContext(ctx, "Fetching reference values from RIM service", "id", id)
 
@@ -105,25 +126,55 @@ func (c *Client) FetchRIM(ctx context.Context, id string) (*SoftwareIdentity, er
 	if err != nil {
 		return nil, fmt.Errorf("extract signing certificates: %w", err)
 	}
-	if err := validateXMLSignature(rimRes.RIM, signingCerts); err != nil {
+	if len(signingCerts) == 0 {
+		return nil, fmt.Errorf("no signing certificates")
+	}
+	verifiedXML, err := validateXMLSignature(rimRes.RIM, signingCerts[0])
+	if err != nil {
 		return nil, err
 	}
 
-	return &softwareIdentity, nil
+	// Consume only the XML covered by the signature, not the original input.
+	var verifiedIdentity SoftwareIdentity
+	if err := xml.Unmarshal(verifiedXML, &verifiedIdentity); err != nil {
+		return nil, fmt.Errorf("unmarshal verified XML: %w", err)
+	}
+	// The enveloped-signature transform removes the signature element. Preserve
+	// its certificates for the caller's separate chain and revocation checks.
+	verifiedIdentity.Signature = softwareIdentity.Signature
+	return &verifiedIdentity, nil
 }
 
-func validateXMLSignature(xmlData []byte, signingCerts []*x509.Certificate) error {
+func validateXMLSignature(xmlData []byte, signingCert *x509.Certificate) ([]byte, error) {
 	doc := etree.NewDocument()
+	// Preserve duplicate attributes so we can reject them rather than silently
+	// verifying a different document from the one parsed by encoding/xml.
+	doc.ReadSettings.PreserveDuplicateAttrs = true
 	if err := doc.ReadFromBytes(xmlData); err != nil {
-		return fmt.Errorf("reading XML document: %w", err)
+		return nil, fmt.Errorf("reading XML document: %w", err)
+	}
+	for _, element := range doc.FindElements("//*") {
+		seen := make(map[string]bool, len(element.Attr))
+		for _, attr := range element.Attr {
+			name := attr.FullKey()
+			if seen[name] {
+				return nil, fmt.Errorf("duplicate XML attribute %q", name)
+			}
+			seen[name] = true
+		}
+	}
+	if len(doc.FindElements("//Signature")) > 1 {
+		return nil, fmt.Errorf("multiple signature elements")
 	}
 	validateCtx := dsig.NewDefaultValidationContext(&dsig.MemoryX509CertificateStore{
-		Roots: signingCerts,
+		Roots: []*x509.Certificate{signingCert},
 	})
-	if _, err := validateCtx.Validate(doc.Root()); err != nil {
-		return fmt.Errorf("validating XML signature: %w", err)
+	verified, err := validateCtx.Validate(doc.Root())
+	if err != nil {
+		return nil, fmt.Errorf("validating XML signature: %w", err)
 	}
-	return nil
+	doc.SetRoot(verified)
+	return doc.WriteToBytes()
 }
 
 type rimResponse struct {

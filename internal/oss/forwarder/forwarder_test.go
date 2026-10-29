@@ -274,7 +274,7 @@ func TestHTTPError(t *testing.T) {
 			args:                nil,
 			expectedStatusCode:  http.StatusBadRequest,
 			expectedContentType: "text/event-stream",
-			expectedBody:        "event: error\n\ndata: {\"error\":{\"message\":\"Invalid parameter\",\"type\":\"\"}}\n\n",
+			expectedBody:        "event: error\ndata: {\"error\":{\"message\":\"Invalid parameter\",\"type\":\"\"}}\n\n",
 		},
 		"Plain request with args": {
 			acceptHeader:        "",                  // No accept header
@@ -292,7 +292,7 @@ func TestHTTPError(t *testing.T) {
 			args:                []any{42},
 			expectedStatusCode:  http.StatusUnauthorized,
 			expectedContentType: "text/event-stream",
-			expectedBody:        "event: error\n\ndata: {\"error\":{\"message\":\"User 42 unauthorized\",\"type\":\"\"}}\n\n",
+			expectedBody:        "event: error\ndata: {\"error\":{\"message\":\"User 42 unauthorized\",\"type\":\"\"}}\n\n",
 		},
 	}
 
@@ -315,6 +315,32 @@ func TestHTTPError(t *testing.T) {
 			assert.Equal(t, tt.expectedContentType, resp.Header.Get("Content-Type"), "Content-Type header mismatch")
 
 			assert.Equal(t, tt.expectedBody, bodyString, "Body mismatch")
+		})
+	}
+}
+
+func TestHTTPErrorWithDetails(t *testing.T) {
+	for _, accept := range []string{"application/json", "text/event-stream"} {
+		t.Run(accept, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+			req.Header.Set("Accept", accept)
+			resp := httptest.NewRecorder()
+			HTTPErrorWithDetails(resp, req, http.StatusNotFound,
+				"The model 'unknown' does not exist.",
+				"invalid_request_error", "model", "model_not_found",
+			)
+
+			assert.Equal(t, http.StatusNotFound, resp.Code)
+			assert.Equal(t, accept, resp.Header().Get("Content-Type"))
+			assert.Equal(t, "nosniff", resp.Header().Get("X-Content-Type-Options"))
+			body := resp.Body.String()
+			if accept == "text/event-stream" {
+				require.True(t, strings.HasPrefix(body, "event: error\ndata: "))
+				require.True(t, strings.HasSuffix(body, "\n\n"))
+				body = strings.TrimPrefix(body, "event: error\ndata: ")
+			}
+			assert.JSONEq(t, `{"error":{"message":"The model 'unknown' does not exist.",
+				"type":"invalid_request_error","param":"model","code":"model_not_found"}}`, body)
 		})
 	}
 }
@@ -380,6 +406,43 @@ func TestForwardMutationErrorStatus(t *testing.T) {
 				assert.Contains(t, resp.Body.String(), "mutation failed")
 			})
 		}
+	}
+}
+
+func TestForwardErrorMapper(t *testing.T) {
+	for name, tc := range map[string]struct {
+		mapErr   error
+		wantBody string
+	}{
+		"mapped": {
+			wantBody: `mapped 400 {"error":{"message":"forwarding request: mutating request: mutation failed: secret input","type":""}}`,
+		},
+		"mapper fails": {
+			mapErr:   errors.New("mapping failed"),
+			wantBody: `{"error":{"message":"internal error: mapping error response failed","type":""}}`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fwd := New(nil, "upstream", SchemeHTTP, UpstreamInference, slog.New(slog.DiscardHandler))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+			resp := httptest.NewRecorder()
+			mapper := func(r *UnaryResponse) (Response, error) {
+				if tc.mapErr != nil {
+					return nil, tc.mapErr
+				}
+				return &UnaryResponse{
+					StatusCode: r.StatusCode,
+					Header:     http.Header{"Content-Type": {"text/plain"}},
+					Body:       fmt.Appendf(nil, "mapped %d %s", r.StatusCode, r.Body),
+				}, nil
+			}
+			fwd.Forward(resp, req, func(*http.Request) error {
+				return NewError("mutation failed", errors.New("secret input"), http.StatusBadRequest)
+			}, PassthroughResponseMapper, WithErrorMapper(mapper))
+
+			assert.Equal(t, http.StatusBadRequest, resp.Code)
+			assert.Equal(t, tc.wantBody, resp.Body.String())
+		})
 	}
 }
 

@@ -1,4 +1,5 @@
 import { PrivatemodeAPIError } from './errors.js';
+import type { NvidiaOCSPPolicy } from './privatemode-ai.js';
 import './wasm_exec.js';
 
 // Go is provided by wasm_exec.js
@@ -52,6 +53,7 @@ interface WasmClientExports {
     apiBaseURL: string,
     enableLogging: boolean,
     extraHTTPHeaders: Record<string, string>,
+    nvidiaOCSPPolicy: string,
   ): Promise<void>;
   initializeOffline(
     authType: string,
@@ -59,7 +61,8 @@ interface WasmClientExports {
     apiBaseURL: string,
     enableLogging: boolean,
     extraHTTPHeaders: Record<string, string>,
-  ): void;
+    nvidiaOCSPPolicy: string,
+  ): Error | undefined;
   setAuth(authType: string, authValue: string): void;
   updateSecret(): Promise<void>;
   fetchManifest(): Promise<string>;
@@ -99,6 +102,11 @@ interface WasmClientExports {
     headers?: Record<string, string>,
   ): Promise<void>;
   listModels(
+    headers?: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+  retrieveModel(
+    model: string,
     headers?: Record<string, string>,
     signal?: AbortSignal,
   ): Promise<unknown>;
@@ -237,13 +245,14 @@ export class WasmClient {
     this.exports.close();
   }
 
-  public initialize(
+  public async initialize(
     manifest: string,
     authType: string,
     authValue: string,
     apiBaseURL: string,
     enableLogging: boolean,
     extraHTTPHeaders: Record<string, string> = {},
+    nvidiaOCSPPolicy: NvidiaOCSPPolicy = {},
   ): Promise<void> {
     return this.exports.initialize(
       manifest,
@@ -252,6 +261,7 @@ export class WasmClient {
       apiBaseURL,
       enableLogging,
       extraHTTPHeaders,
+      JSON.stringify(nvidiaOCSPPolicy),
     );
   }
 
@@ -261,14 +271,19 @@ export class WasmClient {
     apiBaseURL: string,
     enableLogging: boolean,
     extraHTTPHeaders: Record<string, string> = {},
+    nvidiaOCSPPolicy: NvidiaOCSPPolicy = {},
   ): void {
-    this.exports.initializeOffline(
+    const error = this.exports.initializeOffline(
       authType,
       authValue,
       apiBaseURL,
       enableLogging,
       extraHTTPHeaders,
+      JSON.stringify(nvidiaOCSPPolicy),
     );
+    if (error) {
+      throw error;
+    }
   }
 
   public setAuth(authType: string, authValue: string): void {
@@ -381,6 +396,16 @@ export class WasmClient {
   ): Promise<WasmAPIResponse> {
     return normalizeWasmResponse(
       await callWasm(() => this.exports.listModels(headers, signal)),
+    );
+  }
+
+  public async retrieveModel(
+    model: string,
+    headers?: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<WasmAPIResponse> {
+    return normalizeWasmResponse(
+      await callWasm(() => this.exports.retrieveModel(model, headers, signal)),
     );
   }
 

@@ -1,6 +1,10 @@
 /// <reference types="vite/client" />
 import { describe, expect, it, vi } from 'vitest';
-import { PrivatemodeCore, type AuthProvider } from './privatemode-ai.js';
+import {
+  PrivatemodeCore,
+  type AuthProvider,
+  type NvidiaOCSPPolicy,
+} from './privatemode-ai.js';
 import * as wasm from './wasm.js';
 
 /** Build an API-key {@link AuthProvider} for tests. */
@@ -438,6 +442,136 @@ describe('PrivatemodeCore', () => {
       },
     };
   }
+
+  describe('NVIDIA OCSP policy', () => {
+    it.each([0, 1, 'true', 'false', [], {}])(
+      'rejects an invalid allowUnknown during initialization: %s',
+      async (value) => {
+        const client = new PrivatemodeCore({
+          apiKey: 'test-key',
+          dangerouslyAllowBrowser: !isNode,
+          browserWasmURL,
+          manifestBytes: new TextEncoder().encode('{}'),
+          nvidiaOCSPPolicy: {
+            allowUnknown: value,
+          } as unknown as NvidiaOCSPPolicy,
+        });
+        await expect(client.verify()).rejects.toThrow('allowUnknown');
+      },
+    );
+
+    it.each([
+      '1.5',
+      true,
+      [],
+      {},
+      -1,
+      -0.5,
+      2 ** 63 / 3_600_000_000_000,
+      Number.MAX_VALUE,
+    ])(
+      'rejects an invalid grace period during initialization: %s',
+      async (value) => {
+        const client = new PrivatemodeCore({
+          apiKey: 'test-key',
+          dangerouslyAllowBrowser: !isNode,
+          browserWasmURL,
+          manifestBytes: new TextEncoder().encode('{}'),
+          nvidiaOCSPPolicy: {
+            revokedGracePeriodHours: value,
+          } as unknown as NvidiaOCSPPolicy,
+        });
+        await expect(client.verify()).rejects.toThrow(
+          'revokedGracePeriodHours',
+        );
+      },
+    );
+
+    it.each([0, 0.5, 2 ** 63 / 3_600_000_000_000 - 0.000000001])(
+      'accepts a valid grace period of %s hours',
+      (revokedGracePeriodHours) => {
+        expect(
+          () =>
+            new PrivatemodeCore({
+              apiKey: 'test-key',
+              dangerouslyAllowBrowser: !isNode,
+              nvidiaOCSPPolicy: {
+                allowUnknown: false,
+                revokedGracePeriodHours,
+              },
+            }),
+        ).not.toThrow();
+      },
+    );
+
+    it.skipIf(!isNode).each([undefined, null])(
+      'passes strict defaults for a %s policy during online and offline initialization',
+      async (policy) => {
+        const mocks = mockWasmFunctions();
+        try {
+          const client = new PrivatemodeCore({
+            apiKey: 'test-key',
+            nvidiaOCSPPolicy: policy as NvidiaOCSPPolicy | undefined,
+          });
+          await client.verify();
+          expect(mocks.client.initialize.mock.calls[0].at(-1)).toEqual({
+            allowUnknown: false,
+            revokedGracePeriodHours: 0,
+          });
+          await client.initializeOffline(new TextEncoder().encode('{}'));
+          expect(mocks.client.initializeOffline.mock.calls[0].at(-1)).toEqual({
+            allowUnknown: false,
+            revokedGracePeriodHours: 0,
+          });
+        } finally {
+          mocks.restoreAll();
+        }
+      },
+    );
+
+    it.skipIf(!isNode)(
+      'copies custom policies and retains them across initialization retries',
+      async () => {
+        const mocks = mockWasmFunctions();
+        try {
+          const policy: NvidiaOCSPPolicy = {
+            allowUnknown: true,
+            revokedGracePeriodHours: 1.5,
+          };
+          const client = new PrivatemodeCore({
+            apiKey: 'test-key',
+            nvidiaOCSPPolicy: policy,
+          });
+          policy.allowUnknown = false;
+          policy.revokedGracePeriodHours = 0;
+          mocks.client.initialize.mockRejectedValueOnce(
+            new Error(wasm.errManifestMismatch()),
+          );
+          await client.verify();
+          expect(mocks.client.initialize).toHaveBeenCalledTimes(2);
+          for (const call of mocks.client.initialize.mock.calls) {
+            expect(call.at(-1)).toEqual({
+              allowUnknown: true,
+              revokedGracePeriodHours: 1.5,
+            });
+          }
+          await client.initializeOffline(new TextEncoder().encode('{}'));
+          expect(mocks.client.initializeOffline.mock.calls[0].at(-1)).toEqual({
+            allowUnknown: true,
+            revokedGracePeriodHours: 1.5,
+          });
+          const strictClient = new PrivatemodeCore({ apiKey: 'another-key' });
+          await strictClient.initializeOffline(new TextEncoder().encode('{}'));
+          expect(mocks.client.initializeOffline.mock.calls[1].at(-1)).toEqual({
+            allowUnknown: false,
+            revokedGracePeriodHours: 0,
+          });
+        } finally {
+          mocks.restoreAll();
+        }
+      },
+    );
+  });
 
   describe('automatic secret refresh retry logic', () => {
     it.skipIf(!isNode)(

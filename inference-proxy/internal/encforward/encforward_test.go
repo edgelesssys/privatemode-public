@@ -3,10 +3,13 @@ package encforward
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/edgelesssys/continuum/inference-proxy/internal/secrets"
@@ -14,6 +17,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/edgelesssys/continuum/internal/oss/mutators"
+	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -223,6 +227,161 @@ func TestForwardEncryptedTokenMismatch(t *testing.T) {
 	require.Equal(http.StatusBadRequest, forwarder.StatusFromError(err))
 }
 
+// TestForwardEncryptedRejectedMediaLeak checks that request content rejected after decryption
+// stays inside the TEE: the error reply is encrypted and neither it nor the log contains it.
+func TestForwardEncryptedRejectedMediaLeak(t *testing.T) {
+	require := require.New(t)
+	assert := assert.New(t)
+
+	// The plaintext the client encrypted: an audio data URL, which the media validator rejects.
+	const secretAudio = "U0VDUkVULUFVRElPLUNPTlRFTlQ="
+	body := `{"model":"gpt","messages":[{"role":"user","content":[` +
+		`{"type":"audio_url","audio_url":{"url":"data:audio/wav;base64,` + secretAudio + `"}}]}]}`
+
+	var upstreamCalled atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { upstreamCalled.Store(true) }))
+	defer upstream.Close()
+
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	plain := forwarder.New(upstream.Client(), strings.TrimPrefix(upstream.URL, "http://"), forwarder.SchemeHTTP, forwarder.UpstreamModel, log)
+
+	secret := bytes.Repeat([]byte{0x01}, 32)
+	r, client := buildEncryptedRequest(t, secret, body, constants.OpenAIChatCompletionsEndpoint)
+	assert.NotContains(readAndRestore(t, r), secretAudio, "the request must be encrypted on the wire")
+
+	w := httptest.NewRecorder()
+	New(plain, &fakeSecretGetter{secret: secret}).ForwardEncrypted(
+		w, r,
+		openai.MediaContentValidator(log),
+		func(*http.Response) (forwarder.Response, error) { return nil, nil },
+	)
+
+	require.False(upstreamCalled.Load(), "the validator must reject the request")
+	assert.Equal(http.StatusBadRequest, w.Code)
+	assert.NotContains(logs.String(), secretAudio, "rejected plaintext must not be logged")
+	assert.NotContains(w.Body.String(), secretAudio,
+		"rejected plaintext must not leave the TEE unencrypted (Content-Type %q)", w.Header().Get("Content-Type"))
+
+	ds, err := client.DecryptResponse(w.Result(), constants.MaxEncryptedFrameSize)
+	require.NoError(err, "the error reply must be encrypted")
+	plainReply, err := io.ReadAll(ds.Body)
+	require.NoError(err)
+	assert.Contains(string(plainReply), "audio URLs are not allowed")
+	assert.NotContains(string(plainReply), secretAudio)
+}
+
+func TestForwardEncryptedErrors(t *testing.T) {
+	rejectErr := forwarder.NewError("", errors.New("rejected request"), http.StatusBadRequest)
+	cases := map[string]struct {
+		accept          string
+		corruptBody     bool
+		reject          bool
+		upstreamDown    bool
+		wantStatus      int
+		wantEncrypted   bool
+		wantContentType string
+		wantBody        string
+	}{
+		"rejected after decryption": {
+			reject:          true,
+			wantStatus:      http.StatusBadRequest,
+			wantEncrypted:   true,
+			wantContentType: "application/json",
+			wantBody:        `{"error":{"message":"forwarding request: mutating request: mutating request post-decryption: rejected request","type":""}}`,
+		},
+		"rejected after decryption, streaming": {
+			accept:          "text/event-stream",
+			reject:          true,
+			wantStatus:      http.StatusBadRequest,
+			wantEncrypted:   true,
+			wantContentType: "text/event-stream",
+			wantBody:        "event: error\ndata: {\"error\":{\"message\":\"forwarding request: mutating request: mutating request post-decryption: rejected request\",\"type\":\"\"}}\n\n",
+		},
+		"upstream unreachable after decryption": {
+			upstreamDown:    true,
+			wantStatus:      http.StatusBadGateway,
+			wantEncrypted:   true,
+			wantContentType: "application/json",
+			wantBody:        `{"error":{"message":"connection to the model failed","type":"","code":"model_connection_failed"}}`,
+		},
+		"response mapping fails": {
+			wantStatus:      http.StatusInternalServerError,
+			wantEncrypted:   true,
+			wantContentType: "application/json",
+			wantBody:        `{"error":{"message":"mapping response: mapping response pre-encryption: unexpected upstream response","type":""}}`,
+		},
+		"decryption fails": {
+			corruptBody:     true,
+			wantStatus:      http.StatusBadRequest,
+			wantContentType: "application/json",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			assert := assert.New(t)
+
+			upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+			defer upstream.Close()
+			if tc.upstreamDown {
+				upstream.Close()
+			}
+			log := slog.New(slog.DiscardHandler)
+			plain := forwarder.New(upstream.Client(), strings.TrimPrefix(upstream.URL, "http://"), forwarder.SchemeHTTP, forwarder.UpstreamModel, log)
+
+			secret := bytes.Repeat([]byte{0x01}, 32)
+			r, client := buildEncryptedRequest(t, secret, `{"model":"gpt"}`, constants.OpenAIChatCompletionsEndpoint)
+			if tc.accept != "" {
+				r.Header.Set("Accept", tc.accept)
+			}
+			if tc.corruptBody {
+				body := []byte(readAndRestore(t, r))
+				body[len(body)-1] ^= 0xff
+				r.Body = io.NopCloser(bytes.NewReader(body))
+			}
+			postDecrypt := forwarder.NoRequestMutation
+			if tc.reject {
+				postDecrypt = func(*http.Request) error { return rejectErr }
+			}
+
+			w := httptest.NewRecorder()
+			New(plain, &fakeSecretGetter{secret: secret}).ForwardEncrypted(
+				w, r, postDecrypt,
+				func(*http.Response) (forwarder.Response, error) {
+					return nil, errors.New("unexpected upstream response")
+				},
+			)
+
+			assert.Equal(tc.wantStatus, w.Code)
+			if !tc.wantEncrypted {
+				assert.Equal(tc.wantContentType, w.Header().Get("Content-Type"))
+				assert.Contains(w.Body.String(), "decrypting request")
+				return
+			}
+			resp := w.Result()
+			ds, err := client.DecryptResponse(resp, constants.MaxEncryptedFrameSize)
+			require.NoError(err)
+			plainResp, err := io.ReadAll(ds.Body)
+			require.NoError(err)
+			require.NoError(ds.Body.Close())
+			assert.Equal(tc.wantStatus, ds.StatusCode)
+			assert.Equal(tc.wantContentType, ds.Header.Get("Content-Type"))
+			assert.Equal(tc.wantBody, string(plainResp))
+		})
+	}
+}
+
+// readAndRestore returns the request body and puts it back for the next reader.
+func readAndRestore(t *testing.T, r *http.Request) string {
+	t.Helper()
+	b, err := io.ReadAll(r.Body)
+	require.NoError(t, err)
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	return string(b)
+}
+
 // buildEncryptedRequest builds an encrypted request together with the client exchange that can
 // decrypt its response.
 func buildEncryptedRequest(t *testing.T, secret []byte, body, endpoint string) (*http.Request, *encbody.ClientExchange) {
@@ -235,7 +394,7 @@ func buildEncryptedRequest(t *testing.T, secret []byte, body, endpoint string) (
 	r.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
 	r.Header.Set(constants.PrivatemodeSecretIDHeader, "some-id")
 	require.NoError(t, mutators.ContentLengthTokensInjector(r))
-	require.NoError(t, client.EncryptRequest(r))
+	require.NoError(t, client.EncryptRequest(r, nil))
 
 	return r, client
 }
