@@ -9,6 +9,7 @@ package mutators
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"net/http"
@@ -24,6 +25,26 @@ import (
 
 // ErrRemoteResourceURL indicates that a media URL uses a scheme other than data.
 var ErrRemoteResourceURL = errors.New("remote resource URLs are not allowed, use data URLs instead")
+
+// ErrInvalidJSON indicates that a request body is not valid RFC 7493 JSON.
+var ErrInvalidJSON = errors.New("request body is not valid I-JSON (RFC 7493)")
+
+// StrictJSONValidator rejects request bodies that are not valid RFC 7493 JSON.
+// Run it before any gjson-based checks or mutations.
+func StrictJSONValidator(r *http.Request) error {
+	body, err := persist.ReadBodyUnlimited(r)
+	if err != nil {
+		return fmt.Errorf("reading request body: %w", err)
+	}
+	// Skip empty body, e.g., for OPTIONS requests
+	if len(body) == 0 {
+		return nil
+	}
+	if !jsontext.Value(body).IsValid() {
+		return forwarder.NewError("validating request", ErrInvalidJSON, http.StatusBadRequest)
+	}
+	return nil
+}
 
 // imageDataQueries locate image payloads (base64 data or URLs) in chat messages, across the
 // OpenAI and Anthropic formats. "#" + "@flatten" collect every image, so each is counted once.

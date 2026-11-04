@@ -369,6 +369,15 @@ func TestForwardChatCompletionsRequest(t *testing.T) {
 				assert.Contains(responseRecorder.Body.String(), mutators.ErrRemoteResourceURL.Error())
 			},
 		},
+		"duplicate key rejected": {
+			clientRequest: `{"model":"` + defaultModel + `","messages":[{"role":"user","content":"Hi"}],` +
+				`"cache_salt":"` + strings.Repeat("a", 32) + `","stream":true,` +
+				`"stream_options":{"include_usage":true},"stream_options":{"include_usage":false}}`,
+			validateResponse: func(assert *assert.Assertions, responseRecorder *httptest.ResponseRecorder) {
+				assert.Equal(http.StatusBadRequest, responseRecorder.Code)
+				assert.Contains(responseRecorder.Body.String(), mutators.ErrInvalidJSON.Error())
+			},
+		},
 	}
 
 	for name, tc := range testCases {

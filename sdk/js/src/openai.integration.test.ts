@@ -137,15 +137,153 @@ describe.skipIf(!runIntegrationTests)('OpenAI-compatible client', () => {
     expect(transcription.text.length).toBeGreaterThan(0);
   }, 120_000);
 
-  it('maps API errors to the official OpenAI error classes', async () => {
+  // One error per component that answers it.
+  const chatCompletionErrors = {
+    'the apigateway': {
+      request: { model: 'this-model-does-not-exist' },
+      errorClass: OpenAI.NotFoundError,
+      details: {
+        status: 404,
+        message: expect.stringContaining(
+          'model "this-model-does-not-exist" not found',
+        ),
+      },
+    },
+    'the inference-proxy': {
+      request: {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Describe the image.' },
+              {
+                type: 'image_url',
+                image_url: { url: 'https://example.com/sample.png' },
+              },
+            ],
+          },
+        ],
+      },
+      errorClass: OpenAI.BadRequestError,
+      details: {
+        status: 400,
+        message: expect.stringContaining(
+          'remote resource URLs are not allowed',
+        ),
+      },
+    },
+    vLLM: {
+      request: { tool_choice: 'required' },
+      errorClass: OpenAI.BadRequestError,
+      details: {
+        status: 400,
+        message: expect.stringContaining('`tools` must be set'),
+        param: 'tool_choice',
+        type: 'BadRequestError',
+      },
+    },
+  } satisfies Record<
+    string,
+    {
+      request: Partial<OpenAI.ChatCompletionCreateParamsNonStreaming>;
+      errorClass: unknown;
+      details: object;
+    }
+  >;
+
+  for (const [origin, { request, errorClass, details }] of Object.entries(
+    chatCompletionErrors,
+  )) {
+    for (const stream of [false, true]) {
+      it(`surfaces a ${stream ? 'streaming' : 'unary'} chat completion error from ${origin} as an OpenAI error`, async () => {
+        const client = createClient();
+
+        const completion = client.chat.completions.create({
+          max_tokens: 16,
+          messages: [{ role: 'user', content: 'Hello!' }],
+          model: 'gpt-oss-120b',
+          ...request,
+          stream,
+        });
+
+        await expect(completion).rejects.toBeInstanceOf(errorClass);
+        await expect(completion).rejects.toMatchObject(details);
+      }, 120_000);
+    }
+  }
+
+  it('surfaces an embeddings error from the apigateway as an OpenAI error', async () => {
     const client = createClient();
 
-    const completion = client.chat.completions.create({
-      max_tokens: 16,
-      messages: [{ role: 'user', content: 'Hello!' }],
+    const response = client.embeddings.create({
+      input: 'Represent this document',
       model: 'this-model-does-not-exist',
     });
 
-    await expect(completion).rejects.toBeInstanceOf(OpenAI.NotFoundError);
+    await expect(response).rejects.toBeInstanceOf(OpenAI.NotFoundError);
+    await expect(response).rejects.toMatchObject({
+      status: 404,
+      message: expect.stringContaining(
+        'model "this-model-does-not-exist" not found',
+      ),
+    });
+  }, 120_000);
+
+  it('surfaces an embeddings error from vLLM as an OpenAI error', async () => {
+    const client = createClient();
+
+    const response = client.embeddings.create({
+      dimensions: 999_999,
+      input: 'Represent this document',
+      model: 'qwen3-embedding-4b',
+    });
+
+    await expect(response).rejects.toBeInstanceOf(OpenAI.BadRequestError);
+    await expect(response).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining('only supports dimensions'),
+      type: 'BadRequestError',
+    });
+  }, 120_000);
+
+  it('surfaces a transcription error from the apigateway as an OpenAI error', async () => {
+    const client = createClient();
+    const file = await toFile(await testAudio(), 'test.mp3', {
+      type: 'audio/mpeg',
+    });
+
+    const transcription = client.audio.transcriptions.create({
+      file,
+      model: 'this-model-does-not-exist',
+    });
+
+    await expect(transcription).rejects.toBeInstanceOf(OpenAI.NotFoundError);
+    await expect(transcription).rejects.toMatchObject({
+      status: 404,
+      message: expect.stringContaining(
+        'model "this-model-does-not-exist" not found',
+      ),
+    });
+  }, 120_000);
+
+  it('surfaces a transcription error from vLLM as an OpenAI error', async () => {
+    const client = createClient();
+    const file = await toFile(await testAudio(), 'test.mp3', {
+      type: 'audio/mpeg',
+    });
+
+    const transcription = client.audio.transcriptions.create({
+      file,
+      model: 'voxtral-mini-3b',
+      temperature: 7,
+    });
+
+    await expect(transcription).rejects.toBeInstanceOf(OpenAI.BadRequestError);
+    await expect(transcription).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringContaining('temperature must be in'),
+      param: 'temperature',
+      type: 'BadRequestError',
+    });
   }, 120_000);
 });

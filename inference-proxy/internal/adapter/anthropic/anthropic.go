@@ -15,6 +15,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
 )
@@ -57,7 +58,13 @@ func (a *Adapter) HandlesCatchAll() bool {
 func (a *Adapter) forwardMessagesRequest(w http.ResponseWriter, r *http.Request) {
 	a.ForwardEncrypted(
 		w, r,
-		forwarder.RequestMutatorChain(inference.RejectAnonymousRequest, a.cacheSaltValidator, a.legacyCacheSaltHasher, a.mediaContentValidator),
+		forwarder.RequestMutatorChain(
+			inference.RejectAnonymousRequest,
+			mutators.StrictJSONValidator,
+			a.cacheSaltValidator,
+			a.legacyCacheSaltHasher,
+			a.mediaContentValidator,
+		),
 		nil,
 		nil,
 		extractAnthropicUsageUnary,

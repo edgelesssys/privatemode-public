@@ -19,10 +19,46 @@ import (
 	"time"
 
 	"github.com/edgelesssys/continuum/internal/oss/constants"
+	"github.com/edgelesssys/continuum/internal/oss/forwarder"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+func TestStrictJSONValidator(t *testing.T) {
+	testCases := map[string]struct {
+		body    string
+		wantErr bool
+	}{
+		"valid":                {body: `{"model":"m","messages":[{"role":"user","content":"hi"}]}`},
+		"empty body":           {body: ``},
+		"duplicate key":        {body: `{"stream":false,"stream":true}`, wantErr: true},
+		"nested duplicate key": {body: `{"stream_options":{"include_usage":true,"include_usage":false}}`, wantErr: true},
+		"invalid UTF-8":        {body: "{\"content\":\"\xff\"}", wantErr: true},
+		"lone surrogate":       {body: `{"content":"\ud800"}`, wantErr: true},
+		"syntax error":         {body: `{"stream":true`, wantErr: true},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			assert := assert.New(t)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(tc.body))
+
+			err := StrictJSONValidator(req)
+
+			if !tc.wantErr {
+				assert.NoError(err)
+				body, err := io.ReadAll(req.Body)
+				require.NoError(t, err)
+				assert.Equal(tc.body, string(body))
+				return
+			}
+			assert.ErrorIs(err, ErrInvalidJSON)
+			var fwdErr *forwarder.Error
+			require.ErrorAs(t, err, &fwdErr)
+			assert.Equal(http.StatusBadRequest, fwdErr.StatusCode)
+		})
+	}
+}
 
 func TestContentLengthTokensInjector(t *testing.T) {
 	for name, tc := range map[string]struct {

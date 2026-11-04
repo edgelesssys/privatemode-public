@@ -14,6 +14,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/encbody"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 )
 
@@ -165,6 +166,7 @@ func decryptRequest(secrets map[string][]byte, r *http.Request, log *slog.Logger
 	}
 
 	validate := forwarder.RequestMutatorChain(
+		mutators.StrictJSONValidator,
 		openai.CacheSaltValidator(log),
 		openai.MediaContentValidator(log),
 	)

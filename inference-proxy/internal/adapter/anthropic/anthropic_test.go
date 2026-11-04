@@ -19,6 +19,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/anthropic"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/ocsp"
 	"github.com/edgelesssys/continuum/internal/oss/requestid"
 	"github.com/edgelesssys/continuum/internal/oss/sse"
@@ -121,6 +122,15 @@ func TestForwardMessagesRequest(t *testing.T) {
 			}(),
 			validateResponse: func(assert *assert.Assertions, responseRecorder *httptest.ResponseRecorder) {
 				assert.Equal(http.StatusOK, responseRecorder.Code)
+			},
+		},
+		"duplicate key rejected": {
+			clientRequest: `{"model":"` + defaultModel + `","max_tokens":1024,"cache_salt":"` + testCacheSalt + `",` +
+				`"messages":[{"role":"user","content":[{"type":"image","source":{"type":"url",` +
+				`"url":"data:image/png;base64,AA==","url":"https://example.com/image.jpg"}}]}]}`,
+			validateResponse: func(assert *assert.Assertions, responseRecorder *httptest.ResponseRecorder) {
+				assert.Equal(http.StatusBadRequest, responseRecorder.Code)
+				assert.Contains(responseRecorder.Body.String(), mutators.ErrInvalidJSON.Error())
 			},
 		},
 	}

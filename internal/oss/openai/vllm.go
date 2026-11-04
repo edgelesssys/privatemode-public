@@ -449,10 +449,6 @@ func StreamUsageReportingInjector(log *slog.Logger) forwarder.RequestMutator {
 	injectStreamOptions := func(httpBody string) (string, error) {
 		log.DebugContext(context.Background(), "Enabling token tracking for request")
 
-		if !gjson.Valid(httpBody) {
-			return "", forwarder.NewError("validating request", errors.New("request body is not valid json"), http.StatusBadRequest)
-		}
-
 		// stream_options is only relevant for streaming completions.
 		if !gjson.Get(httpBody, "stream").Bool() {
 			return httpBody, nil

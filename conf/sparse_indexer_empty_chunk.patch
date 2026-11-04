@@ -1,0 +1,108 @@
+diff --git a/vllm/models/glm5next/common/sparse_indexer.py b/vllm/models/glm5next/common/sparse_indexer.py
+index ad38454570..c7441f51e8 100644
+--- a/vllm/models/glm5next/common/sparse_indexer.py
++++ b/vllm/models/glm5next/common/sparse_indexer.py
+@@ -113,6 +113,16 @@ def _fill_causal_indices(rows: torch.Tensor, positions: torch.Tensor) -> None:
+     rows[causal_range[None, :] > positions[:, None]] = -1
+ 
+ 
++def _fill_empty_chunk_rows(
++    topk_indices_buffer: torch.Tensor,
++    positions: torch.Tensor,
++    token_ranges: list[tuple[int, int]],
++) -> None:
++    """Select every causal token for rows of chunks without compressed KV."""
++    for start, end in token_ranges:
++        _fill_causal_indices(topk_indices_buffer[start:end], positions[start:end])
++
++
+ def _fill_short_decode_causal_indices(
+     topk_indices_buffer: torch.Tensor,
+     positions: torch.Tensor | None,
+diff --git a/vllm/models/glm5next/nvidia/sparse_indexer.py b/vllm/models/glm5next/nvidia/sparse_indexer.py
+index 00f51cc6a7..90ef6f57ef 100644
+--- a/vllm/models/glm5next/nvidia/sparse_indexer.py
++++ b/vllm/models/glm5next/nvidia/sparse_indexer.py
+@@ -16,6 +16,7 @@ from vllm.models.glm5next.common.sparse_indexer import (
+     _build_decode_scatter_indices,
+     _decode_topk_seq_lens,
+     _fill_causal_indices,
++    _fill_empty_chunk_rows,
+     _fill_short_decode_causal_indices,
+     _gather_workspace_shapes,
+     _scatter_decode_tokens_by_request,
+@@ -371,6 +372,12 @@ def sparse_attn_indexer_kpool(
+                     chunk.token_start : chunk.token_end, : expanded.shape[-1]
+                 ] = expanded
+ 
++        # Dropped zero-pool chunks select every token, like a short prefill.
++        if not short_prefill and positions is not None:
++            _fill_empty_chunk_rows(
++                topk_indices_buffer, positions, prefill_metadata.empty_token_ranges
++            )
++
+     if has_decode:
+         decode_metadata = attn_metadata_narrowed.decode
+         assert decode_metadata is not None
+diff --git a/vllm/v1/attention/backends/mla/indexer.py b/vllm/v1/attention/backends/mla/indexer.py
+index e7eb67b61f..73efb82a59 100644
+--- a/vllm/v1/attention/backends/mla/indexer.py
++++ b/vllm/v1/attention/backends/mla/indexer.py
+@@ -1,6 +1,6 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ from typing import Any
+ 
+ import numpy as np
+@@ -610,6 +610,8 @@ class BuildPrefillChunkMetadataKernel(
+ class DeepseekV32IndexerPrefillMetadata:
+     chunks: list[DeepseekV32IndexerPrefillChunkMetadata]
+     max_prefill_seq_len: int = -1
++    # Token ranges of chunks dropped for having no compressed KV.
++    empty_token_ranges: list[tuple[int, int]] = field(default_factory=list)
+ 
+ 
+ @dataclass
+@@ -1383,6 +1385,7 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
+                 )
+ 
+             chunks = []
++            empty_token_ranges: list[tuple[int, int]] = []
+             for req_slice, query_slice in chunk_specs:
+                 pcp_plan = None
+                 if req_idx is not None:
+@@ -1414,8 +1417,13 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
+                 # Skip when total_seq_lens is 0 (i.e., no compressed token).
+                 if metadata is not None:
+                     chunks.append(metadata)
++                else:
++                    empty_token_ranges.append(
++                        chunk_token_range(query_start_loc_cpu, req_slice, query_slice)
++                    )
+             prefill_metadata = DeepseekV32IndexerPrefillMetadata(
+                 chunks,
++                empty_token_ranges=empty_token_ranges,
+                 max_prefill_seq_len=(
+                     int(seq_lens_cpu[num_decodes:].max().item())
+                     if num_prefills > 0
+@@ -1629,6 +1637,18 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
+         return attn_metadata
+ 
+ 
++def chunk_token_range(
++    query_start_loc_cpu: torch.Tensor, req_slice: slice, query_slice: slice
++) -> tuple[int, int]:
++    """Batch token range of the ``query_slice`` rows of requests ``req_slice``."""
++    start = int(query_start_loc_cpu[req_slice.start])
++    num_tokens = int(query_start_loc_cpu[req_slice.stop]) - start
++    return (
++        start + min(query_slice.start, num_tokens),
++        start + min(query_slice.stop, num_tokens),
++    )
++
++
+ def build_prefill_chunk_metadata(
+     start_idx: int,
+     end_idx: int,

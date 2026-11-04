@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: secret-service
-  namespace: continuum-e8a714
+  namespace: continuum-012cc6
   labels:
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
 spec:
   replicas: 3
   serviceName: secret-service-headless
@@ -15,14 +15,14 @@ spec:
     metadata:
       labels:
         app: secret-service
-        app.kubernetes.io/instance: 'e8a714'
+        app.kubernetes.io/instance: '012cc6'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
     spec:
       runtimeClassName: contrast-cc
       containers:
         - name: secret-service
-          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.61.0@sha256:67d506d6aa231ecf8954feed154b56fb445c80444a27f3aa142a0108b15bafde'
+          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.62.0@sha256:d1273ce2d400dd9ab63897839734270e2615b2c1c973bc062417e9abf1171f50'
           resources:
             requests:
               memory: 2Gi
@@ -32,7 +32,7 @@ spec:
           args:
             - |
               exec /bin/secret-service \
-                --k8s-namespace=continuum-e8a714 \
+                --k8s-namespace=continuum-012cc6 \
                 $([ "${HOSTNAME##*-}" = "0" ] && echo "--may-bootstrap") \
                 --etcd-server-cert=/contrast/tls-config/certChain.pem \
                 --etcd-server-key=/contrast/tls-config/key.pem \
@@ -66,10 +66,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-deepseek-ocr-2
-  namespace: continuum-e8a714
+  namespace: continuum-012cc6
   labels:
     app: workload-deepseek-ocr-2
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
 spec:
   selector:
     matchLabels:
@@ -78,7 +78,7 @@ spec:
     metadata:
       labels:
         app: workload-deepseek-ocr-2
-        app.kubernetes.io/instance: 'e8a714'
+        app.kubernetes.io/instance: '012cc6'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -91,7 +91,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-snp-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.61.0@sha256:a32e11e7ee2961f2e0de4080f6dffecfdc7d64232f3f34f898ed9a91492219e2
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.62.0@sha256:5fcfe330f423e8affe61826875dd046ee31aa69905dc90a9b3434f9ea9042869
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -110,7 +110,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.61.0@sha256:1ca9efe1600238037c4bf954d5cc289c49a541cbfa93fc144a6ce7b2c083554f
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.62.0@sha256:d11ffc5803e3038732ae028dfbba0a2e6891d182c1e8babd7eb673fc11a24969
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -127,7 +127,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-deepseek-ocr-2-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.61.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
           args:
             - 'deepseek-ocr-2'
             - '0'
@@ -217,35 +217,35 @@ spec:
               mv '/var/run/workload-marker/deepseek-ocr-2-0.tmp' '/var/run/workload-marker/deepseek-ocr-2-0'
               mkdir -p /vllm-workspace
               echo "Installing deepseek_logits_processor.py"
-              install -D -m 644 /untrusted-vllm-patch/deepseek_logits_processor.py /vllm-workspace/deepseek_logits_processor.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-deepseek-logits-processor-py/deepseek_logits_processor.py /vllm-workspace/deepseek_logits_processor.py
               if [ $(sha256sum /vllm-workspace/deepseek_logits_processor.py | cut -d ' ' -f 1) != '628ca252446e1fc3ce0a45a66047d105ef3044688d75a4db385054b2e39ea7a0' ]; then echo deepseek_logits_processor.py hash mismatch: $(sha256sum /vllm-workspace/deepseek_logits_processor.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger.py"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger_pyproject.toml"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger_pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode_stat_logger_pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/privatemode_stat_logger.py"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode-stat-logger/privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/pyproject.toml"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml/pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode-stat-logger/pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
               echo "Installing restrict-vllm-network.py"
-              install -D -m 644 /untrusted-vllm-patch/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing skip_special_tokens.patch"
-              install -D -m 644 /untrusted-vllm-patch/skip_special_tokens.patch /vllm-workspace/skip_special_tokens.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-skip-special-tokens-patch/skip_special_tokens.patch /vllm-workspace/skip_special_tokens.patch
               if [ $(sha256sum /vllm-workspace/skip_special_tokens.patch | cut -d ' ' -f 1) != '82e3269ef4ffd41c0670253cf2c37474118ab1615b3dca0a2bf2f2e1be15dbe7' ]; then echo skip_special_tokens.patch hash mismatch: $(sha256sum /vllm-workspace/skip_special_tokens.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/skip_special_tokens.patch
               echo "Installing anthropic_usage_stream.patch"
-              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
               if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
               echo "Installing dump_input_anonymization.patch"
-              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
               if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
               echo "Installing slot_mapping_block_table_bounds.patch"
-              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
               if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
               echo "Installing transcriptions_stream_usage.patch"
-              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
               if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               # --no-build-isolation builds without a venv using setuptools.
@@ -288,8 +288,74 @@ spec:
             - name: vllm-pylock
               mountPath: /untrusted-pylock
               readOnly: true
-            - name: vllm-patch
-              mountPath: /untrusted-vllm-patch
+            - name: vllm-patch-anthropic-usage-stream-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-flash-jinja
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-jinja
+              readOnly: true
+            - name: vllm-patch-deepseek-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-deepseek-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-dump-input-anonymization-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-voxtral-json
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-voxtral-json
+              readOnly: true
+            - name: vllm-patch-glm-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-glm-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-language-penalty-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-language-penalty-py
+              readOnly: true
+            - name: vllm-patch-no-tools-tool-call-ban-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-no-tools-tool-call-ban-patch
+              readOnly: true
+            - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              mountPath: /untrusted-vllm-patch/vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              readOnly: true
+            - name: vllm-patch-repetition-detection-cap-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch
+              readOnly: true
+            - name: vllm-patch-restrict-vllm-network-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py
+              readOnly: true
+            - name: vllm-patch-sitecustomize-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-sitecustomize-py
+              readOnly: true
+            - name: vllm-patch-skip-special-tokens-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-skip-special-tokens-patch
+              readOnly: true
+            - name: vllm-patch-slot-mapping-block-table-bounds-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch
+              readOnly: true
+            - name: vllm-patch-sparse-indexer-empty-chunk-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-sparse-indexer-empty-chunk-patch
+              readOnly: true
+            - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-stream-usage-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-voxtral-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml
               readOnly: true
           resources:
             requests:
@@ -300,7 +366,7 @@ spec:
               memory: 64Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-deepseek-ocr-2-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.61.0@sha256:687228cc72cc66fa5ca45856eff3bf9b55c148d7efad00273bbae847460965ba
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -316,7 +382,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/deepseek-ocr-2-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-e8a714.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -324,7 +390,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,vision'
-            - '--usage-collector-endpoint=usage-collector.continuum-e8a714.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -384,9 +450,75 @@ spec:
         - name: vllm-pylock
           configMap:
             name: vllm-pylock
-        - name: vllm-patch
+        - name: vllm-patch-anthropic-usage-stream-patch
           configMap:
-            name: vllm-patch
+            name: vllm-patch-anthropic-usage-stream-patch
+        - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+          configMap:
+            name: vllm-patch-chat-template-glm-5-3-flash-jinja
+        - name: vllm-patch-chat-template-glm-5-3-jinja
+          configMap:
+            name: vllm-patch-chat-template-glm-5-3-jinja
+        - name: vllm-patch-deepseek-logits-processor-py
+          configMap:
+            name: vllm-patch-deepseek-logits-processor-py
+        - name: vllm-patch-dump-input-anonymization-patch
+          configMap:
+            name: vllm-patch-dump-input-anonymization-patch
+        - name: vllm-patch-generation-config-patch
+          configMap:
+            name: vllm-patch-generation-config-patch
+        - name: vllm-patch-generation-config-voxtral-json
+          configMap:
+            name: vllm-patch-generation-config-voxtral-json
+        - name: vllm-patch-glm-logits-processor-py
+          configMap:
+            name: vllm-patch-glm-logits-processor-py
+        - name: vllm-patch-language-penalty-py
+          configMap:
+            name: vllm-patch-language-penalty-py
+        - name: vllm-patch-no-tools-tool-call-ban-patch
+          configMap:
+            name: vllm-patch-no-tools-tool-call-ban-patch
+        - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+          configMap:
+            name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+        - name: vllm-patch-repetition-detection-cap-patch
+          configMap:
+            name: vllm-patch-repetition-detection-cap-patch
+        - name: vllm-patch-restrict-vllm-network-py
+          configMap:
+            name: vllm-patch-restrict-vllm-network-py
+        - name: vllm-patch-sitecustomize-py
+          configMap:
+            name: vllm-patch-sitecustomize-py
+        - name: vllm-patch-skip-special-tokens-patch
+          configMap:
+            name: vllm-patch-skip-special-tokens-patch
+        - name: vllm-patch-slot-mapping-block-table-bounds-patch
+          configMap:
+            name: vllm-patch-slot-mapping-block-table-bounds-patch
+        - name: vllm-patch-sparse-indexer-empty-chunk-patch
+          configMap:
+            name: vllm-patch-sparse-indexer-empty-chunk-patch
+        - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+          configMap:
+            name: vllm-patch-structured-output-implicit-reasoning-end-patch
+        - name: vllm-patch-transcriptions-patch
+          configMap:
+            name: vllm-patch-transcriptions-patch
+        - name: vllm-patch-transcriptions-stream-usage-patch
+          configMap:
+            name: vllm-patch-transcriptions-stream-usage-patch
+        - name: vllm-patch-voxtral-patch
+          configMap:
+            name: vllm-patch-voxtral-patch
+        - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+          configMap:
+            name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+        - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+          configMap:
+            name: vllm-patch-privatemode-stat-logger-pyproject-toml
         - name: inference-proxy-deepseek-ocr-2-0-identity
           secret:
             secretName: inference-proxy-deepseek-ocr-2-0-identity-secret
@@ -398,10 +530,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-glm-5-3
-  namespace: continuum-e8a714
+  namespace: continuum-012cc6
   labels:
     app: workload-glm-5-3
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
 spec:
   selector:
     matchLabels:
@@ -410,7 +542,7 @@ spec:
     metadata:
       labels:
         app: workload-glm-5-3
-        app.kubernetes.io/instance: 'e8a714'
+        app.kubernetes.io/instance: '012cc6'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -423,7 +555,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-tdx-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.61.0@sha256:a32e11e7ee2961f2e0de4080f6dffecfdc7d64232f3f34f898ed9a91492219e2
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.62.0@sha256:5fcfe330f423e8affe61826875dd046ee31aa69905dc90a9b3434f9ea9042869
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -442,7 +574,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.61.0@sha256:1ca9efe1600238037c4bf954d5cc289c49a541cbfa93fc144a6ce7b2c083554f
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.62.0@sha256:d11ffc5803e3038732ae028dfbba0a2e6891d182c1e8babd7eb673fc11a24969
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -459,7 +591,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-glm-5-3-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.61.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
           command:
             - /bin/sh
             - -ec
@@ -562,52 +694,52 @@ spec:
               mv '/var/run/workload-marker/glm-5-3-0.tmp' '/var/run/workload-marker/glm-5-3-0'
               mkdir -p /vllm-workspace
               echo "Installing language_penalty.py"
-              install -D -m 644 /untrusted-vllm-patch/language_penalty.py /vllm-workspace/language_penalty.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-language-penalty-py/language_penalty.py /vllm-workspace/language_penalty.py
               if [ $(sha256sum /vllm-workspace/language_penalty.py | cut -d ' ' -f 1) != 'e977b4d507f20c0d4e2b1a37fe794ab335b94b503c995a5ccc72739991f8461e' ]; then echo language_penalty.py hash mismatch: $(sha256sum /vllm-workspace/language_penalty.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing glm_logits_processor.py"
-              install -D -m 644 /untrusted-vllm-patch/glm_logits_processor.py /vllm-workspace/glm_logits_processor.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-glm-logits-processor-py/glm_logits_processor.py /vllm-workspace/glm_logits_processor.py
               if [ $(sha256sum /vllm-workspace/glm_logits_processor.py | cut -d ' ' -f 1) != '44b7301a7dd58c829b935d6e0eb5ed1693c7990f149853fb6f78ba7f669ecbc5' ]; then echo glm_logits_processor.py hash mismatch: $(sha256sum /vllm-workspace/glm_logits_processor.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger.py"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger_pyproject.toml"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger_pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode_stat_logger_pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/privatemode_stat_logger.py"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode-stat-logger/privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/pyproject.toml"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml/pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode-stat-logger/pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
               echo "Installing restrict-vllm-network.py"
-              install -D -m 644 /untrusted-vllm-patch/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing sitecustomize.py"
-              install -D -m 644 /untrusted-vllm-patch/sitecustomize.py /vllm-workspace/sitecustomize.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-sitecustomize-py/sitecustomize.py /vllm-workspace/sitecustomize.py
               if [ $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1) != 'f215015407e39580e2b8f709981034c4586c4c421caaefa76b72f076a998a62d' ]; then echo sitecustomize.py hash mismatch: $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing chat_template_glm-5.3.jinja"
-              install -D -m 644 /untrusted-vllm-patch/chat_template_glm-5.3.jinja /vllm-workspace/chat_template_glm-5.3.jinja
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-jinja/chat_template_glm-5.3.jinja /vllm-workspace/chat_template_glm-5.3.jinja
               if [ $(sha256sum /vllm-workspace/chat_template_glm-5.3.jinja | cut -d ' ' -f 1) != '4bd60b021615f2d8bc26437bcf7e6f927871a9996cfcb4027b67e2a53a61e6c4' ]; then echo chat_template_glm-5.3.jinja hash mismatch: $(sha256sum /vllm-workspace/chat_template_glm-5.3.jinja | cut -d ' ' -f 1); exit 1; fi
               echo "Installing repetition_detection_cap.patch"
-              install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
               if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
               echo "Installing anthropic_usage_stream.patch"
-              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
               if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
               echo "Installing dump_input_anonymization.patch"
-              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
               if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
               echo "Installing slot_mapping_block_table_bounds.patch"
-              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
               if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
               echo "Installing transcriptions_stream_usage.patch"
-              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
               if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               echo "Installing structured_output_implicit_reasoning_end.patch"
-              install -D -m 644 /untrusted-vllm-patch/structured_output_implicit_reasoning_end.patch /vllm-workspace/structured_output_implicit_reasoning_end.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch/structured_output_implicit_reasoning_end.patch /vllm-workspace/structured_output_implicit_reasoning_end.patch
               if [ $(sha256sum /vllm-workspace/structured_output_implicit_reasoning_end.patch | cut -d ' ' -f 1) != 'a4a3a591c0d756c8f0a242090b6a3e576ec17d0cc41911dcc86d2414e4831ad1' ]; then echo structured_output_implicit_reasoning_end.patch hash mismatch: $(sha256sum /vllm-workspace/structured_output_implicit_reasoning_end.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/structured_output_implicit_reasoning_end.patch
               echo "Installing no_tools_tool_call_ban.patch"
-              install -D -m 644 /untrusted-vllm-patch/no_tools_tool_call_ban.patch /vllm-workspace/no_tools_tool_call_ban.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-no-tools-tool-call-ban-patch/no_tools_tool_call_ban.patch /vllm-workspace/no_tools_tool_call_ban.patch
               if [ $(sha256sum /vllm-workspace/no_tools_tool_call_ban.patch | cut -d ' ' -f 1) != '9641d586775ce8fff40186d77516ccd952a7cc267e8846f6d0f65c27c71cde65' ]; then echo no_tools_tool_call_ban.patch hash mismatch: $(sha256sum /vllm-workspace/no_tools_tool_call_ban.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/no_tools_tool_call_ban.patch
               # --no-build-isolation builds without a venv using setuptools.
@@ -679,8 +811,74 @@ spec:
             - name: vllm-pylock
               mountPath: /untrusted-pylock
               readOnly: true
-            - name: vllm-patch
-              mountPath: /untrusted-vllm-patch
+            - name: vllm-patch-anthropic-usage-stream-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-flash-jinja
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-jinja
+              readOnly: true
+            - name: vllm-patch-deepseek-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-deepseek-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-dump-input-anonymization-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-voxtral-json
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-voxtral-json
+              readOnly: true
+            - name: vllm-patch-glm-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-glm-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-language-penalty-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-language-penalty-py
+              readOnly: true
+            - name: vllm-patch-no-tools-tool-call-ban-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-no-tools-tool-call-ban-patch
+              readOnly: true
+            - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              mountPath: /untrusted-vllm-patch/vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              readOnly: true
+            - name: vllm-patch-repetition-detection-cap-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch
+              readOnly: true
+            - name: vllm-patch-restrict-vllm-network-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py
+              readOnly: true
+            - name: vllm-patch-sitecustomize-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-sitecustomize-py
+              readOnly: true
+            - name: vllm-patch-skip-special-tokens-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-skip-special-tokens-patch
+              readOnly: true
+            - name: vllm-patch-slot-mapping-block-table-bounds-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch
+              readOnly: true
+            - name: vllm-patch-sparse-indexer-empty-chunk-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-sparse-indexer-empty-chunk-patch
+              readOnly: true
+            - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-stream-usage-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-voxtral-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml
               readOnly: true
           resources:
             requests:
@@ -691,7 +889,7 @@ spec:
               memory: 120Gi
               "nvidia.com/GB100_B200": 4
         - name: inference-proxy-glm-5-3-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.61.0@sha256:687228cc72cc66fa5ca45856eff3bf9b55c148d7efad00273bbae847460965ba
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -707,7 +905,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/glm-5-3-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-e8a714.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -715,7 +913,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling'
-            - '--usage-collector-endpoint=usage-collector.continuum-e8a714.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -775,9 +973,75 @@ spec:
         - name: vllm-pylock
           configMap:
             name: vllm-pylock
-        - name: vllm-patch
+        - name: vllm-patch-anthropic-usage-stream-patch
           configMap:
-            name: vllm-patch
+            name: vllm-patch-anthropic-usage-stream-patch
+        - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+          configMap:
+            name: vllm-patch-chat-template-glm-5-3-flash-jinja
+        - name: vllm-patch-chat-template-glm-5-3-jinja
+          configMap:
+            name: vllm-patch-chat-template-glm-5-3-jinja
+        - name: vllm-patch-deepseek-logits-processor-py
+          configMap:
+            name: vllm-patch-deepseek-logits-processor-py
+        - name: vllm-patch-dump-input-anonymization-patch
+          configMap:
+            name: vllm-patch-dump-input-anonymization-patch
+        - name: vllm-patch-generation-config-patch
+          configMap:
+            name: vllm-patch-generation-config-patch
+        - name: vllm-patch-generation-config-voxtral-json
+          configMap:
+            name: vllm-patch-generation-config-voxtral-json
+        - name: vllm-patch-glm-logits-processor-py
+          configMap:
+            name: vllm-patch-glm-logits-processor-py
+        - name: vllm-patch-language-penalty-py
+          configMap:
+            name: vllm-patch-language-penalty-py
+        - name: vllm-patch-no-tools-tool-call-ban-patch
+          configMap:
+            name: vllm-patch-no-tools-tool-call-ban-patch
+        - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+          configMap:
+            name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+        - name: vllm-patch-repetition-detection-cap-patch
+          configMap:
+            name: vllm-patch-repetition-detection-cap-patch
+        - name: vllm-patch-restrict-vllm-network-py
+          configMap:
+            name: vllm-patch-restrict-vllm-network-py
+        - name: vllm-patch-sitecustomize-py
+          configMap:
+            name: vllm-patch-sitecustomize-py
+        - name: vllm-patch-skip-special-tokens-patch
+          configMap:
+            name: vllm-patch-skip-special-tokens-patch
+        - name: vllm-patch-slot-mapping-block-table-bounds-patch
+          configMap:
+            name: vllm-patch-slot-mapping-block-table-bounds-patch
+        - name: vllm-patch-sparse-indexer-empty-chunk-patch
+          configMap:
+            name: vllm-patch-sparse-indexer-empty-chunk-patch
+        - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+          configMap:
+            name: vllm-patch-structured-output-implicit-reasoning-end-patch
+        - name: vllm-patch-transcriptions-patch
+          configMap:
+            name: vllm-patch-transcriptions-patch
+        - name: vllm-patch-transcriptions-stream-usage-patch
+          configMap:
+            name: vllm-patch-transcriptions-stream-usage-patch
+        - name: vllm-patch-voxtral-patch
+          configMap:
+            name: vllm-patch-voxtral-patch
+        - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+          configMap:
+            name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+        - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+          configMap:
+            name: vllm-patch-privatemode-stat-logger-pyproject-toml
         - name: inference-proxy-glm-5-3-0-identity
           secret:
             secretName: inference-proxy-glm-5-3-0-identity-secret
@@ -789,10 +1053,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-glm-5-3-flash
-  namespace: continuum-e8a714
+  namespace: continuum-012cc6
   labels:
     app: workload-glm-5-3-flash
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
 spec:
   selector:
     matchLabels:
@@ -801,7 +1065,7 @@ spec:
     metadata:
       labels:
         app: workload-glm-5-3-flash
-        app.kubernetes.io/instance: 'e8a714'
+        app.kubernetes.io/instance: '012cc6'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -814,7 +1078,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-tdx-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.61.0@sha256:a32e11e7ee2961f2e0de4080f6dffecfdc7d64232f3f34f898ed9a91492219e2
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.62.0@sha256:5fcfe330f423e8affe61826875dd046ee31aa69905dc90a9b3434f9ea9042869
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -833,7 +1097,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.61.0@sha256:1ca9efe1600238037c4bf954d5cc289c49a541cbfa93fc144a6ce7b2c083554f
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.62.0@sha256:d11ffc5803e3038732ae028dfbba0a2e6891d182c1e8babd7eb673fc11a24969
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -850,7 +1114,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-glm-5-3-flash-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.61.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
           command:
             - /bin/sh
             - -ec
@@ -949,54 +1213,58 @@ spec:
               mv '/var/run/workload-marker/glm-5-3-flash-0.tmp' '/var/run/workload-marker/glm-5-3-flash-0'
               mkdir -p /vllm-workspace
               echo "Installing language_penalty.py"
-              install -D -m 644 /untrusted-vllm-patch/language_penalty.py /vllm-workspace/language_penalty.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-language-penalty-py/language_penalty.py /vllm-workspace/language_penalty.py
               if [ $(sha256sum /vllm-workspace/language_penalty.py | cut -d ' ' -f 1) != 'e977b4d507f20c0d4e2b1a37fe794ab335b94b503c995a5ccc72739991f8461e' ]; then echo language_penalty.py hash mismatch: $(sha256sum /vllm-workspace/language_penalty.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing glm_logits_processor.py"
-              install -D -m 644 /untrusted-vllm-patch/glm_logits_processor.py /vllm-workspace/glm_logits_processor.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-glm-logits-processor-py/glm_logits_processor.py /vllm-workspace/glm_logits_processor.py
               if [ $(sha256sum /vllm-workspace/glm_logits_processor.py | cut -d ' ' -f 1) != '44b7301a7dd58c829b935d6e0eb5ed1693c7990f149853fb6f78ba7f669ecbc5' ]; then echo glm_logits_processor.py hash mismatch: $(sha256sum /vllm-workspace/glm_logits_processor.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger.py"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger_pyproject.toml"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger_pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode_stat_logger_pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/privatemode_stat_logger.py"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode-stat-logger/privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/pyproject.toml"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml/pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode-stat-logger/pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
               echo "Installing restrict-vllm-network.py"
-              install -D -m 644 /untrusted-vllm-patch/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing sitecustomize.py"
-              install -D -m 644 /untrusted-vllm-patch/sitecustomize.py /vllm-workspace/sitecustomize.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-sitecustomize-py/sitecustomize.py /vllm-workspace/sitecustomize.py
               if [ $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1) != 'f215015407e39580e2b8f709981034c4586c4c421caaefa76b72f076a998a62d' ]; then echo sitecustomize.py hash mismatch: $(sha256sum /vllm-workspace/sitecustomize.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing chat_template_glm-5.3-flash.jinja"
-              install -D -m 644 /untrusted-vllm-patch/chat_template_glm-5.3-flash.jinja /vllm-workspace/chat_template_glm-5.3-flash.jinja
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-flash-jinja/chat_template_glm-5.3-flash.jinja /vllm-workspace/chat_template_glm-5.3-flash.jinja
               if [ $(sha256sum /vllm-workspace/chat_template_glm-5.3-flash.jinja | cut -d ' ' -f 1) != 'b9d96a1b857adff6c9073a4cb8fe2cbd9c6557429f57c15976efbc6405529050' ]; then echo chat_template_glm-5.3-flash.jinja hash mismatch: $(sha256sum /vllm-workspace/chat_template_glm-5.3-flash.jinja | cut -d ' ' -f 1); exit 1; fi
               echo "Installing repetition_detection_cap.patch"
-              install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
               if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
               echo "Installing anthropic_usage_stream.patch"
-              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
               if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
               echo "Installing dump_input_anonymization.patch"
-              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
               if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
               echo "Installing slot_mapping_block_table_bounds.patch"
-              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
               if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
               echo "Installing transcriptions_stream_usage.patch"
-              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
               if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               echo "Installing structured_output_implicit_reasoning_end.patch"
-              install -D -m 644 /untrusted-vllm-patch/structured_output_implicit_reasoning_end.patch /vllm-workspace/structured_output_implicit_reasoning_end.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch/structured_output_implicit_reasoning_end.patch /vllm-workspace/structured_output_implicit_reasoning_end.patch
               if [ $(sha256sum /vllm-workspace/structured_output_implicit_reasoning_end.patch | cut -d ' ' -f 1) != 'a4a3a591c0d756c8f0a242090b6a3e576ec17d0cc41911dcc86d2414e4831ad1' ]; then echo structured_output_implicit_reasoning_end.patch hash mismatch: $(sha256sum /vllm-workspace/structured_output_implicit_reasoning_end.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/structured_output_implicit_reasoning_end.patch
               echo "Installing no_tools_tool_call_ban.patch"
-              install -D -m 644 /untrusted-vllm-patch/no_tools_tool_call_ban.patch /vllm-workspace/no_tools_tool_call_ban.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-no-tools-tool-call-ban-patch/no_tools_tool_call_ban.patch /vllm-workspace/no_tools_tool_call_ban.patch
               if [ $(sha256sum /vllm-workspace/no_tools_tool_call_ban.patch | cut -d ' ' -f 1) != '9641d586775ce8fff40186d77516ccd952a7cc267e8846f6d0f65c27c71cde65' ]; then echo no_tools_tool_call_ban.patch hash mismatch: $(sha256sum /vllm-workspace/no_tools_tool_call_ban.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/no_tools_tool_call_ban.patch
+              echo "Installing sparse_indexer_empty_chunk.patch"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-sparse-indexer-empty-chunk-patch/sparse_indexer_empty_chunk.patch /vllm-workspace/sparse_indexer_empty_chunk.patch
+              if [ $(sha256sum /vllm-workspace/sparse_indexer_empty_chunk.patch | cut -d ' ' -f 1) != '0cda8d349cd59465842e8c77e1910f2f3fe78978b76415d33de9fecb5122e16c' ]; then echo sparse_indexer_empty_chunk.patch hash mismatch: $(sha256sum /vllm-workspace/sparse_indexer_empty_chunk.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/sparse_indexer_empty_chunk.patch
               # --no-build-isolation builds without a venv using setuptools.
               # --offline verifies the declared dependencies are present without using network.
               uv pip install --system --no-build-isolation --offline /vllm-workspace/privatemode-stat-logger
@@ -1062,8 +1330,74 @@ spec:
             - name: vllm-pylock
               mountPath: /untrusted-pylock
               readOnly: true
-            - name: vllm-patch
-              mountPath: /untrusted-vllm-patch
+            - name: vllm-patch-anthropic-usage-stream-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-flash-jinja
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-jinja
+              readOnly: true
+            - name: vllm-patch-deepseek-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-deepseek-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-dump-input-anonymization-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-voxtral-json
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-voxtral-json
+              readOnly: true
+            - name: vllm-patch-glm-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-glm-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-language-penalty-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-language-penalty-py
+              readOnly: true
+            - name: vllm-patch-no-tools-tool-call-ban-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-no-tools-tool-call-ban-patch
+              readOnly: true
+            - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              mountPath: /untrusted-vllm-patch/vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              readOnly: true
+            - name: vllm-patch-repetition-detection-cap-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch
+              readOnly: true
+            - name: vllm-patch-restrict-vllm-network-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py
+              readOnly: true
+            - name: vllm-patch-sitecustomize-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-sitecustomize-py
+              readOnly: true
+            - name: vllm-patch-skip-special-tokens-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-skip-special-tokens-patch
+              readOnly: true
+            - name: vllm-patch-slot-mapping-block-table-bounds-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch
+              readOnly: true
+            - name: vllm-patch-sparse-indexer-empty-chunk-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-sparse-indexer-empty-chunk-patch
+              readOnly: true
+            - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-stream-usage-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-voxtral-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml
               readOnly: true
           resources:
             requests:
@@ -1074,7 +1408,7 @@ spec:
               memory: 120Gi
               "nvidia.com/GB100_B200": 2
         - name: inference-proxy-glm-5-3-flash-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.61.0@sha256:687228cc72cc66fa5ca45856eff3bf9b55c148d7efad00273bbae847460965ba
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -1090,7 +1424,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/glm-5-3-flash-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-e8a714.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1098,7 +1432,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling,vision'
-            - '--usage-collector-endpoint=usage-collector.continuum-e8a714.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -1158,9 +1492,75 @@ spec:
         - name: vllm-pylock
           configMap:
             name: vllm-pylock
-        - name: vllm-patch
+        - name: vllm-patch-anthropic-usage-stream-patch
           configMap:
-            name: vllm-patch
+            name: vllm-patch-anthropic-usage-stream-patch
+        - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+          configMap:
+            name: vllm-patch-chat-template-glm-5-3-flash-jinja
+        - name: vllm-patch-chat-template-glm-5-3-jinja
+          configMap:
+            name: vllm-patch-chat-template-glm-5-3-jinja
+        - name: vllm-patch-deepseek-logits-processor-py
+          configMap:
+            name: vllm-patch-deepseek-logits-processor-py
+        - name: vllm-patch-dump-input-anonymization-patch
+          configMap:
+            name: vllm-patch-dump-input-anonymization-patch
+        - name: vllm-patch-generation-config-patch
+          configMap:
+            name: vllm-patch-generation-config-patch
+        - name: vllm-patch-generation-config-voxtral-json
+          configMap:
+            name: vllm-patch-generation-config-voxtral-json
+        - name: vllm-patch-glm-logits-processor-py
+          configMap:
+            name: vllm-patch-glm-logits-processor-py
+        - name: vllm-patch-language-penalty-py
+          configMap:
+            name: vllm-patch-language-penalty-py
+        - name: vllm-patch-no-tools-tool-call-ban-patch
+          configMap:
+            name: vllm-patch-no-tools-tool-call-ban-patch
+        - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+          configMap:
+            name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+        - name: vllm-patch-repetition-detection-cap-patch
+          configMap:
+            name: vllm-patch-repetition-detection-cap-patch
+        - name: vllm-patch-restrict-vllm-network-py
+          configMap:
+            name: vllm-patch-restrict-vllm-network-py
+        - name: vllm-patch-sitecustomize-py
+          configMap:
+            name: vllm-patch-sitecustomize-py
+        - name: vllm-patch-skip-special-tokens-patch
+          configMap:
+            name: vllm-patch-skip-special-tokens-patch
+        - name: vllm-patch-slot-mapping-block-table-bounds-patch
+          configMap:
+            name: vllm-patch-slot-mapping-block-table-bounds-patch
+        - name: vllm-patch-sparse-indexer-empty-chunk-patch
+          configMap:
+            name: vllm-patch-sparse-indexer-empty-chunk-patch
+        - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+          configMap:
+            name: vllm-patch-structured-output-implicit-reasoning-end-patch
+        - name: vllm-patch-transcriptions-patch
+          configMap:
+            name: vllm-patch-transcriptions-patch
+        - name: vllm-patch-transcriptions-stream-usage-patch
+          configMap:
+            name: vllm-patch-transcriptions-stream-usage-patch
+        - name: vllm-patch-voxtral-patch
+          configMap:
+            name: vllm-patch-voxtral-patch
+        - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+          configMap:
+            name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+        - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+          configMap:
+            name: vllm-patch-privatemode-stat-logger-pyproject-toml
         - name: inference-proxy-glm-5-3-flash-0-identity
           secret:
             secretName: inference-proxy-glm-5-3-flash-0-identity-secret
@@ -1172,10 +1572,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-gpt-oss-120b
-  namespace: continuum-e8a714
+  namespace: continuum-012cc6
   labels:
     app: workload-gpt-oss-120b
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
 spec:
   selector:
     matchLabels:
@@ -1184,7 +1584,7 @@ spec:
     metadata:
       labels:
         app: workload-gpt-oss-120b
-        app.kubernetes.io/instance: 'e8a714'
+        app.kubernetes.io/instance: '012cc6'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -1197,7 +1597,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-snp-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.61.0@sha256:a32e11e7ee2961f2e0de4080f6dffecfdc7d64232f3f34f898ed9a91492219e2
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.62.0@sha256:5fcfe330f423e8affe61826875dd046ee31aa69905dc90a9b3434f9ea9042869
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -1216,7 +1616,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.61.0@sha256:1ca9efe1600238037c4bf954d5cc289c49a541cbfa93fc144a6ce7b2c083554f
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.62.0@sha256:d11ffc5803e3038732ae028dfbba0a2e6891d182c1e8babd7eb673fc11a24969
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -1233,7 +1633,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-gpt-oss-120b-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.61.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
           args:
             - 'gpt-oss-120b'
             - '0'
@@ -1320,37 +1720,37 @@ spec:
               cat /proc/sys/kernel/random/uuid > '/var/run/workload-marker/gpt-oss-120b-0.tmp'
               mv '/var/run/workload-marker/gpt-oss-120b-0.tmp' '/var/run/workload-marker/gpt-oss-120b-0'
               mkdir -p /vllm-workspace
-              echo "Installing privatemode_stat_logger.py"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger_pyproject.toml"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger_pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode_stat_logger_pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/privatemode_stat_logger.py"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode-stat-logger/privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/pyproject.toml"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml/pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode-stat-logger/pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
               echo "Installing restrict-vllm-network.py"
-              install -D -m 644 /untrusted-vllm-patch/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing repetition_detection_cap.patch"
-              install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
               if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
               echo "Installing anthropic_usage_stream.patch"
-              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
               if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
               echo "Installing dump_input_anonymization.patch"
-              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
               if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
               echo "Installing slot_mapping_block_table_bounds.patch"
-              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
               if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
               echo "Installing transcriptions_stream_usage.patch"
-              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
               if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               echo "Installing preload-gpt-oss-120b-tokenizer.sh"
-              install -D -m 644 /untrusted-vllm-patch/preload-gpt-oss-120b-tokenizer.sh /vllm-workspace/preload-gpt-oss-120b-tokenizer.sh
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-preload-gpt-oss-120b-tokenizer-sh/preload-gpt-oss-120b-tokenizer.sh /vllm-workspace/preload-gpt-oss-120b-tokenizer.sh
               if [ $(sha256sum /vllm-workspace/preload-gpt-oss-120b-tokenizer.sh | cut -d ' ' -f 1) != '824eb430cfa963848c8d41f9ad2c9477acaf26584aa2719845f13e0fbf6d6916' ]; then echo preload-gpt-oss-120b-tokenizer.sh hash mismatch: $(sha256sum /vllm-workspace/preload-gpt-oss-120b-tokenizer.sh | cut -d ' ' -f 1); exit 1; fi
               # --no-build-isolation builds without a venv using setuptools.
               # --offline verifies the declared dependencies are present without using network.
@@ -1402,8 +1802,74 @@ spec:
             - name: vllm-pylock
               mountPath: /untrusted-pylock
               readOnly: true
-            - name: vllm-patch
-              mountPath: /untrusted-vllm-patch
+            - name: vllm-patch-anthropic-usage-stream-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-flash-jinja
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-jinja
+              readOnly: true
+            - name: vllm-patch-deepseek-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-deepseek-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-dump-input-anonymization-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-voxtral-json
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-voxtral-json
+              readOnly: true
+            - name: vllm-patch-glm-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-glm-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-language-penalty-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-language-penalty-py
+              readOnly: true
+            - name: vllm-patch-no-tools-tool-call-ban-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-no-tools-tool-call-ban-patch
+              readOnly: true
+            - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              mountPath: /untrusted-vllm-patch/vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              readOnly: true
+            - name: vllm-patch-repetition-detection-cap-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch
+              readOnly: true
+            - name: vllm-patch-restrict-vllm-network-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py
+              readOnly: true
+            - name: vllm-patch-sitecustomize-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-sitecustomize-py
+              readOnly: true
+            - name: vllm-patch-skip-special-tokens-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-skip-special-tokens-patch
+              readOnly: true
+            - name: vllm-patch-slot-mapping-block-table-bounds-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch
+              readOnly: true
+            - name: vllm-patch-sparse-indexer-empty-chunk-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-sparse-indexer-empty-chunk-patch
+              readOnly: true
+            - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-stream-usage-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-voxtral-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml
               readOnly: true
           resources:
             requests:
@@ -1414,7 +1880,7 @@ spec:
               memory: 64Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-gpt-oss-120b-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.61.0@sha256:687228cc72cc66fa5ca45856eff3bf9b55c148d7efad00273bbae847460965ba
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -1430,7 +1896,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/gpt-oss-120b-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-e8a714.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1438,7 +1904,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling'
-            - '--usage-collector-endpoint=usage-collector.continuum-e8a714.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -1498,9 +1964,75 @@ spec:
         - name: vllm-pylock
           configMap:
             name: vllm-pylock
-        - name: vllm-patch
+        - name: vllm-patch-anthropic-usage-stream-patch
           configMap:
-            name: vllm-patch
+            name: vllm-patch-anthropic-usage-stream-patch
+        - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+          configMap:
+            name: vllm-patch-chat-template-glm-5-3-flash-jinja
+        - name: vllm-patch-chat-template-glm-5-3-jinja
+          configMap:
+            name: vllm-patch-chat-template-glm-5-3-jinja
+        - name: vllm-patch-deepseek-logits-processor-py
+          configMap:
+            name: vllm-patch-deepseek-logits-processor-py
+        - name: vllm-patch-dump-input-anonymization-patch
+          configMap:
+            name: vllm-patch-dump-input-anonymization-patch
+        - name: vllm-patch-generation-config-patch
+          configMap:
+            name: vllm-patch-generation-config-patch
+        - name: vllm-patch-generation-config-voxtral-json
+          configMap:
+            name: vllm-patch-generation-config-voxtral-json
+        - name: vllm-patch-glm-logits-processor-py
+          configMap:
+            name: vllm-patch-glm-logits-processor-py
+        - name: vllm-patch-language-penalty-py
+          configMap:
+            name: vllm-patch-language-penalty-py
+        - name: vllm-patch-no-tools-tool-call-ban-patch
+          configMap:
+            name: vllm-patch-no-tools-tool-call-ban-patch
+        - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+          configMap:
+            name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+        - name: vllm-patch-repetition-detection-cap-patch
+          configMap:
+            name: vllm-patch-repetition-detection-cap-patch
+        - name: vllm-patch-restrict-vllm-network-py
+          configMap:
+            name: vllm-patch-restrict-vllm-network-py
+        - name: vllm-patch-sitecustomize-py
+          configMap:
+            name: vllm-patch-sitecustomize-py
+        - name: vllm-patch-skip-special-tokens-patch
+          configMap:
+            name: vllm-patch-skip-special-tokens-patch
+        - name: vllm-patch-slot-mapping-block-table-bounds-patch
+          configMap:
+            name: vllm-patch-slot-mapping-block-table-bounds-patch
+        - name: vllm-patch-sparse-indexer-empty-chunk-patch
+          configMap:
+            name: vllm-patch-sparse-indexer-empty-chunk-patch
+        - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+          configMap:
+            name: vllm-patch-structured-output-implicit-reasoning-end-patch
+        - name: vllm-patch-transcriptions-patch
+          configMap:
+            name: vllm-patch-transcriptions-patch
+        - name: vllm-patch-transcriptions-stream-usage-patch
+          configMap:
+            name: vllm-patch-transcriptions-stream-usage-patch
+        - name: vllm-patch-voxtral-patch
+          configMap:
+            name: vllm-patch-voxtral-patch
+        - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+          configMap:
+            name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+        - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+          configMap:
+            name: vllm-patch-privatemode-stat-logger-pyproject-toml
         - name: inference-proxy-gpt-oss-120b-0-identity
           secret:
             secretName: inference-proxy-gpt-oss-120b-0-identity-secret
@@ -1512,10 +2044,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-whisper-qwen3-voxtral
-  namespace: continuum-e8a714
+  namespace: continuum-012cc6
   labels:
     app: workload-whisper-qwen3-voxtral
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
 spec:
   selector:
     matchLabels:
@@ -1524,7 +2056,7 @@ spec:
     metadata:
       labels:
         app: workload-whisper-qwen3-voxtral
-        app.kubernetes.io/instance: 'e8a714'
+        app.kubernetes.io/instance: '012cc6'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -1537,7 +2069,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-snp-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.61.0@sha256:a32e11e7ee2961f2e0de4080f6dffecfdc7d64232f3f34f898ed9a91492219e2
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.62.0@sha256:5fcfe330f423e8affe61826875dd046ee31aa69905dc90a9b3434f9ea9042869
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -1556,7 +2088,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.61.0@sha256:1ca9efe1600238037c4bf954d5cc289c49a541cbfa93fc144a6ce7b2c083554f
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.62.0@sha256:d11ffc5803e3038732ae028dfbba0a2e6891d182c1e8babd7eb673fc11a24969
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -1573,7 +2105,7 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-whisper-large-v3-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.61.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
           args:
             - 'whisper-large-v3'
             - '0'
@@ -1589,7 +2121,7 @@ spec:
             - name: modelweights-whisper-large-v3-0
               devicePath: /dev/modelweights-whisper-large-v3-0
         - name: disk-mounter-qwen3-embedding-4b-1
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.61.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
           args:
             - 'qwen3-embedding-4b'
             - '1'
@@ -1605,7 +2137,7 @@ spec:
             - name: modelweights-qwen3-embedding-4b-1
               devicePath: /dev/modelweights-qwen3-embedding-4b-1
         - name: disk-mounter-voxtral-mini-3b-2
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.61.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
           args:
             - 'voxtral-mini-3b'
             - '2'
@@ -1698,37 +2230,37 @@ spec:
               if [ $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1) != 'e625bab294070791594da8f353f672bfffb3180dce772b36dbb07ac6c78f287a' ]; then echo pylock.audio.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1); exit 1; fi
               env -u UV_OVERRIDE uv pip install --system --no-deps -r /vllm-workspace/pylock.audio.toml
               if [ $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1) != 'e5d1bed4e38c5a44103a39a671c66faef468577067b0253152585f545f0d2c9c' ]; then echo python environment hash mismatch: $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger.py"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger_pyproject.toml"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger_pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode_stat_logger_pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/privatemode_stat_logger.py"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode-stat-logger/privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/pyproject.toml"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml/pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode-stat-logger/pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
               echo "Installing restrict-vllm-network.py"
-              install -D -m 644 /untrusted-vllm-patch/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing transcriptions.patch"
-              install -D -m 644 /untrusted-vllm-patch/transcriptions.patch /vllm-workspace/transcriptions.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-transcriptions-patch/transcriptions.patch /vllm-workspace/transcriptions.patch
               if [ $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1) != 'e0286354e2f3787cb873dc70d659cbf55420adec19852d27fb3cade6266af627' ]; then echo transcriptions.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions.patch
               echo "Installing repetition_detection_cap.patch"
-              install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
               if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
               echo "Installing anthropic_usage_stream.patch"
-              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
               if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
               echo "Installing dump_input_anonymization.patch"
-              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
               if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
               echo "Installing slot_mapping_block_table_bounds.patch"
-              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
               if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
               echo "Installing transcriptions_stream_usage.patch"
-              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
               if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               # --no-build-isolation builds without a venv using setuptools.
@@ -1765,8 +2297,74 @@ spec:
             - name: vllm-pylock
               mountPath: /untrusted-pylock
               readOnly: true
-            - name: vllm-patch
-              mountPath: /untrusted-vllm-patch
+            - name: vllm-patch-anthropic-usage-stream-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-flash-jinja
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-jinja
+              readOnly: true
+            - name: vllm-patch-deepseek-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-deepseek-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-dump-input-anonymization-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-voxtral-json
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-voxtral-json
+              readOnly: true
+            - name: vllm-patch-glm-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-glm-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-language-penalty-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-language-penalty-py
+              readOnly: true
+            - name: vllm-patch-no-tools-tool-call-ban-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-no-tools-tool-call-ban-patch
+              readOnly: true
+            - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              mountPath: /untrusted-vllm-patch/vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              readOnly: true
+            - name: vllm-patch-repetition-detection-cap-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch
+              readOnly: true
+            - name: vllm-patch-restrict-vllm-network-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py
+              readOnly: true
+            - name: vllm-patch-sitecustomize-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-sitecustomize-py
+              readOnly: true
+            - name: vllm-patch-skip-special-tokens-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-skip-special-tokens-patch
+              readOnly: true
+            - name: vllm-patch-slot-mapping-block-table-bounds-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch
+              readOnly: true
+            - name: vllm-patch-sparse-indexer-empty-chunk-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-sparse-indexer-empty-chunk-patch
+              readOnly: true
+            - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-stream-usage-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-voxtral-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml
               readOnly: true
           resources:
             requests:
@@ -1777,7 +2375,7 @@ spec:
               memory: 70Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-whisper-large-v3-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.61.0@sha256:687228cc72cc66fa5ca45856eff3bf9b55c148d7efad00273bbae847460965ba
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -1793,7 +2391,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/whisper-large-v3-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-e8a714.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1801,7 +2399,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=transcribe'
-            - '--usage-collector-endpoint=usage-collector.continuum-e8a714.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -1896,33 +2494,33 @@ spec:
               cat /proc/sys/kernel/random/uuid > '/var/run/workload-marker/qwen3-embedding-4b-1.tmp'
               mv '/var/run/workload-marker/qwen3-embedding-4b-1.tmp' '/var/run/workload-marker/qwen3-embedding-4b-1'
               mkdir -p /vllm-workspace
-              echo "Installing privatemode_stat_logger.py"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger_pyproject.toml"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger_pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode_stat_logger_pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/privatemode_stat_logger.py"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode-stat-logger/privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/pyproject.toml"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml/pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode-stat-logger/pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
               echo "Installing restrict-vllm-network.py"
-              install -D -m 644 /untrusted-vllm-patch/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing repetition_detection_cap.patch"
-              install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
               if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
               echo "Installing anthropic_usage_stream.patch"
-              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
               if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
               echo "Installing dump_input_anonymization.patch"
-              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
               if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
               echo "Installing slot_mapping_block_table_bounds.patch"
-              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
               if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
               echo "Installing transcriptions_stream_usage.patch"
-              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
               if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               # --no-build-isolation builds without a venv using setuptools.
@@ -1961,8 +2559,74 @@ spec:
             - name: vllm-pylock
               mountPath: /untrusted-pylock
               readOnly: true
-            - name: vllm-patch
-              mountPath: /untrusted-vllm-patch
+            - name: vllm-patch-anthropic-usage-stream-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-flash-jinja
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-jinja
+              readOnly: true
+            - name: vllm-patch-deepseek-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-deepseek-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-dump-input-anonymization-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-voxtral-json
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-voxtral-json
+              readOnly: true
+            - name: vllm-patch-glm-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-glm-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-language-penalty-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-language-penalty-py
+              readOnly: true
+            - name: vllm-patch-no-tools-tool-call-ban-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-no-tools-tool-call-ban-patch
+              readOnly: true
+            - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              mountPath: /untrusted-vllm-patch/vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              readOnly: true
+            - name: vllm-patch-repetition-detection-cap-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch
+              readOnly: true
+            - name: vllm-patch-restrict-vllm-network-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py
+              readOnly: true
+            - name: vllm-patch-sitecustomize-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-sitecustomize-py
+              readOnly: true
+            - name: vllm-patch-skip-special-tokens-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-skip-special-tokens-patch
+              readOnly: true
+            - name: vllm-patch-slot-mapping-block-table-bounds-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch
+              readOnly: true
+            - name: vllm-patch-sparse-indexer-empty-chunk-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-sparse-indexer-empty-chunk-patch
+              readOnly: true
+            - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-stream-usage-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-voxtral-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml
               readOnly: true
           resources:
             requests:
@@ -1972,7 +2636,7 @@ spec:
               cpu: "4"
               memory: 24Gi
         - name: inference-proxy-qwen3-embedding-4b-1
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.61.0@sha256:687228cc72cc66fa5ca45856eff3bf9b55c148d7efad00273bbae847460965ba
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
           ports:
             - containerPort: 8086
             - containerPort: 8186
@@ -1988,7 +2652,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8001/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/qwen3-embedding-4b-1'
             - '--workload-metrics=http://127.0.0.1:8001/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-e8a714.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1996,7 +2660,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=embed'
-            - '--usage-collector-endpoint=usage-collector.continuum-e8a714.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4318'
           readinessProbe:
@@ -2097,48 +2761,48 @@ spec:
               if [ $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1) != 'e625bab294070791594da8f353f672bfffb3180dce772b36dbb07ac6c78f287a' ]; then echo pylock.audio.toml hash mismatch: $(sha256sum /vllm-workspace/pylock.audio.toml | cut -d ' ' -f 1); exit 1; fi
               env -u UV_OVERRIDE uv pip install --system --no-deps -r /vllm-workspace/pylock.audio.toml
               if [ $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1) != 'e5d1bed4e38c5a44103a39a671c66faef468577067b0253152585f545f0d2c9c' ]; then echo python environment hash mismatch: $(uv pip freeze --system | sort | sha256sum | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger.py"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing privatemode_stat_logger_pyproject.toml"
-              install -D -m 644 /untrusted-vllm-patch/privatemode_stat_logger_pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
-              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode_stat_logger_pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/privatemode_stat_logger.py"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py/privatemode_stat_logger.py /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1) != '223a2337d47cf0e86d3e7ad55bbc9ce3cd5e41d10f611814373fe54d397bddc6' ]; then echo privatemode-stat-logger/privatemode_stat_logger.py hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/privatemode_stat_logger.py | cut -d ' ' -f 1); exit 1; fi
+              echo "Installing privatemode-stat-logger/pyproject.toml"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml/pyproject.toml /vllm-workspace/privatemode-stat-logger/pyproject.toml
+              if [ $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1) != '4c1a7b6fbfd6801445b3f9d3cc09953cd9af518ec997a319796a84e7278b6a21' ]; then echo privatemode-stat-logger/pyproject.toml hash mismatch: $(sha256sum /vllm-workspace/privatemode-stat-logger/pyproject.toml | cut -d ' ' -f 1); exit 1; fi
               echo "Installing restrict-vllm-network.py"
-              install -D -m 644 /untrusted-vllm-patch/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
               echo "Installing generation_config_voxtral.json"
-              install -D -m 644 /untrusted-vllm-patch/generation_config_voxtral.json /vllm-workspace/generation_config.json
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-generation-config-voxtral-json/generation_config_voxtral.json /vllm-workspace/generation_config.json
               if [ $(sha256sum /vllm-workspace/generation_config.json | cut -d ' ' -f 1) != 'c8297823ed0e642d9932ca2ef1cdc0fa174563a3396c687852c1c377b60a18fd' ]; then echo generation_config_voxtral.json hash mismatch: $(sha256sum /vllm-workspace/generation_config.json | cut -d ' ' -f 1); exit 1; fi
               echo "Installing transcriptions.patch"
-              install -D -m 644 /untrusted-vllm-patch/transcriptions.patch /vllm-workspace/transcriptions.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-transcriptions-patch/transcriptions.patch /vllm-workspace/transcriptions.patch
               if [ $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1) != 'e0286354e2f3787cb873dc70d659cbf55420adec19852d27fb3cade6266af627' ]; then echo transcriptions.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions.patch
               echo "Installing voxtral.patch"
-              install -D -m 644 /untrusted-vllm-patch/voxtral.patch /vllm-workspace/voxtral.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-voxtral-patch/voxtral.patch /vllm-workspace/voxtral.patch
               if [ $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1) != 'dd59b2e26971e18d165fcc4463026b47b8149b796bb253646005e2fa88dc49e0' ]; then echo voxtral.patch hash mismatch: $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/voxtral.patch
               echo "Installing generation_config.patch"
-              install -D -m 644 /untrusted-vllm-patch/generation_config.patch /vllm-workspace/generation_config.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-generation-config-patch/generation_config.patch /vllm-workspace/generation_config.patch
               if [ $(sha256sum /vllm-workspace/generation_config.patch | cut -d ' ' -f 1) != '22f84010fece1a64969f8dc17ecd89579c6bd876e05ba9d5cfe4da0ec7d005d2' ]; then echo generation_config.patch hash mismatch: $(sha256sum /vllm-workspace/generation_config.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/generation_config.patch
               echo "Installing repetition_detection_cap.patch"
-              install -D -m 644 /untrusted-vllm-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
               if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/repetition_detection_cap.patch
               echo "Installing anthropic_usage_stream.patch"
-              install -D -m 644 /untrusted-vllm-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch/anthropic_usage_stream.patch /vllm-workspace/anthropic_usage_stream.patch
               if [ $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1) != 'acda26dc6a33351a202777987cf2cef5936cfbbb885b9b79ff36569b705d86d2' ]; then echo anthropic_usage_stream.patch hash mismatch: $(sha256sum /vllm-workspace/anthropic_usage_stream.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/anthropic_usage_stream.patch
               echo "Installing dump_input_anonymization.patch"
-              install -D -m 644 /untrusted-vllm-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch/dump_input_anonymization.patch /vllm-workspace/dump_input_anonymization.patch
               if [ $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1) != '9dad6bdaf38d151e8ec49011739f1ce467b61bf7be61e108c72cffa0b21df125' ]; then echo dump_input_anonymization.patch hash mismatch: $(sha256sum /vllm-workspace/dump_input_anonymization.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/dump_input_anonymization.patch
               echo "Installing slot_mapping_block_table_bounds.patch"
-              install -D -m 644 /untrusted-vllm-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch/slot_mapping_block_table_bounds.patch /vllm-workspace/slot_mapping_block_table_bounds.patch
               if [ $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1) != 'e09dac3cdd56b1ee5c47b64563cdf0fb0b6644fdb83998e181752bb238b17b89' ]; then echo slot_mapping_block_table_bounds.patch hash mismatch: $(sha256sum /vllm-workspace/slot_mapping_block_table_bounds.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/slot_mapping_block_table_bounds.patch
               echo "Installing transcriptions_stream_usage.patch"
-              install -D -m 644 /untrusted-vllm-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch/transcriptions_stream_usage.patch /vllm-workspace/transcriptions_stream_usage.patch
               if [ $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1) != '0466d6a1120b044faf4c4e2374742d02d4511ab932effaf7943d442e0889de29' ]; then echo transcriptions_stream_usage.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions_stream_usage.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions_stream_usage.patch
               # --no-build-isolation builds without a venv using setuptools.
@@ -2180,8 +2844,74 @@ spec:
             - name: vllm-pylock
               mountPath: /untrusted-pylock
               readOnly: true
-            - name: vllm-patch
-              mountPath: /untrusted-vllm-patch
+            - name: vllm-patch-anthropic-usage-stream-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-anthropic-usage-stream-patch
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-flash-jinja
+              readOnly: true
+            - name: vllm-patch-chat-template-glm-5-3-jinja
+              mountPath: /untrusted-vllm-patch/vllm-patch-chat-template-glm-5-3-jinja
+              readOnly: true
+            - name: vllm-patch-deepseek-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-deepseek-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-dump-input-anonymization-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-dump-input-anonymization-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-patch
+              readOnly: true
+            - name: vllm-patch-generation-config-voxtral-json
+              mountPath: /untrusted-vllm-patch/vllm-patch-generation-config-voxtral-json
+              readOnly: true
+            - name: vllm-patch-glm-logits-processor-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-glm-logits-processor-py
+              readOnly: true
+            - name: vllm-patch-language-penalty-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-language-penalty-py
+              readOnly: true
+            - name: vllm-patch-no-tools-tool-call-ban-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-no-tools-tool-call-ban-patch
+              readOnly: true
+            - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              mountPath: /untrusted-vllm-patch/vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+              readOnly: true
+            - name: vllm-patch-repetition-detection-cap-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch
+              readOnly: true
+            - name: vllm-patch-restrict-vllm-network-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py
+              readOnly: true
+            - name: vllm-patch-sitecustomize-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-sitecustomize-py
+              readOnly: true
+            - name: vllm-patch-skip-special-tokens-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-skip-special-tokens-patch
+              readOnly: true
+            - name: vllm-patch-slot-mapping-block-table-bounds-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-slot-mapping-block-table-bounds-patch
+              readOnly: true
+            - name: vllm-patch-sparse-indexer-empty-chunk-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-sparse-indexer-empty-chunk-patch
+              readOnly: true
+            - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+              readOnly: true
+            - name: vllm-patch-transcriptions-stream-usage-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-voxtral-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+              readOnly: true
+            - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+              mountPath: /untrusted-vllm-patch/vllm-patch-privatemode-stat-logger-pyproject-toml
               readOnly: true
           resources:
             requests:
@@ -2191,7 +2921,7 @@ spec:
               cpu: "4"
               memory: 30Gi
         - name: inference-proxy-voxtral-mini-3b-2
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.61.0@sha256:687228cc72cc66fa5ca45856eff3bf9b55c148d7efad00273bbae847460965ba
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
           ports:
             - containerPort: 8087
             - containerPort: 8187
@@ -2207,7 +2937,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8002/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/voxtral-mini-3b-2'
             - '--workload-metrics=http://127.0.0.1:8002/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-e8a714.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -2215,7 +2945,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=transcribe'
-            - '--usage-collector-endpoint=usage-collector.continuum-e8a714.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4319'
           readinessProbe:
@@ -2275,9 +3005,75 @@ spec:
         - name: vllm-pylock
           configMap:
             name: vllm-pylock
-        - name: vllm-patch
+        - name: vllm-patch-anthropic-usage-stream-patch
           configMap:
-            name: vllm-patch
+            name: vllm-patch-anthropic-usage-stream-patch
+        - name: vllm-patch-chat-template-glm-5-3-flash-jinja
+          configMap:
+            name: vllm-patch-chat-template-glm-5-3-flash-jinja
+        - name: vllm-patch-chat-template-glm-5-3-jinja
+          configMap:
+            name: vllm-patch-chat-template-glm-5-3-jinja
+        - name: vllm-patch-deepseek-logits-processor-py
+          configMap:
+            name: vllm-patch-deepseek-logits-processor-py
+        - name: vllm-patch-dump-input-anonymization-patch
+          configMap:
+            name: vllm-patch-dump-input-anonymization-patch
+        - name: vllm-patch-generation-config-patch
+          configMap:
+            name: vllm-patch-generation-config-patch
+        - name: vllm-patch-generation-config-voxtral-json
+          configMap:
+            name: vllm-patch-generation-config-voxtral-json
+        - name: vllm-patch-glm-logits-processor-py
+          configMap:
+            name: vllm-patch-glm-logits-processor-py
+        - name: vllm-patch-language-penalty-py
+          configMap:
+            name: vllm-patch-language-penalty-py
+        - name: vllm-patch-no-tools-tool-call-ban-patch
+          configMap:
+            name: vllm-patch-no-tools-tool-call-ban-patch
+        - name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+          configMap:
+            name: vllm-patch-preload-gpt-oss-120b-tokenizer-sh
+        - name: vllm-patch-repetition-detection-cap-patch
+          configMap:
+            name: vllm-patch-repetition-detection-cap-patch
+        - name: vllm-patch-restrict-vllm-network-py
+          configMap:
+            name: vllm-patch-restrict-vllm-network-py
+        - name: vllm-patch-sitecustomize-py
+          configMap:
+            name: vllm-patch-sitecustomize-py
+        - name: vllm-patch-skip-special-tokens-patch
+          configMap:
+            name: vllm-patch-skip-special-tokens-patch
+        - name: vllm-patch-slot-mapping-block-table-bounds-patch
+          configMap:
+            name: vllm-patch-slot-mapping-block-table-bounds-patch
+        - name: vllm-patch-sparse-indexer-empty-chunk-patch
+          configMap:
+            name: vllm-patch-sparse-indexer-empty-chunk-patch
+        - name: vllm-patch-structured-output-implicit-reasoning-end-patch
+          configMap:
+            name: vllm-patch-structured-output-implicit-reasoning-end-patch
+        - name: vllm-patch-transcriptions-patch
+          configMap:
+            name: vllm-patch-transcriptions-patch
+        - name: vllm-patch-transcriptions-stream-usage-patch
+          configMap:
+            name: vllm-patch-transcriptions-stream-usage-patch
+        - name: vllm-patch-voxtral-patch
+          configMap:
+            name: vllm-patch-voxtral-patch
+        - name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+          configMap:
+            name: vllm-patch-privatemode-stat-logger-privatemode-stat-logger-py
+        - name: vllm-patch-privatemode-stat-logger-pyproject-toml
+          configMap:
+            name: vllm-patch-privatemode-stat-logger-pyproject-toml
         - name: inference-proxy-whisper-large-v3-0-identity
           secret:
             secretName: inference-proxy-whisper-large-v3-0-identity-secret
@@ -2301,7 +3097,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: unstructured-api
-  namespace: continuum-e8a714
+  namespace: continuum-012cc6
   labels:
     app: unstructured-api
 spec:
@@ -2313,7 +3109,7 @@ spec:
     metadata:
       labels:
         app: unstructured-api
-        app.kubernetes.io/instance: 'e8a714'
+        app.kubernetes.io/instance: '012cc6'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -2370,7 +3166,7 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
         - name: inference-proxy-unstructured-api
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.61.0@sha256:687228cc72cc66fa5ca45856eff3bf9b55c148d7efad00273bbae847460965ba
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
           ports:
             - containerPort: 8085
           args:
@@ -2381,14 +3177,14 @@ spec:
             - --workload-reachability-url=http://127.0.0.1:8000/healthcheck
             - --workload-start-marker=/var/run/workload-marker/unstructured-api
             - --workload-tasks=unstructured
-            - --secret-svc-address=secret-service-internal.continuum-e8a714.svc.cluster.local
+            - --secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
             - '--identity-cert-path=/var/run/secrets/identity/tls.crt'
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
-            - '--usage-collector-endpoint=usage-collector.continuum-e8a714.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
           volumeMounts:
             - name: unstructured-api-identity
               mountPath: /var/run/secrets/identity
@@ -2423,17 +3219,17 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: coordinator
-  namespace: 'continuum-e8a714'
+  namespace: 'continuum-012cc6'
   labels:
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: coordinator
-  namespace: 'continuum-e8a714'
+  namespace: 'continuum-012cc6'
   labels:
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
 rules:
   - apiGroups:
       - ""
@@ -2456,9 +3252,9 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: coordinator
-  namespace: 'continuum-e8a714'
+  namespace: 'continuum-012cc6'
   labels:
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -2466,15 +3262,15 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: coordinator
-    namespace: "continuum-e8a714"
+    namespace: "continuum-012cc6"
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator
-  namespace: 'continuum-e8a714'
+  namespace: 'continuum-012cc6'
   labels:
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
 spec:
   ports:
     - name: userapi
@@ -2498,16 +3294,16 @@ spec:
     app.kubernetes.io/name: coordinator
     app.kubernetes.io/part-of: contrast
     contrast.edgeless.systems/pod-role: coordinator
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
   type: ClusterIP
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator-ready
-  namespace: 'continuum-e8a714'
+  namespace: 'continuum-012cc6'
   labels:
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
 spec:
   ports:
     - name: userapi
@@ -2530,7 +3326,7 @@ spec:
     app.kubernetes.io/name: coordinator
     app.kubernetes.io/part-of: contrast
     contrast.edgeless.systems/pod-role: coordinator
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
   type: ClusterIP
 ---
 apiVersion: apps/v1
@@ -2541,9 +3337,9 @@ metadata:
     app.kubernetes.io/name: coordinator
     app.kubernetes.io/part-of: contrast
     app.kubernetes.io/version: 1.26.0
-    app.kubernetes.io/instance: 'e8a714'
+    app.kubernetes.io/instance: '012cc6'
   name: coordinator
-  namespace: 'continuum-e8a714'
+  namespace: 'continuum-012cc6'
 spec:
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Delete
@@ -2563,7 +3359,7 @@ spec:
         app.kubernetes.io/name: coordinator
         app.kubernetes.io/part-of: contrast
         contrast.edgeless.systems/pod-role: coordinator
-        app.kubernetes.io/instance: 'e8a714'
+        app.kubernetes.io/instance: '012cc6'
         privatemode.edgeless.systems/environment: 'production'
     spec:
       affinity:

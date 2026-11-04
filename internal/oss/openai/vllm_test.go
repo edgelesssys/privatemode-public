@@ -58,10 +58,6 @@ func TestRequestMutationValidationStatus(t *testing.T) {
 			mutator: CacheSaltValidator(log),
 			body:    `{"cache_salt":"short"}`,
 		},
-		"stream options injector rejects invalid JSON": {
-			mutator: StreamUsageReportingInjector(log),
-			body:    `{"stream":true`,
-		},
 	}
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {

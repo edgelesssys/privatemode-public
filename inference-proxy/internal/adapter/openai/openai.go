@@ -16,6 +16,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/compat"
 	"github.com/edgelesssys/continuum/internal/oss/constants"
 	"github.com/edgelesssys/continuum/internal/oss/forwarder"
+	"github.com/edgelesssys/continuum/internal/oss/mutators"
 	"github.com/edgelesssys/continuum/internal/oss/openai"
 	"github.com/edgelesssys/continuum/internal/oss/usage"
 	"github.com/tidwall/gjson"
@@ -186,6 +187,7 @@ func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 		w, r,
 		forwarder.RequestMutatorChain(
 			validateAnonymousRequest,
+			mutators.StrictJSONValidator,
 			a.mutators.CacheSaltValidator,
 			a.mutators.LegacyCacheSaltHasher,
 			a.mutators.MediaContentValidator,

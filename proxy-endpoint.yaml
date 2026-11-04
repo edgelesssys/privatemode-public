@@ -3,22 +3,22 @@ kind: Deployment
 metadata:
   name: privatemode-proxy
   labels:
-    helm.sh/chart: privatemode-proxy-1.61.0
+    helm.sh/chart: privatemode-proxy-1.62.0
     app.kubernetes.io/name: privatemode-proxy
-    app.kubernetes.io/instance: continuum-application-continuum-e8a714
+    app.kubernetes.io/instance: continuum-application-continuum-012cc6
     app.kubernetes.io/managed-by: Helm
-  namespace: continuum-e8a714
+  namespace: continuum-012cc6
 spec:
   replicas: 3
   selector:
     matchLabels:
       app.kubernetes.io/name: privatemode-proxy
-      app.kubernetes.io/instance: continuum-application-continuum-e8a714
+      app.kubernetes.io/instance: continuum-application-continuum-012cc6
   template:
     metadata:
       labels:
         app.kubernetes.io/name: privatemode-proxy
-        app.kubernetes.io/instance: continuum-application-continuum-e8a714
+        app.kubernetes.io/instance: continuum-application-continuum-012cc6
         privatemode.edgeless.systems/environment: production
       annotations:
         contrast.edgeless.systems/skip-initializer: "true"
@@ -42,7 +42,7 @@ spec:
                 - NET_ADMIN
       containers:
         - name: privatemode-proxy
-          image: "ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.61.0@sha256:ec97e6a3cd4867bdedc0c928672926e1f15b15c3ec204534dffb9beb8dbf93df"
+          image: "ghcr.io/edgelesssys/privatemode/privatemode-proxy:v1.62.0@sha256:b2d564aa5f51dfc3cee60424108ca3de1ed0b5349d67e7eac7efe17e62d68d5b"
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
