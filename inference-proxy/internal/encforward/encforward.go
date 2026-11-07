@@ -29,6 +29,21 @@ func AuthenticatedHeaders(ctx context.Context) map[string]string {
 	return headers
 }
 
+// ClientVersion returns the authenticated client version after decryption, falling back
+// to the HTTP header only when the authenticated version is absent. It returns an error
+// if the HTTP header reports v1.63 or newer without an authenticated version.
+// TODO: remove the HTTP fallback once v1.63 is the minimum supported client version.
+func ClientVersion(r *http.Request) (string, error) {
+	if version, present := AuthenticatedHeaders(r.Context())[constants.PrivatemodeVersionHeader]; present {
+		return version, nil
+	}
+	version := r.Header.Get(constants.PrivatemodeVersionHeader)
+	if compat.AtLeastMajorMinor(version, 1, 63) {
+		return "", forwarder.NewError("", errors.New("missing authenticated client version"), http.StatusBadRequest)
+	}
+	return version, nil
+}
+
 // Forwarder forwards requests to the workload, either as plaintext or end-to-end encrypted.
 type Forwarder interface {
 	// ForwardPlain forwards the request and sends back the response without any encryption.
@@ -162,7 +177,10 @@ func (e *encForwarder) ForwardEncrypted(
 
 // validatePromptTokens checks the client's token estimate header against the decrypted body.
 func validatePromptTokens(r *http.Request) error {
-	clientVersion := r.Header.Get(constants.PrivatemodeVersionHeader)
+	clientVersion, err := ClientVersion(r)
+	if err != nil {
+		return err
+	}
 	isCompletion := slices.Contains(
 		[]string{constants.OpenAIChatCompletionsEndpoint, constants.OpenAILegacyCompletionsEndpoint, constants.AnthropicMessagesEndpoint},
 		r.URL.Path,

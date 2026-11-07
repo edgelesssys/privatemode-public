@@ -26,7 +26,8 @@ import (
 // Adapter implements an InferenceAdapter for OpenAI API.
 type Adapter struct {
 	*inference.Adapter
-	mutators openai.DefaultRequestMutators
+	mutators              openai.DefaultRequestMutators
+	legacyCacheSaltHasher forwarder.RequestMutator
 }
 
 // New creates a new InferenceAdapter for the OpenAI API.
@@ -37,8 +38,9 @@ func New(workloadTasks []string, secrets inference.SecretGetter, ocspStatusFile 
 	}
 
 	return &Adapter{
-		Adapter:  baseAdapter,
-		mutators: openai.GetDefaultRequestMutators(openai.RandomPromptCacheSalt, log),
+		Adapter:               baseAdapter,
+		mutators:              openai.GetDefaultRequestMutators(openai.RandomPromptCacheSalt, log),
+		legacyCacheSaltHasher: inference.LegacyCacheSaltHasher(log),
 	}, nil
 }
 
@@ -145,10 +147,27 @@ func (a *Adapter) forwardEmbeddingsRequest(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *Adapter) forwardTranscriptionsRequest(w http.ResponseWriter, r *http.Request) {
+	var durationMutation inference.MutationFunc
 	a.ForwardEncrypted(
 		w, r,
-		forwarder.RequestMutatorChain(inference.RejectAnonymousRequest, a.mutators.AudioStreamUsageReportingInjector),
-		legacyStringDurationMutation(r.Header.Get(constants.PrivatemodeVersionHeader)),
+		forwarder.RequestMutatorChain(
+			inference.RejectAnonymousRequest,
+			a.mutators.AudioStreamUsageReportingInjector,
+			func(req *http.Request) error {
+				clientVersion, err := encforward.ClientVersion(req)
+				if err != nil {
+					return err
+				}
+				durationMutation = legacyStringDurationMutation(clientVersion)
+				return nil
+			},
+		),
+		func(data []byte) ([]byte, error) {
+			if durationMutation == nil {
+				return data, nil
+			}
+			return durationMutation(data)
+		},
 		nil,
 		extractTranscriptionUsage,
 		extractTranscriptionUsage,
@@ -189,7 +208,7 @@ func (a *Adapter) forwardChatCompletionsRequest(w http.ResponseWriter, r *http.R
 			validateAnonymousRequest,
 			mutators.StrictJSONValidator,
 			a.mutators.CacheSaltValidator,
-			a.mutators.LegacyCacheSaltHasher,
+			a.legacyCacheSaltHasher,
 			a.mutators.MediaContentValidator,
 			a.mutators.StreamUsageReportingInjector,
 		),

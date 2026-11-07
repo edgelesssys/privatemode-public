@@ -3,6 +3,8 @@ package inference
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +33,36 @@ import (
 )
 
 const remoteResourceURLError = "Remote resource URLs are not supported. Provide the resource inline using a base64-encoded data URL."
+
+// LegacyCacheSaltHasher creates a [forwarder.RequestMutator] that replaces the cache salt of
+// clients before v1.58 with its base64url-encoded SHA-256 digest. They send standard base64 salts,
+// and vLLM (>= v0.30) rejects the roughly half of them that contain '/'.
+// TODO: drop this once the minimum client version is past v1.57.
+func LegacyCacheSaltHasher(log *slog.Logger) forwarder.RequestMutator {
+	hashSalt := forwarder.WithRequestMutation(func(httpBody string) (string, error) {
+		cacheSalt := gjson.Get(httpBody, "cache_salt")
+		if !cacheSalt.Exists() {
+			return httpBody, nil
+		}
+		digest := sha256.Sum256([]byte(cacheSalt.String()))
+		mutatedBody, err := sjson.Set(httpBody, "cache_salt", base64.URLEncoding.EncodeToString(digest[:]))
+		if err != nil {
+			return "", fmt.Errorf("hashing cache salt: %w", err)
+		}
+		return mutatedBody, nil
+	}, log)
+
+	return func(r *http.Request) error {
+		clientVersion, err := encforward.ClientVersion(r)
+		if err != nil {
+			return err
+		}
+		if compat.AtLeastMajorMinor(clientVersion, 1, 58) {
+			return nil
+		}
+		return hashSalt(r)
+	}
+}
 
 var ocspStatusMetrics = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "privatemode_nvidia_ocsp_status",
@@ -131,18 +163,20 @@ func (a *Adapter) verifyOCSP(r *http.Request, authenticatedHeaders map[string]st
 
 // requestOCSPPolicy parses the OCSP policy of the request.
 func (a *Adapter) requestOCSPPolicy(ctx context.Context, r *http.Request, authenticatedHeaders map[string]string) (*ocspheader.Header, error) {
-	// Authenticated metadata takes precedence over unauthenticated HTTP headers,
-	// including the client version used for legacy compatibility.
+	// Authenticated versions were introduced in v1.63; v1.61 and v1.62 only authenticate the policy.
+	// Clients without an authenticated version are treated as older than v1.63.
+	if compat.AtLeastMajorMinor(authenticatedHeaders[constants.PrivatemodeVersionHeader], 1, 63) {
+		if _, present := authenticatedHeaders[constants.PrivatemodeNvidiaOCSPPolicyHeader]; !present {
+			return nil, forwarder.NewError("", errors.New("missing authenticated OCSP policy"), http.StatusBadRequest)
+		}
+	}
+	// An authenticated policy takes precedence over legacy HTTP policy headers.
 	if policy, present := authenticatedHeaders[constants.PrivatemodeNvidiaOCSPPolicyHeader]; present {
 		parsed, err := ocspheader.Unmarshal(policy)
 		if err != nil {
 			return nil, forwarder.NewError("parsing authenticated OCSP policy", err, http.StatusBadRequest)
 		}
 		return parsed, nil
-	}
-	// At v1.61 clients must provide a policy in the authenticated headers of their encrypted request.
-	if compat.AtLeastMajorMinor(r.Header.Get(constants.PrivatemodeVersionHeader), 1, 61) {
-		return nil, forwarder.NewError("", errors.New("missing authenticated OCSP policy"), http.StatusBadRequest)
 	}
 
 	// Older clients either set dedicated HTTP headers, or omitted the policy

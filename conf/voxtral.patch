@@ -1,26 +1,18 @@
 diff --git a/vllm/entrypoints/speech_to_text/base/serving.py b/vllm/entrypoints/speech_to_text/base/serving.py
-index a52aa7b80f..27310ddeee 100644
+index 34b7e9c249..fc3f25276c 100644
 --- a/vllm/entrypoints/speech_to_text/base/serving.py
 +++ b/vllm/entrypoints/speech_to_text/base/serving.py
-@@ -29,13 +29,13 @@ from vllm.entrypoints.serve.engine.typing import SpeechToTextRequest
- from vllm.entrypoints.serve.utils.api_utils import get_max_tokens
- from vllm.entrypoints.serve.utils.request_logger import RequestLogger
+@@ -29,3 +29,3 @@ from vllm.entrypoints.serve.utils.request_logger import RequestLogger
  from vllm.exceptions import VLLMValidationError
 -from vllm.inputs import EncoderDecoderInput, EngineInput
 +from vllm.inputs import EncoderDecoderInput, EngineInput, PromptType, TokensPrompt
  from vllm.logger import init_logger
- from vllm.logprobs import FlatLogprobs, Logprob
- from vllm.model_executor.models import SupportsTranscription
- from vllm.multimodal.audio import get_audio_duration, resample_audio_pyav, split_audio
+@@ -36,3 +36,3 @@ from vllm.multimodal.media.audio import load_audio
  from vllm.outputs import RequestOutput
 -from vllm.renderers.inputs import DictPrompt, EncoderDecoderDictPrompt
 +from vllm.renderers.inputs import DictPrompt
  from vllm.renderers.inputs.preprocess import parse_enc_dec_prompt, parse_model_prompt
- from vllm.sampling_params import BeamSearchParams, SamplingParams
- from vllm.tokenizers import get_tokenizer
-@@ -172,6 +172,185 @@ def decode_audio(
-         raise ValueError("Invalid or unsupported audio file.") from exc
- 
+@@ -92,2 +92,181 @@ def asr_inter_chunk_separator(
  
 +def voxtralInitTokens(tokenizer: PreTrainedTokenizerBase) -> list[int]:
 +    VOXTRAL_TIMESTAMP = "<00:00.0>"
@@ -202,9 +194,7 @@ index a52aa7b80f..27310ddeee 100644
 +
 +
  class SpeechToTextBaseServing(GenerateBaseServing):
-     """Base class for speech-to-text operations like transcription and
-     translation."""
-@@ -377,8 +556,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -302,8 +481,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
  
              parsed_prompt: DictPrompt
              if request.response_format == "verbose_json":
@@ -214,7 +204,7 @@ index a52aa7b80f..27310ddeee 100644
              else:
                  parsed_prompt = parse_model_prompt(self.model_config, prompt)
  
-@@ -388,8 +566,20 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -313,8 +491,20 @@ class SpeechToTextBaseServing(GenerateBaseServing):
  
          return engine_inputs, duration, chunk_start_offsets
  
@@ -237,7 +227,7 @@ index a52aa7b80f..27310ddeee 100644
  
          if not (isinstance(dec_prompt, dict) and "prompt" in dec_prompt):
              raise VLLMValidationError(
-@@ -402,7 +592,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -327,7 +517,7 @@ class SpeechToTextBaseServing(GenerateBaseServing):
              "<|notimestamps|>", "<|0.00|>"
          )
  
@@ -246,7 +236,7 @@ index a52aa7b80f..27310ddeee 100644
  
      @staticmethod
      def _get_decoder_prompt_len(engine_inputs: list[EngineInput]) -> int:
-@@ -443,6 +633,69 @@ class SpeechToTextBaseServing(GenerateBaseServing):
+@@ -368,6 +558,69 @@ class SpeechToTextBaseServing(GenerateBaseServing):
          Note: No_speech_prob field is not supported
          in this implementation and will be None. See docs for details.
          """

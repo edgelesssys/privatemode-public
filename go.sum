@@ -178,8 +178,8 @@ github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkp
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/dylibso/observe-sdk/go v0.0.0-20240819160327-2d926c5d788a h1:UwSIFv5g5lIvbGgtf3tVwC7Ky9rmMFBp0RMs+6f6YqE=
 github.com/dylibso/observe-sdk/go v0.0.0-20240819160327-2d926c5d788a/go.mod h1:C8DzXehI4zAbrdlbtOByKX6pfivJTBiV9Jjqv56Yd9Q=
-github.com/edgelesssys/contrast v1.26.0 h1:2oBcwZSydMGlyq436kCBYz3Xj+21KwQIbahtKY/bHrg=
-github.com/edgelesssys/contrast v1.26.0/go.mod h1:o2FXL1VeaJ5TS+yCVKUI7/b8dE5MKZjBf1Z+4ruLcbs=
+github.com/edgelesssys/contrast v1.26.1 h1:IemzzUP47V/+2vgta3clzqQmPW/Gpg5IUTnNiNaejtM=
+github.com/edgelesssys/contrast v1.26.1/go.mod h1:o2FXL1VeaJ5TS+yCVKUI7/b8dE5MKZjBf1Z+4ruLcbs=
 github.com/edgelesssys/go-sev-guest v0.0.0-20261013132829-7a9ace10598e h1:5SFAZ8YbRNyQydHjHe/2qlrW6/efaQhXeUfSCjReXbQ=
 github.com/edgelesssys/go-sev-guest v0.0.0-20261013132829-7a9ace10598e/go.mod h1:SK9vW+uyfuzYdVN0m8BShL3OQCtXZe/JPF7ZkpD3760=
 github.com/edgelesssys/go-tdx-guest v0.0.0-20261013140315-ce43fe5589cd h1:6vFdIP4C0KZRR6Rq7xtzjQx8rMu9/UKrYY/+5xwgavw=

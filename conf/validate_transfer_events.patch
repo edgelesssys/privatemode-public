@@ -1,0 +1,11 @@
+--- a/vllm/v1/kv_offload/cpu/gpu_worker.py
++++ b/vllm/v1/kv_offload/cpu/gpu_worker.py
+@@ -737,6 +737,8 @@
+     def get_finished(self) -> list[TransferResult]:
+         results: list[TransferResult] = []
+         while self._transfers and self._transfers[0].end_event.query():
++            if not self._transfers[0].start_event.query():
++                break
+             transfer = self._transfers.popleft()
+             transfer_time = (
+                 transfer.start_event.elapsed_time(transfer.end_event) * 1e-3

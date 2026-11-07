@@ -186,6 +186,7 @@ func TestClientOCSPPolicy(t *testing.T) {
 		if !assert.NoError(t, err) {
 			return
 		}
+		assert.Equal(t, constants.Version(), headers[constants.PrivatemodeVersionHeader])
 		policy, err := ocspheader.Unmarshal(headers[constants.PrivatemodeNvidiaOCSPPolicyHeader])
 		if !assert.NoError(t, err) {
 			return

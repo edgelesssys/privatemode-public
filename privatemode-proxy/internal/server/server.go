@@ -291,6 +291,7 @@ func (s *Server) forwardEncrypted(
 		if err != nil {
 			return fmt.Errorf("generating OCSP policy: %w", err)
 		}
+		authenticatedHeaders[constants.PrivatemodeVersionHeader] = constants.Version()
 		if err = ce.EncryptRequest(req, authenticatedHeaders); err != nil {
 			return fmt.Errorf("encrypting request: %w", err)
 		}

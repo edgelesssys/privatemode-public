@@ -451,7 +451,10 @@ func (c *Client) doEncryptedAPIRequest(req *http.Request) (*forwarder.StreamingR
 	if err != nil {
 		return nil, fmt.Errorf("marshaling NVIDIA OCSP policy: %w", err)
 	}
-	err = ce.EncryptRequest(req, map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: policy})
+	err = ce.EncryptRequest(req, map[string]string{
+		constants.PrivatemodeNvidiaOCSPPolicyHeader: policy,
+		constants.PrivatemodeVersionHeader:          constants.Version(),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("encrypting request: %w", err)
 	}

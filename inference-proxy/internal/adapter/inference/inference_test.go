@@ -2,6 +2,8 @@ package inference
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,6 +27,51 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestLegacyCacheSaltHasher(t *testing.T) {
+	salt := "Jp3c/Hn9Q2tWkx8aVb4ZrL6mYe0sTfUg1iOqP7dNwE5="
+	digest := sha256.Sum256([]byte(salt))
+	hashed := base64.URLEncoding.EncodeToString(digest[:])
+
+	testCases := map[string]struct {
+		clientVersion string
+		body          string
+		wantBody      string
+	}{
+		"client before v1.58 gets the salt hashed": {
+			clientVersion: "v1.57.2",
+			body:          `{"model":"model","cache_salt":"` + salt + `"}`,
+			wantBody:      `{"model":"model","cache_salt":"` + hashed + `"}`,
+		},
+		"client v1.58 keeps its salt": {
+			clientVersion: "v1.58.0",
+			body:          `{"model":"model","cache_salt":"` + salt + `"}`,
+			wantBody:      `{"model":"model","cache_salt":"` + salt + `"}`,
+		},
+		"body without salt is unchanged": {
+			clientVersion: "v1.57.2",
+			body:          `{"model":"model"}`,
+			wantBody:      `{"model":"model"}`,
+		},
+		"empty body is unchanged": {
+			clientVersion: "v1.57.2",
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(tc.body))
+			req.Header.Set(constants.PrivatemodeVersionHeader, tc.clientVersion)
+
+			require.NoError(LegacyCacheSaltHasher(slog.Default())(req))
+
+			after, err := io.ReadAll(req.Body)
+			require.NoError(err)
+			assert.Equal(t, tc.wantBody, string(after))
+		})
+	}
+}
 
 func TestForwardEncryptedRemoteResourceURLError(t *testing.T) {
 	const domainError = `{"error":{"message":"The URL must be from one of the allowed domains: ['/']. Input URL domain: example.com","type":"BadRequestError","param":null,"code":400},"request_id":"test"}`
@@ -314,12 +361,19 @@ func TestAuthenticatedOCSPPolicy(t *testing.T) {
 		"v1.60 prerelease uses legacy policy":              {clientVersion: "v1.60.0-pre", outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
 		"missing version uses legacy policy":               {outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
 		"invalid version uses legacy policy":               {clientVersion: "invalid", outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
-		"v1.61 requires authenticated policy":              {clientVersion: "v1.61.0", gpu: ocsp.StatusGood, code: http.StatusBadRequest},
-		"v1.61 cannot use legacy policy":                   {clientVersion: "v1.61.0", outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusBadRequest},
-		"short v1.61 requires authenticated policy":        {clientVersion: "v1.61", gpu: ocsp.StatusGood, code: http.StatusBadRequest},
-		"v1.61 prerelease requires authenticated policy":   {clientVersion: "v1.61.0-pre", gpu: ocsp.StatusGood, code: http.StatusBadRequest},
-		"newer minor requires authenticated policy":        {clientVersion: "v1.62.0", gpu: ocsp.StatusGood, code: http.StatusBadRequest},
-		"newer major requires authenticated policy":        {clientVersion: "v2.0.0", gpu: ocsp.StatusGood, code: http.StatusBadRequest},
+		"outer v1.61 without version defaults to good":     {clientVersion: "v1.61.0", gpu: ocsp.StatusGood, code: http.StatusOK},
+		"outer v1.61 without version uses legacy policy":   {clientVersion: "v1.61.0", outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"outer v1.62 without version defaults to good":     {clientVersion: "v1.62.0", gpu: ocsp.StatusGood, code: http.StatusOK},
+		"v1.62 authenticates policy without version":       {clientVersion: "v1.62.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: unknown}, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"short v1.63 requires authenticated policy":        {headers: map[string]string{constants.PrivatemodeVersionHeader: "v1.63"}, gpu: ocsp.StatusGood, code: http.StatusBadRequest},
+		"newer minor requires authenticated policy":        {headers: map[string]string{constants.PrivatemodeVersionHeader: "v1.64.0"}, gpu: ocsp.StatusGood, code: http.StatusBadRequest},
+		"outer newer major requires authenticated version": {clientVersion: "v2.0.0", outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusBadRequest},
+		"authenticated version prevents downgrade":         {clientVersion: "v1.62.0", headers: map[string]string{constants.PrivatemodeVersionHeader: "v1.63.0"}, outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusBadRequest},
+		"authenticated version without outer version":      {headers: map[string]string{constants.PrivatemodeVersionHeader: "v1.63.0"}, gpu: ocsp.StatusGood, code: http.StatusBadRequest},
+		"authenticated prerelease requires policy":         {headers: map[string]string{constants.PrivatemodeVersionHeader: "v1.63.0-pre"}, gpu: ocsp.StatusGood, code: http.StatusBadRequest},
+		"authenticated newer major requires policy":        {headers: map[string]string{constants.PrivatemodeVersionHeader: "v2.0.0"}, gpu: ocsp.StatusGood, code: http.StatusBadRequest},
+		"authenticated old version overrides outer":        {clientVersion: "v1.63.0", headers: map[string]string{constants.PrivatemodeVersionHeader: "v1.62.9"}, outerPolicy: unknown, outerMAC: legacyMAC, gpu: ocsp.StatusUnknown, code: http.StatusOK},
+		"authenticated version and policy":                 {clientVersion: "v1.62.0", headers: map[string]string{constants.PrivatemodeVersionHeader: "v1.63.0", constants.PrivatemodeNvidiaOCSPPolicyHeader: unknown}, gpu: ocsp.StatusUnknown, code: http.StatusOK},
 		"good only default":                                {gpu: ocsp.StatusGood, code: http.StatusOK},
 		"default rejects unknown":                          {gpu: ocsp.StatusUnknown, code: http.StatusInternalServerError},
 		"authenticated unknown":                            {clientVersion: "v1.61.0", headers: map[string]string{constants.PrivatemodeNvidiaOCSPPolicyHeader: unknown}, gpu: ocsp.StatusUnknown, code: http.StatusOK},

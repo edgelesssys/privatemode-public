@@ -445,6 +445,7 @@ func TestInvalidSecretRetry(t *testing.T) {
 		if !assert.NoError(err) {
 			return
 		}
+		assert.Equal(constants.Version(), headers[constants.PrivatemodeVersionHeader])
 		policy, err := ocspheader.Unmarshal(headers[constants.PrivatemodeNvidiaOCSPPolicyHeader])
 		if !assert.NoError(err) {
 			return
@@ -952,6 +953,7 @@ func TestInferenceHeaders(t *testing.T) {
 				if !assert.NoError(err) {
 					return
 				}
+				assert.Equal(constants.Version(), headers[constants.PrivatemodeVersionHeader])
 				policy, err := ocspheader.Unmarshal(headers[constants.PrivatemodeNvidiaOCSPPolicyHeader])
 				if !assert.NoError(err) {
 					return

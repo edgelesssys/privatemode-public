@@ -38,7 +38,7 @@ func New(workloadTasks []string, secrets inference.SecretGetter, ocspStatusFile 
 	return &Adapter{
 		Adapter:               baseAdapter,
 		cacheSaltValidator:    openai.CacheSaltValidator(log),
-		legacyCacheSaltHasher: openai.LegacyCacheSaltHasher(log),
+		legacyCacheSaltHasher: inference.LegacyCacheSaltHasher(log),
 		mediaContentValidator: anthropic.MediaContentValidator(log),
 	}, nil
 }

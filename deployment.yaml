@@ -2,9 +2,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: secret-service
-  namespace: continuum-012cc6
+  namespace: continuum-a225c8
   labels:
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
 spec:
   replicas: 3
   serviceName: secret-service-headless
@@ -15,14 +15,14 @@ spec:
     metadata:
       labels:
         app: secret-service
-        app.kubernetes.io/instance: '012cc6'
+        app.kubernetes.io/instance: 'a225c8'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
     spec:
       runtimeClassName: contrast-cc
       containers:
         - name: secret-service
-          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.62.0@sha256:d1273ce2d400dd9ab63897839734270e2615b2c1c973bc062417e9abf1171f50'
+          image: 'ghcr.io/edgelesssys/privatemode/secret-service:v1.63.0@sha256:26c797bbde03151b1ae29fec1618dc74b67ba5a7b08f0bc1f20a9d90df06ec7b'
           resources:
             requests:
               memory: 2Gi
@@ -32,7 +32,7 @@ spec:
           args:
             - |
               exec /bin/secret-service \
-                --k8s-namespace=continuum-012cc6 \
+                --k8s-namespace=continuum-a225c8 \
                 $([ "${HOSTNAME##*-}" = "0" ] && echo "--may-bootstrap") \
                 --etcd-server-cert=/contrast/tls-config/certChain.pem \
                 --etcd-server-key=/contrast/tls-config/key.pem \
@@ -66,10 +66,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-deepseek-ocr-2
-  namespace: continuum-012cc6
+  namespace: continuum-a225c8
   labels:
     app: workload-deepseek-ocr-2
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
 spec:
   selector:
     matchLabels:
@@ -78,7 +78,7 @@ spec:
     metadata:
       labels:
         app: workload-deepseek-ocr-2
-        app.kubernetes.io/instance: '012cc6'
+        app.kubernetes.io/instance: 'a225c8'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -91,7 +91,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-snp-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.62.0@sha256:5fcfe330f423e8affe61826875dd046ee31aa69905dc90a9b3434f9ea9042869
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.63.0@sha256:55561e652ff9672f7a9304592a0ea3a9478ef0acc6a33243cc5697e76b95256a
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -110,7 +110,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.62.0@sha256:d11ffc5803e3038732ae028dfbba0a2e6891d182c1e8babd7eb673fc11a24969
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.63.0@sha256:f1b67d1d22246ffcf76c5b4379a4ff2a6b340f679e64c030bf84981f296d8da8
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -127,7 +127,17 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-deepseek-ocr-2-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.63.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # Disable core dumps in the pod's guest kernel. The systemd collector
+              # can exhaust guest memory, and piped core dumps ignore ulimit -c.
+              echo 0 > /proc/sys/kernel/core_uses_pid
+              echo > /proc/sys/kernel/core_pattern
+              exec /bin/disk-mounter "$@"
+            - _
           args:
             - 'deepseek-ocr-2'
             - '0'
@@ -342,11 +352,14 @@ spec:
             - name: vllm-patch-structured-output-implicit-reasoning-end-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
               readOnly: true
-            - name: vllm-patch-transcriptions-patch
-              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+            - name: vllm-patch-torchcodec-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-torchcodec-patch
               readOnly: true
             - name: vllm-patch-transcriptions-stream-usage-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-validate-transfer-events-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-validate-transfer-events-patch
               readOnly: true
             - name: vllm-patch-voxtral-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
@@ -366,7 +379,7 @@ spec:
               memory: 64Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-deepseek-ocr-2-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.63.0@sha256:f7c2b213a0bb34b1289bf2c3a18bcc44f241ae622c961c36bc44d13820d63f92
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -382,7 +395,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/deepseek-ocr-2-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-a225c8.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -390,7 +403,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,vision'
-            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-a225c8.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -504,12 +517,15 @@ spec:
         - name: vllm-patch-structured-output-implicit-reasoning-end-patch
           configMap:
             name: vllm-patch-structured-output-implicit-reasoning-end-patch
-        - name: vllm-patch-transcriptions-patch
+        - name: vllm-patch-torchcodec-patch
           configMap:
-            name: vllm-patch-transcriptions-patch
+            name: vllm-patch-torchcodec-patch
         - name: vllm-patch-transcriptions-stream-usage-patch
           configMap:
             name: vllm-patch-transcriptions-stream-usage-patch
+        - name: vllm-patch-validate-transfer-events-patch
+          configMap:
+            name: vllm-patch-validate-transfer-events-patch
         - name: vllm-patch-voxtral-patch
           configMap:
             name: vllm-patch-voxtral-patch
@@ -530,10 +546,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-glm-5-3
-  namespace: continuum-012cc6
+  namespace: continuum-a225c8
   labels:
     app: workload-glm-5-3
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
 spec:
   selector:
     matchLabels:
@@ -542,7 +558,7 @@ spec:
     metadata:
       labels:
         app: workload-glm-5-3
-        app.kubernetes.io/instance: '012cc6'
+        app.kubernetes.io/instance: 'a225c8'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -555,7 +571,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-tdx-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.62.0@sha256:5fcfe330f423e8affe61826875dd046ee31aa69905dc90a9b3434f9ea9042869
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.63.0@sha256:55561e652ff9672f7a9304592a0ea3a9478ef0acc6a33243cc5697e76b95256a
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -574,7 +590,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.62.0@sha256:d11ffc5803e3038732ae028dfbba0a2e6891d182c1e8babd7eb673fc11a24969
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.63.0@sha256:f1b67d1d22246ffcf76c5b4379a4ff2a6b340f679e64c030bf84981f296d8da8
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -591,11 +607,16 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-glm-5-3-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.63.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
           command:
             - /bin/sh
             - -ec
             - |
+              # Disable core dumps in the pod's guest kernel. The systemd collector
+              # can exhaust guest memory, and piped core dumps ignore ulimit -c.
+              echo 0 > /proc/sys/kernel/core_uses_pid
+              echo > /proc/sys/kernel/core_pattern
+              # Parallelism can cause NV_ERR_NO_MEMORY in the Nvidia driver.
               echo 2000000 > /proc/sys/vm/min_free_kbytes
               exec /bin/disk-mounter "$@"
             - _
@@ -629,6 +650,7 @@ spec:
                 - SETUID
                 - SETGID
                 - SETPCAP
+                - SYS_ADMIN
           readinessProbe:
             httpGet:
               path: /workload-readyz
@@ -671,6 +693,8 @@ spec:
               value: "-2.5"
             - name: VLLM_FLASHINFER_WORKSPACE_BUFFER_SIZE
               value: "3221225472"
+            - name: VLLM_KV_CACHE_LAYOUT
+              value: "BLHNC"
             - name: VLLM_MEM_POLL_SECONDS
               value: "60"
             - name: VLLM_MEM_POLL_SNAPSHOT
@@ -689,6 +713,8 @@ spec:
             - /bin/bash
             - -ec
             - |
+              # Resize the guest tmpfs before allocating any KV offload buffers.
+              mount -o remount,size=202G /dev/shm
               # Publish a fresh token for the inference-proxy restart detection.
               cat /proc/sys/kernel/random/uuid > '/var/run/workload-marker/glm-5-3-0.tmp'
               mv '/var/run/workload-marker/glm-5-3-0.tmp' '/var/run/workload-marker/glm-5-3-0'
@@ -742,6 +768,10 @@ spec:
               install -D -m 644 /untrusted-vllm-patch/vllm-patch-no-tools-tool-call-ban-patch/no_tools_tool_call_ban.patch /vllm-workspace/no_tools_tool_call_ban.patch
               if [ $(sha256sum /vllm-workspace/no_tools_tool_call_ban.patch | cut -d ' ' -f 1) != '9641d586775ce8fff40186d77516ccd952a7cc267e8846f6d0f65c27c71cde65' ]; then echo no_tools_tool_call_ban.patch hash mismatch: $(sha256sum /vllm-workspace/no_tools_tool_call_ban.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/no_tools_tool_call_ban.patch
+              echo "Installing validate_transfer_events.patch"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-validate-transfer-events-patch/validate_transfer_events.patch /vllm-workspace/validate_transfer_events.patch
+              if [ $(sha256sum /vllm-workspace/validate_transfer_events.patch | cut -d ' ' -f 1) != '7a2c8007e1a67ffb557eddd76bcfc3d7fd690752bd6aad0609ede77ddbdc483f' ]; then echo validate_transfer_events.patch hash mismatch: $(sha256sum /vllm-workspace/validate_transfer_events.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/validate_transfer_events.patch
               # --no-build-isolation builds without a venv using setuptools.
               # --offline verifies the declared dependencies are present without using network.
               uv pip install --system --no-build-isolation --offline /vllm-workspace/privatemode-stat-logger
@@ -762,6 +792,8 @@ spec:
             - '--tensor-parallel-size=4'
             - '--gpu-memory-utilization=0.1'
             - '--kv-cache-memory-bytes=45g'
+            - '--kv-offloading-size=200'
+            - '--kv-offloading-backend=native'
             - '--max-num-seqs=500'
             - '--max-num-batched-tokens=8192'
             - '--max-model-len=1048576'
@@ -865,11 +897,14 @@ spec:
             - name: vllm-patch-structured-output-implicit-reasoning-end-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
               readOnly: true
-            - name: vllm-patch-transcriptions-patch
-              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+            - name: vllm-patch-torchcodec-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-torchcodec-patch
               readOnly: true
             - name: vllm-patch-transcriptions-stream-usage-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-validate-transfer-events-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-validate-transfer-events-patch
               readOnly: true
             - name: vllm-patch-voxtral-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
@@ -883,13 +918,13 @@ spec:
           resources:
             requests:
               cpu: "7"
-              memory: 120Gi
+              memory: 320Gi
             limits:
               cpu: "7"
-              memory: 120Gi
+              memory: 320Gi
               "nvidia.com/GB100_B200": 4
         - name: inference-proxy-glm-5-3-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.63.0@sha256:f7c2b213a0bb34b1289bf2c3a18bcc44f241ae622c961c36bc44d13820d63f92
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -905,7 +940,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/glm-5-3-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-a225c8.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -913,7 +948,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling'
-            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-a225c8.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -1027,12 +1062,15 @@ spec:
         - name: vllm-patch-structured-output-implicit-reasoning-end-patch
           configMap:
             name: vllm-patch-structured-output-implicit-reasoning-end-patch
-        - name: vllm-patch-transcriptions-patch
+        - name: vllm-patch-torchcodec-patch
           configMap:
-            name: vllm-patch-transcriptions-patch
+            name: vllm-patch-torchcodec-patch
         - name: vllm-patch-transcriptions-stream-usage-patch
           configMap:
             name: vllm-patch-transcriptions-stream-usage-patch
+        - name: vllm-patch-validate-transfer-events-patch
+          configMap:
+            name: vllm-patch-validate-transfer-events-patch
         - name: vllm-patch-voxtral-patch
           configMap:
             name: vllm-patch-voxtral-patch
@@ -1053,10 +1091,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-glm-5-3-flash
-  namespace: continuum-012cc6
+  namespace: continuum-a225c8
   labels:
     app: workload-glm-5-3-flash
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
 spec:
   selector:
     matchLabels:
@@ -1065,7 +1103,7 @@ spec:
     metadata:
       labels:
         app: workload-glm-5-3-flash
-        app.kubernetes.io/instance: '012cc6'
+        app.kubernetes.io/instance: 'a225c8'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -1078,7 +1116,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-tdx-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.62.0@sha256:5fcfe330f423e8affe61826875dd046ee31aa69905dc90a9b3434f9ea9042869
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.63.0@sha256:55561e652ff9672f7a9304592a0ea3a9478ef0acc6a33243cc5697e76b95256a
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -1097,7 +1135,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.62.0@sha256:d11ffc5803e3038732ae028dfbba0a2e6891d182c1e8babd7eb673fc11a24969
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.63.0@sha256:f1b67d1d22246ffcf76c5b4379a4ff2a6b340f679e64c030bf84981f296d8da8
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -1114,11 +1152,16 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-glm-5-3-flash-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.63.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
           command:
             - /bin/sh
             - -ec
             - |
+              # Disable core dumps in the pod's guest kernel. The systemd collector
+              # can exhaust guest memory, and piped core dumps ignore ulimit -c.
+              echo 0 > /proc/sys/kernel/core_uses_pid
+              echo > /proc/sys/kernel/core_pattern
+              # Parallelism can cause NV_ERR_NO_MEMORY in the Nvidia driver.
               echo 2000000 > /proc/sys/vm/min_free_kbytes
               exec /bin/disk-mounter "$@"
             - _
@@ -1152,6 +1195,7 @@ spec:
                 - SETUID
                 - SETGID
                 - SETPCAP
+                - SYS_ADMIN
           readinessProbe:
             httpGet:
               path: /workload-readyz
@@ -1192,6 +1236,8 @@ spec:
               value: 'http://127.0.0.1:8285/SubmitStatsEvents'
             - name: LANGUAGE_PENALTY_LOGIT_BIAS
               value: "-2.5"
+            - name: VLLM_KV_CACHE_LAYOUT
+              value: "LBHNC"
             - name: VLLM_MEM_POLL_SECONDS
               value: "60"
             - name: VLLM_MEM_POLL_SNAPSHOT
@@ -1208,6 +1254,8 @@ spec:
             - /bin/bash
             - -ec
             - |
+              # Resize the guest tmpfs before allocating any KV offload buffers.
+              mount -o remount,size=202G /dev/shm
               # Publish a fresh token for the inference-proxy restart detection.
               cat /proc/sys/kernel/random/uuid > '/var/run/workload-marker/glm-5-3-flash-0.tmp'
               mv '/var/run/workload-marker/glm-5-3-flash-0.tmp' '/var/run/workload-marker/glm-5-3-flash-0'
@@ -1265,6 +1313,10 @@ spec:
               install -D -m 644 /untrusted-vllm-patch/vllm-patch-sparse-indexer-empty-chunk-patch/sparse_indexer_empty_chunk.patch /vllm-workspace/sparse_indexer_empty_chunk.patch
               if [ $(sha256sum /vllm-workspace/sparse_indexer_empty_chunk.patch | cut -d ' ' -f 1) != '0cda8d349cd59465842e8c77e1910f2f3fe78978b76415d33de9fecb5122e16c' ]; then echo sparse_indexer_empty_chunk.patch hash mismatch: $(sha256sum /vllm-workspace/sparse_indexer_empty_chunk.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/sparse_indexer_empty_chunk.patch
+              echo "Installing validate_transfer_events.patch"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-validate-transfer-events-patch/validate_transfer_events.patch /vllm-workspace/validate_transfer_events.patch
+              if [ $(sha256sum /vllm-workspace/validate_transfer_events.patch | cut -d ' ' -f 1) != '7a2c8007e1a67ffb557eddd76bcfc3d7fd690752bd6aad0609ede77ddbdc483f' ]; then echo validate_transfer_events.patch hash mismatch: $(sha256sum /vllm-workspace/validate_transfer_events.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/validate_transfer_events.patch
               # --no-build-isolation builds without a venv using setuptools.
               # --offline verifies the declared dependencies are present without using network.
               uv pip install --system --no-build-isolation --offline /vllm-workspace/privatemode-stat-logger
@@ -1285,6 +1337,8 @@ spec:
             - '--tensor-parallel-size=2'
             - '--gpu-memory-utilization=0.1'
             - '--kv-cache-memory-bytes=68g'
+            - '--kv-offloading-size=200'
+            - '--kv-offloading-backend=native'
             - '--max-num-seqs=400'
             - '--max-model-len=1048576'
             - '--chat-template=/vllm-workspace/chat_template_glm-5.3-flash.jinja'
@@ -1384,11 +1438,14 @@ spec:
             - name: vllm-patch-structured-output-implicit-reasoning-end-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
               readOnly: true
-            - name: vllm-patch-transcriptions-patch
-              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+            - name: vllm-patch-torchcodec-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-torchcodec-patch
               readOnly: true
             - name: vllm-patch-transcriptions-stream-usage-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-validate-transfer-events-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-validate-transfer-events-patch
               readOnly: true
             - name: vllm-patch-voxtral-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
@@ -1402,13 +1459,13 @@ spec:
           resources:
             requests:
               cpu: "7"
-              memory: 120Gi
+              memory: 320Gi
             limits:
               cpu: "7"
-              memory: 120Gi
+              memory: 320Gi
               "nvidia.com/GB100_B200": 2
         - name: inference-proxy-glm-5-3-flash-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.63.0@sha256:f7c2b213a0bb34b1289bf2c3a18bcc44f241ae622c961c36bc44d13820d63f92
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -1424,7 +1481,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/glm-5-3-flash-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-a225c8.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1432,7 +1489,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling,vision'
-            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-a225c8.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -1546,12 +1603,15 @@ spec:
         - name: vllm-patch-structured-output-implicit-reasoning-end-patch
           configMap:
             name: vllm-patch-structured-output-implicit-reasoning-end-patch
-        - name: vllm-patch-transcriptions-patch
+        - name: vllm-patch-torchcodec-patch
           configMap:
-            name: vllm-patch-transcriptions-patch
+            name: vllm-patch-torchcodec-patch
         - name: vllm-patch-transcriptions-stream-usage-patch
           configMap:
             name: vllm-patch-transcriptions-stream-usage-patch
+        - name: vllm-patch-validate-transfer-events-patch
+          configMap:
+            name: vllm-patch-validate-transfer-events-patch
         - name: vllm-patch-voxtral-patch
           configMap:
             name: vllm-patch-voxtral-patch
@@ -1572,10 +1632,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-gpt-oss-120b
-  namespace: continuum-012cc6
+  namespace: continuum-a225c8
   labels:
     app: workload-gpt-oss-120b
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
 spec:
   selector:
     matchLabels:
@@ -1584,7 +1644,7 @@ spec:
     metadata:
       labels:
         app: workload-gpt-oss-120b
-        app.kubernetes.io/instance: '012cc6'
+        app.kubernetes.io/instance: 'a225c8'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -1597,7 +1657,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-snp-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.62.0@sha256:5fcfe330f423e8affe61826875dd046ee31aa69905dc90a9b3434f9ea9042869
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.63.0@sha256:55561e652ff9672f7a9304592a0ea3a9478ef0acc6a33243cc5697e76b95256a
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -1616,7 +1676,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.62.0@sha256:d11ffc5803e3038732ae028dfbba0a2e6891d182c1e8babd7eb673fc11a24969
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.63.0@sha256:f1b67d1d22246ffcf76c5b4379a4ff2a6b340f679e64c030bf84981f296d8da8
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -1633,7 +1693,17 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-gpt-oss-120b-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.63.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # Disable core dumps in the pod's guest kernel. The systemd collector
+              # can exhaust guest memory, and piped core dumps ignore ulimit -c.
+              echo 0 > /proc/sys/kernel/core_uses_pid
+              echo > /proc/sys/kernel/core_pattern
+              exec /bin/disk-mounter "$@"
+            - _
           args:
             - 'gpt-oss-120b'
             - '0'
@@ -1664,6 +1734,7 @@ spec:
                 - SETUID
                 - SETGID
                 - SETPCAP
+                - SYS_ADMIN
           readinessProbe:
             httpGet:
               path: /workload-readyz
@@ -1716,6 +1787,8 @@ spec:
             - /bin/bash
             - -ec
             - |
+              # Resize the guest tmpfs before allocating any KV offload buffers.
+              mount -o remount,size=82G /dev/shm
               # Publish a fresh token for the inference-proxy restart detection.
               cat /proc/sys/kernel/random/uuid > '/var/run/workload-marker/gpt-oss-120b-0.tmp'
               mv '/var/run/workload-marker/gpt-oss-120b-0.tmp' '/var/run/workload-marker/gpt-oss-120b-0'
@@ -1772,6 +1845,8 @@ spec:
             - '--mm-hasher-algorithm=sha256'
             - '--gpu-memory-utilization=0.1'
             - '--kv-cache-memory-bytes=8.85g'
+            - '--kv-offloading-size=80'
+            - '--kv-offloading-backend=native'
             - '--max-num-seqs=256'
             - '--max-model-len=131072'
             - '--enable-auto-tool-choice'
@@ -1856,11 +1931,14 @@ spec:
             - name: vllm-patch-structured-output-implicit-reasoning-end-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
               readOnly: true
-            - name: vllm-patch-transcriptions-patch
-              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+            - name: vllm-patch-torchcodec-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-torchcodec-patch
               readOnly: true
             - name: vllm-patch-transcriptions-stream-usage-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-validate-transfer-events-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-validate-transfer-events-patch
               readOnly: true
             - name: vllm-patch-voxtral-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
@@ -1874,13 +1952,13 @@ spec:
           resources:
             requests:
               cpu: "3"
-              memory: 64Gi
+              memory: 144Gi
             limits:
               cpu: "3"
-              memory: 64Gi
+              memory: 144Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-gpt-oss-120b-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.63.0@sha256:f7c2b213a0bb34b1289bf2c3a18bcc44f241ae622c961c36bc44d13820d63f92
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -1896,7 +1974,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/gpt-oss-120b-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-a225c8.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -1904,7 +1982,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=generate,tool_calling'
-            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-a225c8.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -2018,12 +2096,15 @@ spec:
         - name: vllm-patch-structured-output-implicit-reasoning-end-patch
           configMap:
             name: vllm-patch-structured-output-implicit-reasoning-end-patch
-        - name: vllm-patch-transcriptions-patch
+        - name: vllm-patch-torchcodec-patch
           configMap:
-            name: vllm-patch-transcriptions-patch
+            name: vllm-patch-torchcodec-patch
         - name: vllm-patch-transcriptions-stream-usage-patch
           configMap:
             name: vllm-patch-transcriptions-stream-usage-patch
+        - name: vllm-patch-validate-transfer-events-patch
+          configMap:
+            name: vllm-patch-validate-transfer-events-patch
         - name: vllm-patch-voxtral-patch
           configMap:
             name: vllm-patch-voxtral-patch
@@ -2044,10 +2125,10 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: workload-whisper-qwen3-voxtral
-  namespace: continuum-012cc6
+  namespace: continuum-a225c8
   labels:
     app: workload-whisper-qwen3-voxtral
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
 spec:
   selector:
     matchLabels:
@@ -2056,7 +2137,7 @@ spec:
     metadata:
       labels:
         app: workload-whisper-qwen3-voxtral
-        app.kubernetes.io/instance: '012cc6'
+        app.kubernetes.io/instance: 'a225c8'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -2069,7 +2150,7 @@ spec:
       runtimeClassName: contrast-cc-metal-qemu-snp-gpu
       initContainers:
         - name: kernel-log
-          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.62.0@sha256:5fcfe330f423e8affe61826875dd046ee31aa69905dc90a9b3434f9ea9042869
+          image: ghcr.io/edgelesssys/privatemode/kernel-log:v1.63.0@sha256:55561e652ff9672f7a9304592a0ea3a9478ef0acc6a33243cc5697e76b95256a
           restartPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
@@ -2088,7 +2169,7 @@ spec:
               mountPath: /var/run/continuum
             - mountPath: /contrast
               name: contrast-secrets
-          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.62.0@sha256:d11ffc5803e3038732ae028dfbba0a2e6891d182c1e8babd7eb673fc11a24969
+          image: ghcr.io/edgelesssys/privatemode/attestation-agent:v1.63.0@sha256:f1b67d1d22246ffcf76c5b4379a4ff2a6b340f679e64c030bf84981f296d8da8
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
@@ -2105,7 +2186,17 @@ spec:
               add:
                 - SYS_ADMIN
         - name: disk-mounter-whisper-large-v3-0
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.63.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # Disable core dumps in the pod's guest kernel. The systemd collector
+              # can exhaust guest memory, and piped core dumps ignore ulimit -c.
+              echo 0 > /proc/sys/kernel/core_uses_pid
+              echo > /proc/sys/kernel/core_pattern
+              exec /bin/disk-mounter "$@"
+            - _
           args:
             - 'whisper-large-v3'
             - '0'
@@ -2121,7 +2212,17 @@ spec:
             - name: modelweights-whisper-large-v3-0
               devicePath: /dev/modelweights-whisper-large-v3-0
         - name: disk-mounter-qwen3-embedding-4b-1
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.63.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # Disable core dumps in the pod's guest kernel. The systemd collector
+              # can exhaust guest memory, and piped core dumps ignore ulimit -c.
+              echo 0 > /proc/sys/kernel/core_uses_pid
+              echo > /proc/sys/kernel/core_pattern
+              exec /bin/disk-mounter "$@"
+            - _
           args:
             - 'qwen3-embedding-4b'
             - '1'
@@ -2137,7 +2238,17 @@ spec:
             - name: modelweights-qwen3-embedding-4b-1
               devicePath: /dev/modelweights-qwen3-embedding-4b-1
         - name: disk-mounter-voxtral-mini-3b-2
-          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.62.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          image: ghcr.io/edgelesssys/privatemode/disk-mounter:v1.63.0@sha256:f66f2ea5feb4a39ec4f8ec1e464e7d911ee2f67ef468603cb80fbcbf341ec931
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # Disable core dumps in the pod's guest kernel. The systemd collector
+              # can exhaust guest memory, and piped core dumps ignore ulimit -c.
+              echo 0 > /proc/sys/kernel/core_uses_pid
+              echo > /proc/sys/kernel/core_pattern
+              exec /bin/disk-mounter "$@"
+            - _
           args:
             - 'voxtral-mini-3b'
             - '2'
@@ -2239,10 +2350,10 @@ spec:
               echo "Installing restrict-vllm-network.py"
               install -D -m 644 /untrusted-vllm-patch/vllm-patch-restrict-vllm-network-py/restrict-vllm-network.py /vllm-workspace/restrict-vllm-network.py
               if [ $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1) != '266a0927ea919db3d1ae35e221cef2ee0701d051f2bbebb3be08fd385a7864a2' ]; then echo restrict-vllm-network.py hash mismatch: $(sha256sum /vllm-workspace/restrict-vllm-network.py | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing transcriptions.patch"
-              install -D -m 644 /untrusted-vllm-patch/vllm-patch-transcriptions-patch/transcriptions.patch /vllm-workspace/transcriptions.patch
-              if [ $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1) != 'e0286354e2f3787cb873dc70d659cbf55420adec19852d27fb3cade6266af627' ]; then echo transcriptions.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions.patch
+              echo "Installing torchcodec.patch"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-torchcodec-patch/torchcodec.patch /vllm-workspace/torchcodec.patch
+              if [ $(sha256sum /vllm-workspace/torchcodec.patch | cut -d ' ' -f 1) != 'd68b1b83fd93bb5a9c0aba5e8a2dc53ed79d8efbcf8b37d96a57ee844639091a' ]; then echo torchcodec.patch hash mismatch: $(sha256sum /vllm-workspace/torchcodec.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/torchcodec.patch
               echo "Installing repetition_detection_cap.patch"
               install -D -m 644 /untrusted-vllm-patch/vllm-patch-repetition-detection-cap-patch/repetition_detection_cap.patch /vllm-workspace/repetition_detection_cap.patch
               if [ $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1) != '64fb3ddeb4d1591dee4773739b2bf44b622ef4388d80eee28b30a847dbf5133f' ]; then echo repetition_detection_cap.patch hash mismatch: $(sha256sum /vllm-workspace/repetition_detection_cap.patch | cut -d ' ' -f 1); exit 1; fi
@@ -2351,11 +2462,14 @@ spec:
             - name: vllm-patch-structured-output-implicit-reasoning-end-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
               readOnly: true
-            - name: vllm-patch-transcriptions-patch
-              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+            - name: vllm-patch-torchcodec-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-torchcodec-patch
               readOnly: true
             - name: vllm-patch-transcriptions-stream-usage-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-validate-transfer-events-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-validate-transfer-events-patch
               readOnly: true
             - name: vllm-patch-voxtral-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
@@ -2375,7 +2489,7 @@ spec:
               memory: 70Gi
               "nvidia.com/GH100_H100_PCIE": 1
         - name: inference-proxy-whisper-large-v3-0
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.63.0@sha256:f7c2b213a0bb34b1289bf2c3a18bcc44f241ae622c961c36bc44d13820d63f92
           ports:
             - containerPort: 8085
             - containerPort: 8185
@@ -2391,7 +2505,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8000/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/whisper-large-v3-0'
             - '--workload-metrics=http://127.0.0.1:8000/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-a225c8.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -2399,7 +2513,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=transcribe'
-            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-a225c8.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4317'
           readinessProbe:
@@ -2613,11 +2727,14 @@ spec:
             - name: vllm-patch-structured-output-implicit-reasoning-end-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
               readOnly: true
-            - name: vllm-patch-transcriptions-patch
-              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+            - name: vllm-patch-torchcodec-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-torchcodec-patch
               readOnly: true
             - name: vllm-patch-transcriptions-stream-usage-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-validate-transfer-events-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-validate-transfer-events-patch
               readOnly: true
             - name: vllm-patch-voxtral-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
@@ -2636,7 +2753,7 @@ spec:
               cpu: "4"
               memory: 24Gi
         - name: inference-proxy-qwen3-embedding-4b-1
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.63.0@sha256:f7c2b213a0bb34b1289bf2c3a18bcc44f241ae622c961c36bc44d13820d63f92
           ports:
             - containerPort: 8086
             - containerPort: 8186
@@ -2652,7 +2769,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8001/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/qwen3-embedding-4b-1'
             - '--workload-metrics=http://127.0.0.1:8001/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-a225c8.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -2660,7 +2777,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=embed'
-            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-a225c8.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4318'
           readinessProbe:
@@ -2773,13 +2890,13 @@ spec:
               echo "Installing generation_config_voxtral.json"
               install -D -m 644 /untrusted-vllm-patch/vllm-patch-generation-config-voxtral-json/generation_config_voxtral.json /vllm-workspace/generation_config.json
               if [ $(sha256sum /vllm-workspace/generation_config.json | cut -d ' ' -f 1) != 'c8297823ed0e642d9932ca2ef1cdc0fa174563a3396c687852c1c377b60a18fd' ]; then echo generation_config_voxtral.json hash mismatch: $(sha256sum /vllm-workspace/generation_config.json | cut -d ' ' -f 1); exit 1; fi
-              echo "Installing transcriptions.patch"
-              install -D -m 644 /untrusted-vllm-patch/vllm-patch-transcriptions-patch/transcriptions.patch /vllm-workspace/transcriptions.patch
-              if [ $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1) != 'e0286354e2f3787cb873dc70d659cbf55420adec19852d27fb3cade6266af627' ]; then echo transcriptions.patch hash mismatch: $(sha256sum /vllm-workspace/transcriptions.patch | cut -d ' ' -f 1); exit 1; fi
-              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/transcriptions.patch
+              echo "Installing torchcodec.patch"
+              install -D -m 644 /untrusted-vllm-patch/vllm-patch-torchcodec-patch/torchcodec.patch /vllm-workspace/torchcodec.patch
+              if [ $(sha256sum /vllm-workspace/torchcodec.patch | cut -d ' ' -f 1) != 'd68b1b83fd93bb5a9c0aba5e8a2dc53ed79d8efbcf8b37d96a57ee844639091a' ]; then echo torchcodec.patch hash mismatch: $(sha256sum /vllm-workspace/torchcodec.patch | cut -d ' ' -f 1); exit 1; fi
+              patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/torchcodec.patch
               echo "Installing voxtral.patch"
               install -D -m 644 /untrusted-vllm-patch/vllm-patch-voxtral-patch/voxtral.patch /vllm-workspace/voxtral.patch
-              if [ $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1) != 'dd59b2e26971e18d165fcc4463026b47b8149b796bb253646005e2fa88dc49e0' ]; then echo voxtral.patch hash mismatch: $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1); exit 1; fi
+              if [ $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1) != '1d70cbfb30d7247bc3565cec8cbe619e656b38ed41b3fe8045bd05060ae14018' ]; then echo voxtral.patch hash mismatch: $(sha256sum /vllm-workspace/voxtral.patch | cut -d ' ' -f 1); exit 1; fi
               patch --batch --fuzz=0 -p1 -d /usr/local/lib/python3.12/dist-packages < /vllm-workspace/voxtral.patch
               echo "Installing generation_config.patch"
               install -D -m 644 /untrusted-vllm-patch/vllm-patch-generation-config-patch/generation_config.patch /vllm-workspace/generation_config.patch
@@ -2898,11 +3015,14 @@ spec:
             - name: vllm-patch-structured-output-implicit-reasoning-end-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-structured-output-implicit-reasoning-end-patch
               readOnly: true
-            - name: vllm-patch-transcriptions-patch
-              mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-patch
+            - name: vllm-patch-torchcodec-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-torchcodec-patch
               readOnly: true
             - name: vllm-patch-transcriptions-stream-usage-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-transcriptions-stream-usage-patch
+              readOnly: true
+            - name: vllm-patch-validate-transfer-events-patch
+              mountPath: /untrusted-vllm-patch/vllm-patch-validate-transfer-events-patch
               readOnly: true
             - name: vllm-patch-voxtral-patch
               mountPath: /untrusted-vllm-patch/vllm-patch-voxtral-patch
@@ -2921,7 +3041,7 @@ spec:
               cpu: "4"
               memory: 30Gi
         - name: inference-proxy-voxtral-mini-3b-2
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.63.0@sha256:f7c2b213a0bb34b1289bf2c3a18bcc44f241ae622c961c36bc44d13820d63f92
           ports:
             - containerPort: 8087
             - containerPort: 8187
@@ -2937,7 +3057,7 @@ spec:
             - '--workload-reachability-url=http://127.0.0.1:8002/v1/models'
             - '--workload-start-marker=/var/run/workload-marker/voxtral-mini-3b-2'
             - '--workload-metrics=http://127.0.0.1:8002/metrics'
-            - '--secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local'
+            - '--secret-svc-address=secret-service-internal.continuum-a225c8.svc.cluster.local'
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
@@ -2945,7 +3065,7 @@ spec:
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
             - '--workload-tasks=transcribe'
-            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-a225c8.svc.cluster.local:3000'
             - '--otlp-traces-endpoint=continuum-infra-monitoring-alloy.continuum-infra.svc.cluster.local:4317'
             - '--trace-listen-port=4319'
           readinessProbe:
@@ -3059,12 +3179,15 @@ spec:
         - name: vllm-patch-structured-output-implicit-reasoning-end-patch
           configMap:
             name: vllm-patch-structured-output-implicit-reasoning-end-patch
-        - name: vllm-patch-transcriptions-patch
+        - name: vllm-patch-torchcodec-patch
           configMap:
-            name: vllm-patch-transcriptions-patch
+            name: vllm-patch-torchcodec-patch
         - name: vllm-patch-transcriptions-stream-usage-patch
           configMap:
             name: vllm-patch-transcriptions-stream-usage-patch
+        - name: vllm-patch-validate-transfer-events-patch
+          configMap:
+            name: vllm-patch-validate-transfer-events-patch
         - name: vllm-patch-voxtral-patch
           configMap:
             name: vllm-patch-voxtral-patch
@@ -3097,7 +3220,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: unstructured-api
-  namespace: continuum-012cc6
+  namespace: continuum-a225c8
   labels:
     app: unstructured-api
 spec:
@@ -3109,7 +3232,7 @@ spec:
     metadata:
       labels:
         app: unstructured-api
-        app.kubernetes.io/instance: '012cc6'
+        app.kubernetes.io/instance: 'a225c8'
         privatemode.edgeless.systems/environment: 'production'
         privatemode.edgeless.systems/delete-when: coordinator-recovered
         privatemode.edgeless.systems/workload: ""
@@ -3166,7 +3289,7 @@ spec:
             periodSeconds: 5
             timeoutSeconds: 3
         - name: inference-proxy-unstructured-api
-          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.62.0@sha256:caec5dc38b21090b04edcea5353598ab36da388832016df0a18cea42e210b4ae
+          image: ghcr.io/edgelesssys/privatemode/inference-proxy:v1.63.0@sha256:f7c2b213a0bb34b1289bf2c3a18bcc44f241ae622c961c36bc44d13820d63f92
           ports:
             - containerPort: 8085
           args:
@@ -3177,14 +3300,14 @@ spec:
             - --workload-reachability-url=http://127.0.0.1:8000/healthcheck
             - --workload-start-marker=/var/run/workload-marker/unstructured-api
             - --workload-tasks=unstructured
-            - --secret-svc-address=secret-service-internal.continuum-012cc6.svc.cluster.local
+            - --secret-svc-address=secret-service-internal.continuum-a225c8.svc.cluster.local
             - '--etcd-member-cert=/contrast/tls-config/certChain.pem'
             - '--etcd-member-key=/contrast/tls-config/key.pem'
             - '--etcd-ca=/contrast/tls-config/mesh-ca.pem'
             - '--identity-cert-path=/var/run/secrets/identity/tls.crt'
             - '--identity-key-path=/var/run/secrets/identity/tls.key'
             - '--identity-ca-path=/var/run/secrets/identity/ca.crt'
-            - '--usage-collector-endpoint=usage-collector.continuum-012cc6.svc.cluster.local:3000'
+            - '--usage-collector-endpoint=usage-collector.continuum-a225c8.svc.cluster.local:3000'
           volumeMounts:
             - name: unstructured-api-identity
               mountPath: /var/run/secrets/identity
@@ -3219,17 +3342,17 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: coordinator
-  namespace: 'continuum-012cc6'
+  namespace: 'continuum-a225c8'
   labels:
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: coordinator
-  namespace: 'continuum-012cc6'
+  namespace: 'continuum-a225c8'
   labels:
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
 rules:
   - apiGroups:
       - ""
@@ -3252,9 +3375,9 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: coordinator
-  namespace: 'continuum-012cc6'
+  namespace: 'continuum-a225c8'
   labels:
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -3262,15 +3385,15 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: coordinator
-    namespace: "continuum-012cc6"
+    namespace: "continuum-a225c8"
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator
-  namespace: 'continuum-012cc6'
+  namespace: 'continuum-a225c8'
   labels:
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
 spec:
   ports:
     - name: userapi
@@ -3294,16 +3417,16 @@ spec:
     app.kubernetes.io/name: coordinator
     app.kubernetes.io/part-of: contrast
     contrast.edgeless.systems/pod-role: coordinator
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
   type: ClusterIP
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: coordinator-ready
-  namespace: 'continuum-012cc6'
+  namespace: 'continuum-a225c8'
   labels:
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
 spec:
   ports:
     - name: userapi
@@ -3326,7 +3449,7 @@ spec:
     app.kubernetes.io/name: coordinator
     app.kubernetes.io/part-of: contrast
     contrast.edgeless.systems/pod-role: coordinator
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/instance: 'a225c8'
   type: ClusterIP
 ---
 apiVersion: apps/v1
@@ -3336,10 +3459,10 @@ metadata:
     app.kubernetes.io/component: coordinator
     app.kubernetes.io/name: coordinator
     app.kubernetes.io/part-of: contrast
-    app.kubernetes.io/version: 1.26.0
-    app.kubernetes.io/instance: '012cc6'
+    app.kubernetes.io/version: 1.26.1
+    app.kubernetes.io/instance: 'a225c8'
   name: coordinator
-  namespace: 'continuum-012cc6'
+  namespace: 'continuum-a225c8'
 spec:
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Delete
@@ -3359,7 +3482,7 @@ spec:
         app.kubernetes.io/name: coordinator
         app.kubernetes.io/part-of: contrast
         contrast.edgeless.systems/pod-role: coordinator
-        app.kubernetes.io/instance: '012cc6'
+        app.kubernetes.io/instance: 'a225c8'
         privatemode.edgeless.systems/environment: 'production'
     spec:
       affinity:
@@ -3372,7 +3495,7 @@ spec:
                 topologyKey: kubernetes.io/hostname
               weight: 100
       containers:
-        - image: ghcr.io/edgelesssys/contrast/coordinator:v1.26.0@sha256:e32dbf23e2ca6b77761f87e769c917c6c3728fed7f84e0625e1334c6f4d8b4af
+        - image: ghcr.io/edgelesssys/contrast/coordinator:v1.26.1@sha256:68001292c53f9d444afd8791beb6982ffbb7978b4be0c376f5c636df49b2f213
           livenessProbe:
             failureThreshold: 3
             httpGet:

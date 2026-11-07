@@ -394,7 +394,7 @@ func buildEncryptedRequest(t *testing.T, secret []byte, body, endpoint string) (
 	r.Header.Set(constants.PrivatemodeVersionHeader, constants.Version())
 	r.Header.Set(constants.PrivatemodeSecretIDHeader, "some-id")
 	require.NoError(t, mutators.ContentLengthTokensInjector(r))
-	require.NoError(t, client.EncryptRequest(r, nil))
+	require.NoError(t, client.EncryptRequest(r, map[string]string{constants.PrivatemodeVersionHeader: constants.Version()}))
 
 	return r, client
 }
