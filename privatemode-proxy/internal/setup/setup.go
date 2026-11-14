@@ -17,6 +17,7 @@ import (
 	"github.com/edgelesssys/continuum/internal/oss/secretclient"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager"
 	"github.com/edgelesssys/continuum/internal/oss/secretmanager/updater"
+	"github.com/edgelesssys/continuum/privatemode-proxy/internal/manifestlog"
 	contrastsdk "github.com/edgelesssys/contrast/sdk"
 	"github.com/spf13/afero"
 )
@@ -44,6 +45,7 @@ func SecretManager(ctx context.Context, flags Flags, log *slog.Logger) (*secretm
 
 	var caGetter updater.CAGetter
 	var currentManifest func() string
+	var mfLogger *manifestlog.Logger
 	if flags.ManifestPath != "" { // static mode
 		expectedMfBytes, err := fs.ReadFile(flags.ManifestPath)
 		if err != nil {
@@ -52,18 +54,39 @@ func SecretManager(ctx context.Context, flags Flags, log *slog.Logger) (*secretm
 		caGetter = updater.NewStaticCAGetter(caUpdater, expectedMfBytes)
 		currentManifest = func() string { return string(expectedMfBytes) }
 	} else {
-		caAdapter := newCAAdapter(flags.CDNBaseURL, mfLogger{fs: fs, workspace: flags.Workspace}, caUpdater, log)
+		caAdapter := newCAAdapter(flags.CDNBaseURL, caUpdater, log)
 		caGetter = caAdapter
 		currentManifest = caAdapter.CurrentManifest
+		var err error
+		mfLogger, err = manifestlog.New(fs, flags.Workspace)
+		if err != nil {
+			return nil, nil, fmt.Errorf("creating manifest logger: %w", err)
+		}
 	}
 
 	secretUpdater := updater.New(ssClient, caGetter, log)
 	credDropOnUnauthorized := flags.APIKey == nil
-	sm := secretmanager.New(secretUpdater.UpdateSecret, credDropOnUnauthorized)
+
+	sm := newSecretManager(secretUpdater, currentManifest, mfLogger, credDropOnUnauthorized)
 	if flags.APIKey != nil {
 		if err := sm.OfferCredential(ctx, auth.APIKey(*flags.APIKey)); err != nil {
 			return nil, nil, fmt.Errorf("trying API key: %w", err)
 		}
 	}
 	return sm, currentManifest, nil
+}
+
+func newSecretManager(secretUpdater *updater.Updater, currentManifest func() string, mfLogger *manifestlog.Logger, credDropOnUnauthorized bool) *secretmanager.SecretManager {
+	return secretmanager.New(func(ctx context.Context, cred auth.Credential) (string, []byte, error) {
+		id, data, err := secretUpdater.UpdateSecret(ctx, cred)
+		if err != nil {
+			return "", nil, err
+		}
+		if mfLogger != nil {
+			if err := mfLogger.WriteEntry([]byte(currentManifest()), id); err != nil {
+				return "", nil, fmt.Errorf("logging manifest: %w", err)
+			}
+		}
+		return id, data, nil
+	}, credDropOnUnauthorized)
 }

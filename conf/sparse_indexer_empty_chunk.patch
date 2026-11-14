@@ -20,10 +20,10 @@ index ad38454570..c7441f51e8 100644
      topk_indices_buffer: torch.Tensor,
      positions: torch.Tensor | None,
 diff --git a/vllm/models/glm5next/nvidia/sparse_indexer.py b/vllm/models/glm5next/nvidia/sparse_indexer.py
-index 00f51cc6a7..90ef6f57ef 100644
+index 154fdcda90..a6b93d54b6 100644
 --- a/vllm/models/glm5next/nvidia/sparse_indexer.py
 +++ b/vllm/models/glm5next/nvidia/sparse_indexer.py
-@@ -16,6 +16,7 @@ from vllm.models.glm5next.common.sparse_indexer import (
+@@ -22,6 +22,7 @@ from vllm.models.glm5next.common.sparse_indexer import (
      _build_decode_scatter_indices,
      _decode_topk_seq_lens,
      _fill_causal_indices,
@@ -31,9 +31,9 @@ index 00f51cc6a7..90ef6f57ef 100644
      _fill_short_decode_causal_indices,
      _gather_workspace_shapes,
      _scatter_decode_tokens_by_request,
-@@ -371,6 +372,12 @@ def sparse_attn_indexer_kpool(
-                     chunk.token_start : chunk.token_end, : expanded.shape[-1]
-                 ] = expanded
+@@ -418,6 +419,12 @@ def sparse_attn_indexer_kpool(
+             # columns are part of the attention index and are exchanged too.
+             row_shard.exchange_topk(topk_indices_buffer, topk_tokens + index_kpool - 1)
  
 +        # Dropped zero-pool chunks select every token, like a short prefill.
 +        if not short_prefill and positions is not None:
@@ -45,7 +45,7 @@ index 00f51cc6a7..90ef6f57ef 100644
          decode_metadata = attn_metadata_narrowed.decode
          assert decode_metadata is not None
 diff --git a/vllm/v1/attention/backends/mla/indexer.py b/vllm/v1/attention/backends/mla/indexer.py
-index e7eb67b61f..73efb82a59 100644
+index 2d797ae662..0d756ad6ef 100644
 --- a/vllm/v1/attention/backends/mla/indexer.py
 +++ b/vllm/v1/attention/backends/mla/indexer.py
 @@ -1,6 +1,6 @@
@@ -56,16 +56,16 @@ index e7eb67b61f..73efb82a59 100644
  from typing import Any
  
  import numpy as np
-@@ -610,6 +610,8 @@ class BuildPrefillChunkMetadataKernel(
- class DeepseekV32IndexerPrefillMetadata:
-     chunks: list[DeepseekV32IndexerPrefillChunkMetadata]
+@@ -714,6 +714,8 @@ class DeepseekV32IndexerPrefillMetadata:
      max_prefill_seq_len: int = -1
+     # Per-TP-rank contiguous row counts, or None for the replicated path.
+     row_shard_sizes: list[int] | None = None
 +    # Token ranges of chunks dropped for having no compressed KV.
 +    empty_token_ranges: list[tuple[int, int]] = field(default_factory=list)
  
  
  @dataclass
-@@ -1383,6 +1385,7 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
+@@ -1543,6 +1545,7 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
                  )
  
              chunks = []
@@ -73,7 +73,7 @@ index e7eb67b61f..73efb82a59 100644
              for req_slice, query_slice in chunk_specs:
                  pcp_plan = None
                  if req_idx is not None:
-@@ -1414,8 +1417,13 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
+@@ -1574,6 +1577,10 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
                  # Skip when total_seq_lens is 0 (i.e., no compressed token).
                  if metadata is not None:
                      chunks.append(metadata)
@@ -81,14 +81,19 @@ index e7eb67b61f..73efb82a59 100644
 +                    empty_token_ranges.append(
 +                        chunk_token_range(query_start_loc_cpu, req_slice, query_slice)
 +                    )
+             row_shard_sizes = None
+             if tp_prefill_row_sharding_supported(
+                 self.vllm_config, self.dcp_world_size, self.use_pcp, self.tp_size
+@@ -1586,6 +1593,7 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
+                 )
              prefill_metadata = DeepseekV32IndexerPrefillMetadata(
                  chunks,
 +                empty_token_ranges=empty_token_ranges,
                  max_prefill_seq_len=(
                      int(seq_lens_cpu[num_decodes:].max().item())
                      if num_prefills > 0
-@@ -1629,6 +1637,18 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
-         return attn_metadata
+@@ -1834,6 +1842,18 @@ class DeepseekV32IndexerMetadataBuilder(AttentionMetadataBuilder):
+             decode.schedule_metadata.copy_(schedule_metadata)
  
  
 +def chunk_token_range(

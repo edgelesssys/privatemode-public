@@ -1,6 +1,8 @@
+diff --git a/vllm/v1/kv_offload/cpu/gpu_worker.py b/vllm/v1/kv_offload/cpu/gpu_worker.py
+index f6053480a7..c3e7ed12f6 100644
 --- a/vllm/v1/kv_offload/cpu/gpu_worker.py
 +++ b/vllm/v1/kv_offload/cpu/gpu_worker.py
-@@ -737,6 +737,8 @@
+@@ -706,6 +706,8 @@ class SingleDirectionOffloadingHandler:
      def get_finished(self) -> list[TransferResult]:
          results: list[TransferResult] = []
          while self._transfers and self._transfers[0].end_event.query():

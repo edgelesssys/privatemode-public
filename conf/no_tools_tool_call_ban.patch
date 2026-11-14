@@ -1,8 +1,8 @@
 diff --git a/vllm/parser/glm47_moe.py b/vllm/parser/glm47_moe.py
-index 00e517f2ea..83ea922a39 100644
+index 9a18228fb0..db89900207 100644
 --- a/vllm/parser/glm47_moe.py
 +++ b/vllm/parser/glm47_moe.py
-@@ -203,6 +203,24 @@ class Glm47MoeParser(ParserEngine):
+@@ -233,6 +233,24 @@ class Glm47MoeParser(ParserEngine):
          )
          super().__init__(tokenizer, tools, **kwargs)
  

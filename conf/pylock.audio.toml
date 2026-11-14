@@ -3,14 +3,14 @@ created-by = "pip"
 
 [[packages]]
 name = "av"
-version = "19.0.1"
+version = "19.0.2"
 
 [[packages.wheels]]
-name = "av-19.0.1-cp312-abi3-manylinux_2_28_x86_64.whl"
-url = "https://files.pythonhosted.org/packages/c8/97/5fb45934ac64e8afc2c6869a7dcb8cb2af1ddab09a725367548856cbb59f/av-19.0.1-cp312-abi3-manylinux_2_28_x86_64.whl"
+name = "av-19.0.2-cp312-abi3-manylinux_2_28_x86_64.whl"
+url = "https://files.pythonhosted.org/packages/e1/7f/9f1237feb894afa472ef834aa1fbfe4d6398f28dc7e86a1b418650204c36/av-19.0.2-cp312-abi3-manylinux_2_28_x86_64.whl"
 
 [packages.wheels.hashes]
-sha256 = "1bea5b6134209305199bce7627ac3d33964de2cf2b09c77d08e7f67cf8bd4170"
+sha256 = "9c1da7aad0fa6c13b4a5c1e7985be0d13f8526a96284573acaf3d55ead6d3fe8"
 
 [[packages]]
 name = "scipy"

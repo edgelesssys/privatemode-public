@@ -9,11 +9,14 @@ import regex as re
 import torch
 
 from vllm.logger import init_logger
-from vllm.v1.sample.logits_processor.interface import BatchUpdate, LogitsProcessor
+from vllm.v1.worker.gpu.sample.logits_processor import (
+    LogitsContext,
+    LogitsProcessor,
+    LogitsProcRequestState,
+)
 
 if TYPE_CHECKING:
     from vllm.config import VllmConfig
-    from vllm.config.model import ModelConfig
 
 # Prefix "vllm." so the logger inherits vLLM's INFO handler: this module loads
 # off PYTHONPATH, so __name__ alone sits outside the vllm.* namespace and its
@@ -26,9 +29,6 @@ logger = init_logger("vllm." + __name__)
 LOGIT_BIAS_ENV = "LANGUAGE_PENALTY_LOGIT_BIAS"
 _HAN_RE = re.compile(r"\p{Han}")
 _KANA_RE = re.compile(r"[\p{Hiragana}\p{Katakana}]")
-_LOGIT_BIAS_CACHE: dict[
-    tuple[str, str, str | None, bool, int, float], torch.Tensor
-] = {}
 
 
 def configured_logit_bias() -> float:
@@ -85,88 +85,36 @@ def compute_bias_from_tokenizer(
     return logit_bias
 
 
-def _get_logit_bias_cpu(
-    model_config: "ModelConfig", vocab_size: int, bias: float
-) -> torch.Tensor:
-    from vllm.tokenizers import cached_tokenizer_from_config
-
-    tokenizer_name = model_config.tokenizer or model_config.model
-    cache_key = (
-        tokenizer_name,
-        model_config.tokenizer_mode,
-        model_config.tokenizer_revision,
-        model_config.trust_remote_code,
-        vocab_size,
-        bias,
-    )
-    if cache_key in _LOGIT_BIAS_CACHE:
-        return _LOGIT_BIAS_CACHE[cache_key]
-    tokenizer = cached_tokenizer_from_config(model_config)
-    if tokenizer is None:
-        raise ValueError("Language penalty requires tokenizer initialization.")
-    logit_bias = compute_bias_from_tokenizer(tokenizer, vocab_size, bias)
-    # One-time (per model/vocab) confirmation that the penalty is active, with
-    # the effective bias so the configured value is visible in the log.
-    logger.info(
-        "Language penalty active: %d tokens biased by %s for %s (vocab_size=%d).",
-        int(torch.count_nonzero(logit_bias).item()),
-        bias,
-        tokenizer_name,
-        vocab_size,
-    )
-    _LOGIT_BIAS_CACHE[cache_key] = logit_bias
-    return logit_bias
-
-
-def get_logit_bias(
-    model_config: "ModelConfig", vocab_size: int, device: torch.device, bias: float
-) -> torch.Tensor:
-    logit_bias = _get_logit_bias_cpu(
-        model_config=model_config, vocab_size=vocab_size, bias=bias
-    )
-    return logit_bias.to(device=device, non_blocking=True)
-
-
 class LanguagePenaltyLogitsProcessor(LogitsProcessor):
     """Bias Han-only (Chinese) tokens down to suppress language drift."""
 
     def __init__(
-        self,
-        vllm_config: "VllmConfig",
-        device: torch.device,
-        is_pin_memory: bool,
+        self, vllm_config: "VllmConfig", req_states: LogitsProcRequestState
     ) -> None:
-        del device
-        del is_pin_memory
-        self.model_config = vllm_config.model_config
         # Resolved at engine start so a bad override crashes the workload early.
-        self.bias = configured_logit_bias()
-        self.logit_bias: torch.Tensor | None = None
+        bias = configured_logit_bias()
+        model_config = vllm_config.model_config
+        if model_config is None:
+            raise ValueError("Language penalty requires a model_config.")
+        from vllm.tokenizers import cached_tokenizer_from_config
 
-    def apply(self, logits: torch.Tensor) -> torch.Tensor:
-        logit_bias = self._get_logit_bias(logits)
-        if logit_bias is not None:
-            logits.add_(logit_bias)
+        tokenizer = cached_tokenizer_from_config(model_config)
+        if tokenizer is None:
+            raise ValueError("Language penalty requires tokenizer initialization.")
+        logit_bias = compute_bias_from_tokenizer(tokenizer, req_states.vocab_size, bias)
+        # One-time confirmation that the penalty is active, with the effective
+        # bias so the configured value is visible in the log.
+        logger.info(
+            "Language penalty active: %d tokens biased by %s for %s (vocab_size=%d).",
+            int(torch.count_nonzero(logit_bias).item()),
+            bias,
+            model_config.tokenizer or model_config.model,
+            req_states.vocab_size,
+        )
+        self.logit_bias = logit_bias.to(req_states.device)
+
+    def apply(self, logits: torch.Tensor, ctx: LogitsContext) -> torch.Tensor:
+        # Same bias for every row, so no row-to-request mapping is needed.
+        del ctx
+        logits.add_(self.logit_bias)
         return logits
-
-    def is_argmax_invariant(self) -> bool:
-        return False
-
-    def update_state(self, batch_update: BatchUpdate | None) -> None:
-        del batch_update
-
-    def _get_logit_bias(self, logits: torch.Tensor) -> torch.Tensor | None:
-        if self.model_config is None:
-            return None
-        if (
-            self.logit_bias is None
-            or self.logit_bias.device != logits.device
-            or self.logit_bias.shape[0] != logits.shape[-1]
-        ):
-            self.logit_bias = get_logit_bias(
-                model_config=self.model_config,
-                vocab_size=logits.shape[-1],
-                device=logits.device,
-                bias=self.bias,
-            )
-        return self.logit_bias

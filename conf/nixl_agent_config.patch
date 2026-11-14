@@ -1,0 +1,104 @@
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py b/vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py
+index 778eb0f756..861b52969b 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py
+@@ -65,7 +65,11 @@ from vllm.distributed.kv_transfer.kv_connector.v1.ssm_conv_transfer_utils import
+     MambaConvSplitInfo,
+     derive_mamba_conv_split,
+ )
+-from vllm.distributed.nixl_utils import NixlWrapper, nixl_agent_config
++from vllm.distributed.nixl_utils import (
++    NixlWrapper,
++    nixl_agent_config,
++    nixl_thread_sync_t,
++)
+ from vllm.distributed.parallel_state import (
+     get_pcp_group,
+     get_tensor_model_parallel_rank,
+@@ -631,15 +635,53 @@ class NixlBaseConnectorWorker:
+         num_threads = vllm_config.kv_transfer_config.get_from_extra_config(
+             "num_threads", 4
+         )
++        # Without the progress thread, concurrent agent use requires
++        # sync_mode="strict".
++        enable_prog_thread: bool = vllm_config.kv_transfer_config.get_from_extra_config(
++            "enable_prog_thread", True
++        )
++        # None keeps NIXL's default.
++        sync_mode: str | None = vllm_config.kv_transfer_config.get_from_extra_config(
++            "sync_mode", None
++        )
++        if sync_mode is not None and str(sync_mode).lower() not in (
++            "none",
++            "rw",
++            "strict",
++            "default",
++        ):
++            raise ValueError(
++                f"Invalid NIXL sync_mode {sync_mode!r}, "
++                "expected one of: none, rw, strict, default."
++            )
+         if nixl_agent_config is None:
+             config = None
+         else:
+             # Enable telemetry by default for NIXL 0.7.1 and above.
+-            config = (
+-                nixl_agent_config(backends=self.nixl_backends, capture_telemetry=True)
+-                if len(non_ucx_backends) > 0
+-                else nixl_agent_config(num_threads=num_threads, capture_telemetry=True)
+-            )
++            config_kwargs: dict[str, Any] = {
++                "enable_prog_thread": enable_prog_thread,
++                "capture_telemetry": True,
++            }
++            if len(non_ucx_backends) > 0:
++                config_kwargs["backends"] = self.nixl_backends
++            else:
++                config_kwargs["num_threads"] = num_threads
++            if sync_mode is not None:
++                if nixl_thread_sync_t is None:
++                    raise RuntimeError(
++                        "NIXL sync_mode is set but the installed NIXL does not "
++                        "provide nixl_thread_sync_t; upgrade NIXL."
++                    )
++                config_kwargs["sync_mode"] = nixl_thread_sync_t[
++                    f"NIXL_THREAD_SYNC_{sync_mode.upper()}"
++                ]
++            elif not enable_prog_thread:
++                logger.warning(
++                    "NIXL progress thread is disabled without sync_mode='strict'; "
++                    "concurrent agent use may be unsafe."
++                )
++            logger.info("NIXL agent config: %s", config_kwargs)
++            config = nixl_agent_config(**config_kwargs)
+ 
+         self.nixl_wrapper = nixl_wrapper_cls(str(uuid.uuid4()), config)
+         # Map of engine_id -> {(pp_rank, tp_rank): agent_name, ...}.
+diff --git a/vllm/distributed/nixl_utils.py b/vllm/distributed/nixl_utils.py
+index c063b3ea74..d9b17fcded 100644
+--- a/vllm/distributed/nixl_utils.py
++++ b/vllm/distributed/nixl_utils.py
+@@ -14,6 +14,7 @@ logger = init_logger(__name__)
+ # declaration for static analyzers
+ NixlWrapper: Any
+ nixl_agent_config: Any
++nixl_thread_sync_t: Any
+ nixlXferTelemetry: Any
+ 
+ 
+@@ -51,6 +52,7 @@ def _load_nixl_attr(name: str) -> Any:
+     attr_name = {
+         "NixlWrapper": "nixl_agent",
+         "nixl_agent_config": "nixl_agent_config",
++        "nixl_thread_sync_t": "nixl_thread_sync_t",
+         "nixlXferTelemetry": "nixlXferTelemetry",
+     }[name]
+ 
+@@ -110,6 +112,7 @@ def alias_nixl_for_ray() -> None:
+ __all__ = [
+     "NixlWrapper",
+     "nixl_agent_config",
++    "nixl_thread_sync_t",
+     "nixlXferTelemetry",
+     "is_nixl_available",
+     "alias_nixl_for_ray",

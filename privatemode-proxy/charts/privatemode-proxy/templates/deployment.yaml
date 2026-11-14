@@ -69,7 +69,7 @@ spec:
             - {{ printf "--cors-allowed-origins=%s" . | quote }}
             {{- end }}
             {{- if .Values.config.workspace.enabled }}
-            - "--workspace={{ .Values.config.workspace.mountPath }}"
+            - "--workspace={{ .Values.config.workspace.mountPath }}/$(POD_NAME)"
             {{- end }}
             {{- if .Values.config.manifest.enabled }}
             - "--manifest-path={{ .Values.config.manifest.mountPath }}"
@@ -97,8 +97,14 @@ spec:
             {{- with .Values.config.extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if or .Values.config.customCA.enabled .Values.config.extraEnv }}
+          {{- if or .Values.config.workspace.enabled .Values.config.customCA.enabled .Values.config.extraEnv }}
           env:
+            {{- if .Values.config.workspace.enabled }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- end }}
             {{- if .Values.config.customCA.enabled }}
             - name: SSL_CERT_FILE
               value: "/etc/ssl/certs/custom-ca-bundle.crt"

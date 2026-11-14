@@ -12,14 +12,11 @@ import (
 
 	"github.com/edgelesssys/continuum/internal/oss/auth"
 	"github.com/edgelesssys/continuum/internal/oss/privatemode"
-	"github.com/edgelesssys/continuum/privatemode-proxy/internal/manifestlog"
-	"github.com/spf13/afero"
 )
 
 // caAdapter updates the mesh CA with the interface for the secretupdater.
 type caAdapter struct {
 	fetcher   manifestFetcher
-	mfLogger  mfLogger
 	caUpdater caUpdater
 	log       *slog.Logger
 
@@ -36,14 +33,13 @@ type manifestFetcher interface {
 }
 
 // newCAAdapter creates a new caAdapter.
-func newCAAdapter(cdnBaseURL string, mfLogger mfLogger, caUpdater caUpdater, log *slog.Logger) *caAdapter {
+func newCAAdapter(cdnBaseURL string, caUpdater caUpdater, log *slog.Logger) *caAdapter {
 	fetcher := privatemode.
 		New(auth.Credential{}). // No credential is required to just fetch the manifest
 		WithCDNBaseURL(cdnBaseURL)
 
 	return &caAdapter{
 		fetcher:   fetcher,
-		mfLogger:  mfLogger,
 		caUpdater: caUpdater,
 		log:       log,
 	}
@@ -56,10 +52,6 @@ func (c *caAdapter) GetMeshCA(ctx context.Context, cred auth.Credential) (*x509.
 		return nil, fmt.Errorf("fetching manifest: %w", err)
 	}
 	c.log.InfoContext(ctx, "Coordinator manifest fetched successfully")
-
-	if err := c.mfLogger.Log(expectedMfBytes); err != nil {
-		return nil, fmt.Errorf("logging manifest: %w", err)
-	}
 
 	cert, err := c.caUpdater.GetAttestedMeshCA(ctx, expectedMfBytes, cred)
 	if err != nil {
@@ -77,13 +69,4 @@ func (c *caAdapter) CurrentManifest() string {
 	c.manifestMu.Lock()
 	defer c.manifestMu.Unlock()
 	return string(c.manifest)
-}
-
-type mfLogger struct {
-	fs        afero.Fs
-	workspace string
-}
-
-func (m mfLogger) Log(mf []byte) error {
-	return manifestlog.WriteEntry(m.fs, m.workspace, mf)
 }

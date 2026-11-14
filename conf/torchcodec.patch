@@ -1,9 +1,8 @@
 diff --git a/vllm/multimodal/media/audio.py b/vllm/multimodal/media/audio.py
+index c05f4e4dcc..3b39844929 100644
 --- a/vllm/multimodal/media/audio.py
 +++ b/vllm/multimodal/media/audio.py
-@@ -350,32 +350,42 @@
-     # Decode the stream. RuntimeError here covers a corrupt stream or a
-     # container that lies about its length. Bounding the range (when a
+@@ -356,27 +356,37 @@ def load_audio_torchcodec(
      # duration limit is set) keeps an under-reported duration from expanding
      # into unbounded PCM.
      try:
@@ -27,17 +26,29 @@ diff --git a/vllm/multimodal/media/audio.py b/vllm/multimodal/media/audio.py
              "Invalid or corrupted audio data. Ensure the input is a valid "
              "audio or video file (e.g. a complete WAV, MP3, or MP4)."
          ) from e
-+
+ 
 +    # Preserve the original [0, stop) interval by removing negative-PTS
 +    # codec priming. Match torchcodec's nearest-sample rounding (ties up).
 +    data = samples.data
 +    if samples.pts_seconds < 0:
 +        start_sample = math.floor(-samples.pts_seconds * samples.sample_rate + 0.5)
 +        data = data[:, start_sample:]
++
+     # FFmpeg < 5.0 misses Ogg end_trimming, leaving up to one Vorbis block of
+     # padding at the tail; we need to trim for valid audio length.
+     if metadata.codec == "vorbis" and metadata.duration_seconds is not None:
+         expected_samples = round(metadata.duration_seconds * samples.sample_rate)
+-        padding = samples.data.shape[-1] - expected_samples
++        padding = data.shape[-1] - expected_samples
+         native_sr = metadata.sample_rate or samples.sample_rate
+         max_padding = cdiv(_VORBIS_MAX_BLOCK_SAMPLES * samples.sample_rate, native_sr)
+         if 0 < padding <= max_padding:
+-            samples.data = samples.data[..., :expected_samples]
++            data = data[..., :expected_samples]
  
      # Authoritative post-decode checks: the metadata estimates above can be
      # bypassed by a container that lies about its duration or size.
-     if max_duration_s is not None:
+@@ -384,10 +394,10 @@ def load_audio_torchcodec(
          # Same `int()` semantics as load_audio_pyav's
          # `total_samples > int(sr * max_duration_s)`.
          max_samples = int(samples.sample_rate * max_duration_s)
@@ -50,11 +61,7 @@ diff --git a/vllm/multimodal/media/audio.py b/vllm/multimodal/media/audio.py
                  f"samples at {samples.sample_rate}Hz). Set "
                  f"VLLM_MAX_AUDIO_DECODE_DURATION_S to "
                  f"increase this limit."
-             )
-     if max_decode_bytes is not None and samples.data.nbytes > max_decode_bytes:
-@@ -385,11 +395,11 @@
-             f"limit ({samples.data.nbytes / MiB_bytes:.0f} MiB decoded). "
-             f"Set VLLM_MAX_AUDIO_DECODE_BYTES to increase this limit."
+@@ -401,7 +411,7 @@ def load_audio_torchcodec(
          )
  
      out_sr = samples.sample_rate
@@ -63,5 +70,3 @@ diff --git a/vllm/multimodal/media/audio.py b/vllm/multimodal/media/audio.py
      if audio.size == 0:
          raise ValueError("No audio found in the input.")
  
-     if mono and audio.ndim > 1:
-         # Same reduction as load_audio_pyav, so both backends agree at the

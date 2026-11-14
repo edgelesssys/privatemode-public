@@ -1,0 +1,240 @@
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py b/vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py
+index 861b52969b..6287670cb2 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py
+@@ -534,6 +534,7 @@ class NixlBaseConnectorWorker:
+         )
+         # NOTE (NickLucche): For now we use a hardcoded value for a simpler interface.
+         self._lease_extension = kv_lease_duration * 2 // 3
++        self._kv_lease_duration = kv_lease_duration
+ 
+         self._bidirectional_kv_xfer_enabled: bool = (
+             vllm_config.kv_transfer_config.get_from_extra_config(
+@@ -697,6 +698,9 @@ class NixlBaseConnectorWorker:
+         self._invalid_engine_backoff: dict[EngineId, tuple[float, float]] = {}
+         # Map of engine_id -> clock offset.
+         self._engine_clock_offset: dict[EngineId, float] = {}
++        # Remote engines exporting a lease expiry for every pull -> (clock
++        # offset, fence margin). Set before the engine is in _remote_agents.
++        self._lease_fences: dict[EngineId, tuple[float, float]] = {}
+ 
+         # Metadata.
+         self.engine_id: EngineId = engine_id
+@@ -1066,6 +1070,7 @@ class NixlBaseConnectorWorker:
+         # higher RTT is just noise that skews the midpoint estimate.
+         best_rtt = float("inf")
+         best_offset: float | None = None
++        remote_lease: int | None = None
+ 
+         with zmq_ctx(zmq.REQ, path) as sock:
+             for remote_pp_rank, remote_rank in itertools.product(
+@@ -1158,6 +1163,7 @@ class NixlBaseConnectorWorker:
+                         f"Expected {expected_engine_id},"
+                         f"received {metadata.engine_id}."
+                     )
++                remote_lease = metadata.kv_lease_duration
+ 
+                 # Register Remote agent.
+                 if notif_agents_only:
+@@ -1178,6 +1184,12 @@ class NixlBaseConnectorWorker:
+                 remote_rank_to_agent_name[remote_ranks] = remote_agent_name
+ 
+         assert best_offset is not None
++        if remote_lease is not None:
++            # Margin for clock-offset error, derived from the producer's lease
++            # like the heartbeat interval.
++            self._lease_fences[expected_engine_id] = (best_offset, remote_lease / 6)
++        else:
++            self._lease_fences.pop(expected_engine_id, None)
+         return remote_rank_to_agent_name, best_offset
+ 
+     def _add_notif_only_remote_agent(
+@@ -1845,6 +1857,7 @@ class NixlBaseConnectorWorker:
+             pcp_size=self.pcp_size,
+             region_members=self.region_members,
+             packed_member_layouts=packed_member_layouts,
++            kv_lease_duration=self._kv_lease_duration,
+         )
+         # Wrap metadata in payload with hash for defensive decoding
+         assert self.compat_hash is not None
+@@ -2903,6 +2916,8 @@ class NixlBaseConnectorWorker:
+         done_recving, newly_failed = self._pop_done_transfers(self._recving_transfers)
+         if newly_failed:
+             self._recv_failures.update(newly_failed)
++        # Declined receives fail like transport errors.
++        self._recv_failures.update(self._decline_late_recvs(done_recving))
+ 
+         done_sending.update(self._replicated_pcp_done_sending)
+         self._replicated_pcp_done_sending.clear()
+@@ -3053,6 +3068,10 @@ class NixlBaseConnectorWorker:
+         """
+         raise NotImplementedError
+ 
++    def _decline_late_recvs(self, done_recving: set[str]) -> set[str]:
++        """Completed receives whose KV must not be used. Pull mode overrides."""
++        return set()
++
+     def _reap_expired_send_leases(self, done_sending: set[str]) -> None:
+         """Reclaim expired send-side KV leases into ``done_sending``.
+ 
+@@ -3757,6 +3776,7 @@ class NixlBaseConnectorWorker:
+ 
+         # Drop the cached clock offset; it is re-measured on the next handshake.
+         self._engine_clock_offset.pop(engine_id, None)
++        self._lease_fences.pop(engine_id, None)
+         # A just-completed handshake may not have recorded activity yet, so
+         # tolerate a missing entry.
+         last_active = self._engine_last_active.pop(engine_id, None)
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/nixl/metadata.py b/vllm/distributed/kv_transfer/kv_connector/v1/nixl/metadata.py
+index a33f620a0a..0f67fe31c1 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/nixl/metadata.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/nixl/metadata.py
+@@ -80,6 +80,9 @@ class NixlAgentMetadata:
+     region_members: list[list[str]] = field(default_factory=list)
+     # Packed member -> (byte offset in its region's block, bytes per page).
+     packed_member_layouts: dict[str, tuple[int, int]] = field(default_factory=dict)
++    # Lease (seconds) behind the remote_blocks_expiry_time exported for every
++    # pull; None if none is exported. D fences its reads against it.
++    kv_lease_duration: int | None = None
+ 
+ 
+ @dataclass
+@@ -258,6 +261,9 @@ class ReqMeta:
+     # True only when the scheduler parked the request in WAITING_FOR_REMOTE_KVS
+     # and expects it in finished_recving; notify-only recvs must not be reported.
+     awaiting_kvs: bool = False
++    # Worker-only, pull: local perf_counter time by which every READ must
++    # complete for the KV to be used.
++    lease_fence: float | None = None
+     # Worker-only, per-region physical pages to zero after a successful pull.
+     # None selects group-based completion; empty lists mean no zeroing.
+     region_blocks_to_zero: BlockIds | None = None
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/nixl/pull_scheduler.py b/vllm/distributed/kv_transfer/kv_connector/v1/nixl/pull_scheduler.py
+index f283a40d3c..1a7e9e58ca 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/nixl/pull_scheduler.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/nixl/pull_scheduler.py
+@@ -264,9 +264,8 @@ class NixlPullConnectorScheduler(NixlBaseConnectorScheduler):
+             self._reqs_need_send[request.request_id] = (
+                 time.perf_counter() + request_kv_blocks_ttl
+             )
+-            if is_d_node:
+-                # D blocks expiry time exported for the turn-2 readback.
+-                blocks_expiry_time = self._reqs_need_send[request.request_id]
++            # Un-extended lease expiry on this process's perf_counter clock.
++            blocks_expiry_time = self._reqs_need_send[request.request_id]
+             # NOTE HMA will "mark" empty/null blocks in groups with 0s (eg SWA ones),
+             # trimming down after allocating for the whole sequence length. Empty
+             # blocks are always at the start of the list.
+diff --git a/vllm/distributed/kv_transfer/kv_connector/v1/nixl/pull_worker.py b/vllm/distributed/kv_transfer/kv_connector/v1/nixl/pull_worker.py
+index 16a25149ea..fac3331034 100644
+--- a/vllm/distributed/kv_transfer/kv_connector/v1/nixl/pull_worker.py
++++ b/vllm/distributed/kv_transfer/kv_connector/v1/nixl/pull_worker.py
+@@ -2,6 +2,7 @@
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ """Pull-specific (READ) worker-side logic for the NIXL connector."""
+ 
++import math
+ import time
+ from typing import TYPE_CHECKING
+ 
+@@ -133,6 +134,58 @@ class NixlPullConnectorWorker(NixlBaseConnectorWorker):
+         deadline = blocks_expiry_time - clock_offset
+         return time.perf_counter() + _KV_BLOCKS_EXPIRY_SAFETY_MARGIN >= deadline
+ 
++    def _lease_deadline(self, meta: ReqMeta) -> float | None:
++        """Local time by which this request's READs must complete (#61229).
++
++        None if unfenced: the producer exports no lease expiry, or the request
++        reads nothing. -inf if the exported expiry is missing or invalid.
++        """
++        assert meta.remote is not None
++        fence = self._lease_fences.get(meta.remote.engine_id)
++        if fence is None or not any(
++            len(group) > 0 for group in meta.local_physical_block_ids
++        ):
++            return None
++        clock_offset, margin = fence
++        expiry = meta.remote.blocks_expiry_time
++        # The expiry is client-controllable.
++        try:
++            if isinstance(expiry, (int, float)) and math.isfinite(expiry):
++                return float(expiry) - clock_offset - margin
++        except OverflowError:
++            pass
++        return float("-inf")
++
++    def _decline_late_recvs(self, done_recving: set[str]) -> set[str]:
++        """Completed pulls whose READs may have outlived the producer's lease.
++
++        A kept pull finished every READ before P's expiry-based free, provided
++        the handshake clock-offset error stays below the margin: P frees on
++        expiry no earlier than its exported expiry, and completion is observed
++        here no earlier than it happened. Frees triggered by consumer
++        notifications are not detected, so a duplicate read of one lease
++        passes.
++        """
++        now = time.perf_counter()
++        late: set[str] = set()
++        for req_id in done_recving:
++            deadline = getattr(self._recving_metadata.get(req_id), "lease_fence", None)
++            if (
++                not isinstance(deadline, float)
++                or now < deadline
++                or req_id in self._recv_failures
++            ):
++                continue
++            logger.error(
++                "Declining KV pulled for %s: the READ completed %.1fs after the "
++                "producer's lease fence; the blocks may have been reused.",
++                req_id,
++                now - deadline,
++            )
++            self.xfer_stats.record_kv_expired_req()
++            late.add(req_id)
++        return late
++
+     def _read_blocks_for_req(self, req_id: str, meta: ReqMeta):
+         assert meta.remote is not None and self.transfer_topo is not None
+         engine_id = meta.remote.engine_id
+@@ -149,19 +202,35 @@ class NixlPullConnectorWorker(NixlBaseConnectorWorker):
+         # thread (this one), so we don't race on this structure.
+         self._engine_last_active[engine_id] = time.perf_counter()
+ 
+-        if self._bidirectional_kv_xfer_enabled and self._is_turn2_read_expired(meta):
+-            logger.warning(
+-                "Declining expired remote read for %s from engine %s.",
+-                req_id,
+-                engine_id,
++        deadline = self._lease_deadline(meta)
++        if deadline is None:
++            expired = self._bidirectional_kv_xfer_enabled and (
++                self._is_turn2_read_expired(meta)
+             )
+-            self.xfer_stats.record_kv_expired_req()
++        else:
++            expired = time.perf_counter() >= deadline
++        if expired:
++            if deadline == float("-inf"):
++                logger.warning(
++                    "Declining remote read for %s from engine %s: no valid lease "
++                    "expiry.",
++                    req_id,
++                    engine_id,
++                )
++            else:
++                logger.warning(
++                    "Declining expired remote read for %s from engine %s.",
++                    req_id,
++                    engine_id,
++                )
++                self.xfer_stats.record_kv_expired_req()
+             # KV expiry is reported separately from transport failures, so only
+             # the state cleanup side of _handle_failed_transfer runs here.
+             self._handle_failed_transfer(
+                 req_id, None, self._recv_failures, record_failed_transfer=False
+             )
+             return
++        meta.lease_fence = deadline
+ 
+         if any(len(group) > 0 for group in meta.local_block_ids):
+             # The scheduler waits for finished_recving from *every* worker.

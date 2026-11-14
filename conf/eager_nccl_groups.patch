@@ -1,0 +1,37 @@
+diff --git a/vllm/distributed/parallel_state.py b/vllm/distributed/parallel_state.py
+index fea0c4e3c7..6ee51da833 100644
+--- a/vllm/distributed/parallel_state.py
++++ b/vllm/distributed/parallel_state.py
+@@ -2361,6 +2361,32 @@ def initialize_model_parallel(
+         _EP.rank_in_group if _EP is not None else "N/A",
+         _EPLB.rank_in_group if _EPLB is not None else "N/A",
+     )
++    _warmup_dcp_group()
++
++
++def _warmup_dcp_group() -> None:
++    """Connects the DCP group's torch NCCL communicator now, before the KV cache.
++
++    DCP runs torch collectives on its device group directly (KV gather and
++    all-to-all), which connect at their first use. Connected later on a nearly
++    full B300 GPU, the communicator fails with Xid 170 under Confidential
++    Computing. The all_to_all is warmed too: the symmetric-memory all-to-all
++    falls back to it for batches above its workspace.
++    """
++    group = _DCP
++    if group is None or group.world_size <= 1:
++        return
++    device_group = group.device_group
++    # "cpu:gloo,cuda:nccl" with VLLM_DISTRIBUTED_USE_SPLIT_GROUP.
++    if "nccl" not in str(torch.distributed.get_backend(device_group)):
++        return
++    n = 1024
++    x = torch.zeros(group.world_size * n, dtype=torch.bfloat16, device=group.device)
++    y = torch.empty_like(x)
++    torch.distributed.all_gather_into_tensor(y, x[:n], group=device_group)
++    torch.distributed.all_to_all_single(y, x, group=device_group)
++    torch.accelerator.synchronize()
++    logger.info("Warmed up NCCL group dcp (world size %d)", group.world_size)
+ 
+ 
+ def ensure_model_parallel_initialized(

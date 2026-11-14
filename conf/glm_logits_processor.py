@@ -2,14 +2,15 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
+import numpy as np
 import torch
 
 from vllm.logger import init_logger
 from vllm.utils.torch_utils import async_tensor_h2d
-from vllm.v1.sample.logits_processor.interface import (
-    BatchUpdate,
+from vllm.v1.worker.gpu.sample.logits_processor import (
+    LogitsContext,
     LogitsProcessor,
-    MoveDirectionality,
+    LogitsProcRequestState,
 )
 
 if TYPE_CHECKING:
@@ -31,13 +32,6 @@ class _Phase(Enum):
     THINK = 1  # inside the think block
     ANSWER_START = 2  # after </think>, no answer token yet
     FREE = 3  # answer or tool call started, or no think block in this turn
-
-
-@dataclass
-class _RequestState:
-    output_tok_ids: list[int]  # live reference, kept current by the engine
-    phase: _Phase
-    consumed: int = 0
 
 
 @dataclass(frozen=True)
@@ -70,162 +64,194 @@ def _resolve_markers(tokenizer) -> _Markers:
     return markers
 
 
+_THINK = _Phase.THINK.value
+_ANSWER_START = _Phase.ANSWER_START.value
+_FREE = _Phase.FREE.value
+
+
 class GlmLogitsProcessor(LogitsProcessor):
     """Prevents empty GLM answers: no turn end before the answer."""
 
     def __init__(
-        self,
-        vllm_config: "VllmConfig",
-        device: torch.device,
-        is_pin_memory: bool,
+        self, vllm_config: "VllmConfig", req_states: LogitsProcRequestState
     ) -> None:
-        del is_pin_memory
-        self.device = device
-        self.model_config = vllm_config.model_config
-        if self.model_config is None:
+        if vllm_config.speculative_config is not None:
+            raise ValueError(
+                f"{type(self).__name__} does not support speculative decoding."
+            )
+        model_config = vllm_config.model_config
+        if model_config is None:
             raise ValueError("glm logits processor requires a model_config")
         from vllm.tokenizers import cached_tokenizer_from_config
 
-        self._tokenizer = cached_tokenizer_from_config(self.model_config)
+        tokenizer = cached_tokenizer_from_config(model_config)
         # Raises at engine start if a marker is missing: only GLM models load this processor.
-        self._markers = _resolve_markers(self._tokenizer)
-        logger.info(
-            "GLM logits processor active, end of turn %s.",
-            list(self._markers.end_of_turn),
+        self._markers = m = _resolve_markers(tokenizer)
+        logger.info("GLM logits processor active, end of turn %s.", list(m.end_of_turn))
+        self.req_states = req_states
+        self.device = device = req_states.device
+        self._eot_idx = torch.tensor(m.end_of_turn, dtype=torch.long, device=device)
+        self._boundary_idx = torch.tensor(
+            m.turn_boundaries, dtype=torch.long, device=device
         )
-        self._eot_idx = torch.tensor(
-            self._markers.end_of_turn, dtype=torch.long, device=device
+        # Ids past the tokenizer's vocabulary (vocab padding) are not whitespace.
+        num_tokens = min(max(tokenizer.get_vocab().values()) + 1, req_states.vocab_size)
+        is_whitespace = torch.zeros(req_states.vocab_size, dtype=torch.bool)
+        is_whitespace[:num_tokens] = torch.tensor(
+            [_decodes_to_whitespace(tokenizer, t) for t in range(num_tokens)],
+            dtype=torch.bool,
         )
-        self._whitespace: dict[int, bool] = {}
-        self._row_cache: dict[str, tuple[list[int], torch.Tensor]] = {}
-        self._states: dict[int, _RequestState] = {}
+        self._is_whitespace = is_whitespace.to(device)
+        self._phase = torch.full(
+            (req_states.max_num_reqs,), _FREE, dtype=torch.int32, device=device
+        )
+        # Per slot: tokens already folded into _phase.
+        self._scanned = np.zeros(req_states.max_num_reqs, dtype=np.int64)
+        self._pending: dict[int, None] = {}
 
-    def _is_whitespace(self, tok: int) -> bool:
-        cached = self._whitespace.get(tok)
-        if cached is None:
-            text = self._tokenizer.decode([tok], skip_special_tokens=False)
-            cached = self._whitespace[tok] = text != "" and not text.strip()
-        return cached
+    def add_request(self, req_idx: int, sampling_params) -> bool:
+        del sampling_params
+        # The slot's tokens are on the device only by apply_staged_writes().
+        self._pending[req_idx] = None
+        return True
 
-    def _initial_phase(self, prompt_tok_ids: list[int] | None) -> _Phase:
-        """Phase at the end of the prompt."""
-        if not prompt_tok_ids:
-            return _Phase.FREE
-        m = self._markers
-        for i in range(len(prompt_tok_ids) - 1, -1, -1):
-            tok = prompt_tok_ids[i]
-            if tok == m.think_start:
-                return _Phase.THINK
-            if tok == m.think_end:
-                tail = prompt_tok_ids[i + 1 :]
-                if all(self._is_whitespace(t) for t in tail):
-                    return _Phase.ANSWER_START
-                return _Phase.FREE
-            if tok in m.turn_boundaries:
-                break
-        return _Phase.FREE
+    def apply_staged_writes(self) -> None:
+        if not self._pending:
+            return
+        slots = np.fromiter(self._pending, dtype=np.int64)
+        self._pending.clear()
+        prompt_lens = self.req_states.prompt_len.np[slots].astype(np.int64)
+        prefill_lens = self.req_states.prefill_len.np[slots].astype(np.int64)
+        slots_t = self._h2d(slots)
+        # One slot at a time: padding all slots to the longest prefill (up to the
+        # context window) would take GBs with many slots added in one step.
+        for i, (prompt_len, prefill_len) in enumerate(
+            zip(prompt_lens.tolist(), prefill_lens.tolist())
+        ):
+            slot_t = slots_t[i : i + 1]
+            if prefill_len == 0:
+                self._phase[slot_t] = _FREE
+                continue
+            pos = torch.arange(prefill_len, device=self.device)[None, :]
+            tokens = self._tokens(slot_t, pos)
+            prompt = pos < prompt_len
+            phase = self._prompt_phase(tokens, pos, prompt)
+            self._phase[slot_t] = self._advance(phase, tokens, ~prompt)
+        self._scanned[slots] = prefill_lens
 
-    def update_state(self, batch_update: BatchUpdate | None) -> None:
-        if batch_update is not None:
-            for index in batch_update.removed:
-                self._states.pop(index, None)
-
-            for index, _params, prompt_tok_ids, output_tok_ids in batch_update.added:
-                self._states[index] = _RequestState(
-                    output_tok_ids=output_tok_ids,
-                    phase=self._initial_phase(prompt_tok_ids),
-                )
-
-            for i1, i2, direction in batch_update.moved:
-                if direction == MoveDirectionality.SWAP:
-                    s1 = self._states.pop(i1, None)
-                    s2 = self._states.pop(i2, None)
-                    if s2 is not None:
-                        self._states[i1] = s2
-                    if s1 is not None:
-                        self._states[i2] = s1
-                else:
-                    s1 = self._states.pop(i1, None)
-                    if s1 is not None:
-                        self._states[i2] = s1
-                    else:
-                        self._states.pop(i2, None)
-
-        self._scan_states()
-
-    def _scan_states(self) -> None:
-        # Stops at a -1 async-scheduling placeholder; apply() rescans once the
-        # engine has filled it in, so a phase change takes effect in the same step.
-        m = self._markers
-        for state in self._states.values():
-            toks = state.output_tok_ids
-            i = state.consumed
-            while i < len(toks) and state.phase != _Phase.FREE:
-                tok = toks[i]
-                if tok < 0:
-                    break
-                if state.phase == _Phase.THINK:
-                    if tok == m.think_end:
-                        state.phase = _Phase.ANSWER_START
-                    elif tok == m.tool_call_start:
-                        state.phase = _Phase.FREE
-                elif not self._is_whitespace(tok):
-                    state.phase = _Phase.FREE
-                i += 1
-            state.consumed = i
-
-    def apply(self, logits: torch.Tensor) -> torch.Tensor:
-        self._scan_states()
-        m = self._markers
-        if not self._states:
+    def apply(self, logits: torch.Tensor, ctx: LogitsContext) -> torch.Tensor:
+        slots = ctx.idx_mapping_np
+        if logits.shape[0] != slots.shape[0]:
+            raise RuntimeError(f"{type(self).__name__} received draft-expanded logits")
+        # Padded to the CUDA graph's request count under FULL graphs.
+        seq_lens = ctx.seq_lens_upper_bound_np[: slots.shape[0]].astype(np.int64)
+        # Rows of a non-final prefill chunk sample a token that is discarded.
+        rows = np.flatnonzero(seq_lens >= self.req_states.prefill_len.np[slots])
+        if rows.size == 0:
             return logits
+        row_slots = slots[rows].astype(np.int64)
+        starts = self._scanned[row_slots]
+        ends = seq_lens[rows]
+        rows_t = self._h2d(rows)
+        slots_t = self._h2d(row_slots)
 
-        think_rows: list[int] = []
-        answer_rows: list[int] = []
-        for index, state in sorted(self._states.items()):
-            if state.phase == _Phase.THINK:
-                think_rows.append(index)
-            elif state.phase == _Phase.ANSWER_START:
-                answer_rows.append(index)
+        phase = self._phase[slots_t]
+        width = int(np.maximum(ends - starts, 0).max())
+        if width:
+            pos = self._h2d(starts)[:, None] + torch.arange(width, device=self.device)
+            new = pos < self._h2d(ends)[:, None]
+            tokens = self._tokens(slots_t, pos)
+            phase = self._advance(phase, tokens, new)
+            self._phase[slots_t] = phase
+            self._scanned[row_slots] = np.maximum(starts, ends)
 
-        eot = self._eot_idx
         # Neither rule overrides an earlier mask (grammar, client ban): a token the grammar
         # rejects ends the request.
-        if think_rows:
-            rows = self._rows("think", think_rows)
-            eot_logits = logits[rows.unsqueeze(1), eot]
-            think_end = logits[rows, m.think_end]
-            applies = torch.isfinite(think_end)
-            # Where the model would end its turn, close the think block instead. max, not
-            # logaddexp: no stop pressure beyond the model's own.
-            logits[rows, m.think_end] = torch.where(
-                applies,
-                torch.maximum(think_end, eot_logits.max(dim=1).values),
-                think_end,
-            )
-            logits[rows.unsqueeze(1), eot] = torch.where(
-                applies.unsqueeze(1), float("-inf"), eot_logits
-            )
-        if answer_rows:
-            rows = self._rows("answer", answer_rows)
-            eot_logits = logits[rows.unsqueeze(1), eot]
-            allowed = torch.isfinite(logits[rows]).sum(dim=1)
-            applies = allowed > torch.isfinite(eot_logits).sum(dim=1)
-            logits[rows.unsqueeze(1), eot] = torch.where(
-                applies.unsqueeze(1), float("-inf"), eot_logits
-            )
+        m = self._markers
+        eot = self._eot_idx
+        eot_cols = (rows_t[:, None], eot[None, :])
+        eot_logits = logits[eot_cols]
+        think_end = logits[rows_t, m.think_end]
+        think = (phase == _THINK) & torch.isfinite(think_end)
+        # Answer start: ban the turn end only if another token stays allowed.
+        logits[eot_cols] = torch.where(
+            (phase == _ANSWER_START)[:, None], float("-inf"), eot_logits
+        )
+        answer = (phase == _ANSWER_START) & torch.isfinite(logits.amax(dim=1)[rows_t])
+        logits[eot_cols] = torch.where(
+            (think | answer)[:, None], float("-inf"), eot_logits
+        )
+        # Where the model would end its turn, close the think block instead. max, not
+        # logaddexp: no stop pressure beyond the model's own.
+        logits[rows_t, m.think_end] = torch.where(
+            think, torch.maximum(think_end, eot_logits.max(dim=1).values), think_end
+        )
         return logits
 
-    def _rows(self, key: str, rows: list[int]) -> torch.Tensor:
-        """Row indices as a device tensor, rebuilt only when the set changes."""
-        cached = self._row_cache.get(key)
-        if cached is None or cached[0] != rows:
-            cached = (
-                rows,
-                async_tensor_h2d(rows, device=self.device, dtype=torch.long),
-            )
-            self._row_cache[key] = cached
-        return cached[1]
+    def _h2d(self, data: np.ndarray) -> torch.Tensor:
+        return async_tensor_h2d(data, self.device, torch.long)
 
-    def is_argmax_invariant(self) -> bool:
-        return False
+    def _tokens(self, slots_t: torch.Tensor, pos: torch.Tensor) -> torch.Tensor:
+        """Committed tokens at pos per slot; out-of-range positions hold junk
+        the callers mask out."""
+        all_token_ids = self.req_states.all_token_ids.gpu
+        pos = pos.clamp(0, all_token_ids.shape[1] - 1)
+        tokens = all_token_ids[slots_t[:, None], pos].long()
+        return tokens.clamp(0, self._is_whitespace.shape[0] - 1)
+
+    def _prompt_phase(
+        self, tokens: torch.Tensor, pos: torch.Tensor, prompt: torch.Tensor
+    ) -> torch.Tensor:
+        """Phase at the end of the prompt: the last think marker after the
+        last turn boundary decides."""
+        m = self._markers
+        boundary = torch.isin(tokens, self._boundary_idx) & prompt
+        last_boundary = torch.where(boundary, pos, -1).amax(dim=1, keepdim=True)
+        marker = (
+            ((tokens == m.think_start) | (tokens == m.think_end))
+            & prompt
+            & (pos > last_boundary)
+        )
+        last_marker = torch.where(marker, pos, -1).amax(dim=1, keepdim=True)
+        marker_tok = tokens.gather(1, last_marker.clamp(min=0)).squeeze(1)
+        answered = (~self._is_whitespace[tokens] & prompt & (pos > last_marker)).any(
+            dim=1
+        )
+        free = torch.full_like(marker_tok, _FREE, dtype=torch.int32)
+        after_end = torch.where(answered, free, _ANSWER_START)
+        phase = torch.where(marker_tok == m.think_start, _THINK, after_end)
+        return torch.where(last_marker.squeeze(1) >= 0, phase, free)
+
+    def _advance(
+        self,
+        phase: torch.Tensor,
+        tokens: torch.Tensor,
+        valid: torch.Tensor,
+    ) -> torch.Tensor:
+        """Phase after the valid tokens of each row, in column order."""
+        m = self._markers
+        cols = torch.arange(tokens.shape[1], device=self.device)[None, :]
+        tool_call = (tokens == m.tool_call_start) & valid
+        stop = ((tokens == m.think_end) & valid) | tool_call
+        # THINK ends at the first </think> or <tool_call>.
+        first = stop.int().argmax(dim=1, keepdim=True)
+        non_ws = ~self._is_whitespace[tokens] & valid
+        free = torch.full_like(phase, _FREE)
+        # After </think>, any non-whitespace token frees the row.
+        answered_after = (non_ws & (cols > first)).any(dim=1)
+        from_think = torch.where(
+            tool_call.gather(1, first).squeeze(1) | answered_after,
+            free,
+            _ANSWER_START,
+        )
+        from_think = torch.where(stop.any(dim=1), from_think, _THINK)
+        from_answer = torch.where(non_ws.any(dim=1), free, _ANSWER_START)
+        phase_next = torch.where(phase == _THINK, from_think, phase)
+        return torch.where(phase == _ANSWER_START, from_answer, phase_next).to(
+            phase.dtype
+        )
+
+
+def _decodes_to_whitespace(tokenizer, tok: int) -> bool:
+    text = tokenizer.decode([tok], skip_special_tokens=False)
+    return text != "" and not text.strip()

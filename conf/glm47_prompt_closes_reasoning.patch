@@ -1,0 +1,133 @@
+diff --git a/vllm/parser/abstract_parser.py b/vllm/parser/abstract_parser.py
+index 12a9c23698..2dbd343440 100644
+--- a/vllm/parser/abstract_parser.py
++++ b/vllm/parser/abstract_parser.py
+@@ -347,6 +347,10 @@ class DelegatingParser(Parser):
+     values (no reasoning extraction, no tool calls).
+     """
+ 
++    def set_prompt_token_ids(self, prompt_token_ids: Sequence[int]) -> None:
++        if self._reasoning_parser is not None:
++            self._reasoning_parser.set_prompt_token_ids(prompt_token_ids)
++
+     def extract_reasoning(
+         self,
+         model_output: str,
+@@ -860,6 +864,7 @@ class DelegatingParser(Parser):
+ 
+         if not state.prompt_reasoning_checked and prompt_token_ids is not None:
+             state.prompt_reasoning_checked = True
++            self.set_prompt_token_ids(prompt_token_ids)
+             if self._reasoning_parser is None or self.is_reasoning_end(
+                 prompt_token_ids
+             ):
+diff --git a/vllm/parser/engine/adapters.py b/vllm/parser/engine/adapters.py
+index cd7aaa7297..0b004153ff 100644
+--- a/vllm/parser/engine/adapters.py
++++ b/vllm/parser/engine/adapters.py
+@@ -49,6 +49,7 @@ class ParserEngineReasoningAdapter(ReasoningParser):
+         self._parser_engine = self._parser_engine_cls(tokenizer, **kwargs)  # type: ignore[call-arg]
+         self._parser_engine_kwargs = kwargs
+         self._counting_parser_engine: ParserEngine | None = None
++        self._prompt_token_ids: Sequence[int] | None = None
+         # TODO: Remove once Responses finalization reuses accumulated streaming
+         # parser results instead of reparsing the complete output.
+         self._streaming_count_valid = False
+@@ -68,6 +69,12 @@ class ParserEngineReasoningAdapter(ReasoningParser):
+     def find_reasoning_end(self, token_ids: Sequence[int]) -> ReasoningEnd | None:
+         return self._parser_engine.find_reasoning_end(token_ids)
+ 
++    def set_prompt_token_ids(self, prompt_token_ids: Sequence[int]) -> None:
++        self._prompt_token_ids = prompt_token_ids
++        self._parser_engine.set_prompt_token_ids(prompt_token_ids)
++        if self._counting_parser_engine is not None:
++            self._counting_parser_engine.set_prompt_token_ids(prompt_token_ids)
++
+     def adjust_initial_state_from_prompt(self, prompt_token_ids: Sequence[int]) -> None:
+         self._parser_engine.adjust_initial_state_from_prompt(prompt_token_ids)
+ 
+@@ -144,6 +151,10 @@ class ParserEngineReasoningAdapter(ReasoningParser):
+             self._counting_parser_engine = self._parser_engine_cls(
+                 self.model_tokenizer, **self._parser_engine_kwargs
+             )  # type: ignore[call-arg]
++            if self._prompt_token_ids is not None:
++                self._counting_parser_engine.set_prompt_token_ids(
++                    self._prompt_token_ids
++                )
+         self._counting_parser_engine._single_pass_parse(
+             self.model_tokenizer.decode(token_ids), token_ids
+         )
+diff --git a/vllm/parser/glm47_moe.py b/vllm/parser/glm47_moe.py
+index db89900207..60c8e4f667 100644
+--- a/vllm/parser/glm47_moe.py
++++ b/vllm/parser/glm47_moe.py
+@@ -32,6 +32,8 @@ from vllm.parser.engine.parser_engine_config import (
+ logger = init_logger(__name__)
+ 
+ if TYPE_CHECKING:
++    from collections.abc import Sequence
++
+     from vllm.tokenizers import TokenizerLike
+     from vllm.tool_parsers.abstract_tool_parser import Tool
+ 
+@@ -203,6 +205,9 @@ def glm47_moe_config(thinking: bool = True) -> ParserEngineConfig:
+ class Glm47MoeParser(ParserEngine):
+     """GLM-4.7 parser backed by the declarative parser engine."""
+ 
++    # On the class: Ling3Parser skips this __init__ but inherits _reset().
++    _prompt_closes_reasoning = False
++
+     def __init__(
+         self,
+         tokenizer: TokenizerLike,
+@@ -216,9 +221,9 @@ class Glm47MoeParser(ParserEngine):
+             tokenizer
+         ):
+             logger.warning_once(
+-                "Ignoring enable_thinking/thinking: the GLM-5.3 chat template "
+-                "has no thinking switch, so reasoning is always on and "
+-                "disabling extraction would leak it into the content."
++                "Ignoring enable_thinking/thinking: the shipped GLM-5.3 chat "
++                "template has no thinking switch; the output is parsed as "
++                "reasoning unless the rendered prompt closes the think block."
+             )
+             thinking = None
+             enable_thinking = None
+@@ -233,6 +238,19 @@ class Glm47MoeParser(ParserEngine):
+         )
+         super().__init__(tokenizer, tools, **kwargs)
+ 
++    def set_prompt_token_ids(self, prompt_token_ids: Sequence[int]) -> None:
++        # The template actually used (e.g. --chat-template) may have rendered a
++        # closed <think></think> although the shipped one always thinks: the
++        # output is then content.
++        self._prompt_closes_reasoning = self.thinking_enabled and (
++            self.is_reasoning_end(list(prompt_token_ids))
++        )
++
++    def _reset(self, initial_state: ParserState | None = None) -> None:
++        if initial_state is None and self._prompt_closes_reasoning:
++            initial_state = ParserState.CONTENT
++        super()._reset(initial_state=initial_state)
++
+     def adjust_request(
+         self, request: ChatCompletionRequest | ResponsesRequest
+     ) -> ChatCompletionRequest | ResponsesRequest:
+diff --git a/vllm/reasoning/abs_reasoning_parsers.py b/vllm/reasoning/abs_reasoning_parsers.py
+index accc8c9c27..0cc20b384f 100644
+--- a/vllm/reasoning/abs_reasoning_parsers.py
++++ b/vllm/reasoning/abs_reasoning_parsers.py
+@@ -192,6 +192,13 @@ class ReasoningParser:
+         """Adjust request parameters; override in subclasses as needed."""
+         return request
+ 
++    def set_prompt_token_ids(self, prompt_token_ids: Sequence[int]) -> None:
++        """Called with the rendered prompt before the request's output is parsed.
++
++        Default is a no-op; override in subclasses as needed.
++        """
++        return
++
+     def adjust_initial_state_from_prompt(self, prompt_token_ids: Sequence[int]) -> None:
+         """Hook called once at the start of streaming with the prompt tokens.
+ 

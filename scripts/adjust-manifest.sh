@@ -11,9 +11,9 @@ manifest=$1
 # set TCB versions and mitigation vector
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.BootloaderVersion=12' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.TEEVersion=0' "$manifest"
-yq eval -i '.ReferenceValues.snp[].MinimumTCB.SNPVersion=28' "$manifest"
+yq eval -i '.ReferenceValues.snp[].MinimumTCB.SNPVersion=30' "$manifest"
 yq eval -i '.ReferenceValues.snp[].MinimumTCB.MicrocodeVersion=88' "$manifest"
-yq eval -i '.ReferenceValues.snp[].MinimumMitigationVector=15' "$manifest"
+yq eval -i '.ReferenceValues.snp[].MinimumMitigationVector=1023' "$manifest"
 
 # configure PlatformInfo
 yq eval -i '.ReferenceValues.snp[].PlatformInfo={ "SMTEnabled":false, "ECCEnabled":true, "AliasCheckComplete":true }' "$manifest"

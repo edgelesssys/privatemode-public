@@ -1,0 +1,23 @@
+diff --git a/vllm/utils/platform_utils.py b/vllm/utils/platform_utils.py
+index 5d7fed3c99..e12e1702d8 100644
+--- a/vllm/utils/platform_utils.py
++++ b/vllm/utils/platform_utils.py
+@@ -50,11 +50,15 @@ def is_pin_memory_available() -> bool:
+ @cache
+ def is_uva_available() -> bool:
+     """Check if Unified Virtual Addressing (UVA) is available."""
+-    # UVA requires pinned memory.
+     from vllm.platforms import current_platform
+ 
+-    # TODO: Add more requirements for UVA if needed.
+-    return is_pin_memory_available() or current_platform.is_cpu()
++    # Under GPU Confidential Computing the device cannot read pinned host
++    # memory, and Privatemode always runs under it: UVA is off except on the
++    # CPU backend, where host memory is device memory.
++    # Cost: StagedWriteTensor's UVA tensors move to the GPU, mainly the V2
++    # runner's all_token_ids (max_num_seqs x max_model_len x 4 B per GPU,
++    # ~2 GiB for GLM-5.3), taken from the KV cache.
++    return current_platform.is_cpu()
+ 
+ 
+ @cache

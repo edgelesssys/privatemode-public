@@ -1,0 +1,52 @@
+diff --git a/vllm/config/structured_outputs.py b/vllm/config/structured_outputs.py
+index 4a13900b56..6f58d1566d 100644
+--- a/vllm/config/structured_outputs.py
++++ b/vllm/config/structured_outputs.py
+@@ -23,10 +23,10 @@ class StructuredOutputsConfig:
+     based on request contents and what the backend libraries currently support,
+     so the behavior is subject to change in each release."""
+     disable_any_whitespace: bool = False
+-    """If `True`, json output will always be compact without any whitespace.
+-    If `False`, the model may generate whitespace between JSON fields,
+-    which is still valid JSON. This is only supported for xgrammar
+-    and guidance backends."""
++    """If `True`, json output has no whitespace except one space after each
++    `,` and `:` (xgrammar; guidance stays compact). If `False`, the model may
++    generate whitespace between JSON fields, which is still valid JSON. This is
++    only supported for xgrammar and guidance backends."""
+     disable_additional_properties: bool = False
+     """If `True`, the `guidance` backend will not use `additionalProperties`
+     in the JSON schema. This is only supported for the `guidance` backend and
+diff --git a/vllm/v1/structured_output/backend_xgrammar.py b/vllm/v1/structured_output/backend_xgrammar.py
+index 0199c5f75d..54511c175a 100644
+--- a/vllm/v1/structured_output/backend_xgrammar.py
++++ b/vllm/v1/structured_output/backend_xgrammar.py
+@@ -89,25 +89,9 @@ class XgrammarBackend(StructuredOutputBackend):
+         grammar_spec: str,
+         stop_token_ids: set[int] | None = None,
+     ) -> StructuredOutputGrammar:
+-        # Note(arpera):
+-        # Our flag disable_any_whitespace does NOT map directly to
+-        # xgrammar's flag any_whitespace
+-        # To achieve desired behavior of disable_any_whitespace
+-        # we have to set not only any_whitespace
+-        # but also specify a list of separators after which
+-        # xgrammar must not insert spaces.
+-        # This is a requirement of xgrammar's API, so we must comply with it.
+-        #
+-        # FIXME(arpera):
+-        # Currently xgrammar v0.2.8 DOES emit spaces after comma
+-        # even if we specify it in separators list.
+-        # The bug has been reported to xgrammar team:
+-        # https://github.com/mlc-ai/xgrammar/issues/945
+-        # Please, track that issue, and once it is resolved remove this comment.
+-        # Upd. this bug was fixed in xgrammar main branch on Oct 8, 2026
+-        # and will be available in next release.
+-        # So, remove this comment once xgrammar updates to v0.2.9
+-        separators = (",", ":") if self.disable_any_whitespace else None
++        # Upstream (vllm-project/vllm#58067) uses "," / ":"; GLM emits '": "' as one
++        # token and derails when it is masked.
++        separators = (", ", ": ") if self.disable_any_whitespace else None
+         if request_type == StructuredOutputOptions.JSON:
+             ctx = self.compiler.compile_json_schema(
+                 grammar_spec,

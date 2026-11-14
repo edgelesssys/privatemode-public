@@ -1,0 +1,83 @@
+diff --git a/vllm/models/glm5next/common/kda.py b/vllm/models/glm5next/common/kda.py
+index 68d405b40c..fc7d2e72a2 100644
+--- a/vllm/models/glm5next/common/kda.py
++++ b/vllm/models/glm5next/common/kda.py
+@@ -47,7 +47,10 @@ from vllm.platforms import current_platform
+ from vllm.third_party.flash_linear_attention.ops.kda import FusedRMSNormGated
+ from vllm.v1.attention.backends.gdn_attn import GDNAttentionMetadata
+ from vllm.v1.kv_cache_interface import MambaSpec
+-from vllm.v1.worker.workspace import current_workspace_manager
++from vllm.v1.worker.workspace import (
++    current_workspace_manager,
++    is_workspace_manager_initialized,
++)
+ 
+ if current_platform.is_rocm():
+     from vllm.models.glm5next.amd.ops.third_party.kda import (
+@@ -354,33 +357,40 @@ class Glm5NextLinearAttention(GatedDeltaNetAttention):
+         ) = None
+         self._checkpoint_exporter: FlashKDAPrefillCheckpointExporter | None = None
+         if self.kda_prefill_backend == "flashkda":
+-            import vllm._flashkda_C  # noqa: F401
++            self._init_flashkda_prefill(vllm_config)
+ 
+-            max_tokens = vllm_config.scheduler_config.max_num_batched_tokens
+-            max_seqs = vllm_config.scheduler_config.max_num_seqs
+-            workspace_size = torch.ops._flashkda_C.get_workspace_size(
+-                max_tokens, self.local_num_heads, max_seqs
+-            )
+-            self._flashkda_buffer_specs = (
+-                (
+-                    (max_seqs, self.local_num_heads, self.head_dim, self.head_dim),
+-                    self.get_state_dtype()[1],
+-                ),
+-                (
+-                    (max_seqs, self.local_num_heads, self.head_dim, self.head_dim),
+-                    self.get_state_dtype()[1],
+-                ),
+-                ((workspace_size,), torch.uint8),
+-                # Output buffer for steps that also carry spec-decode tokens:
+-                # the non-spec tokens are then scattered by non_spec_token_indx.
+-                (
+-                    (1, max_tokens, self.local_num_heads, self.head_dim),
+-                    vllm_config.model_config.dtype,
+-                ),
+-            )
+-            self._checkpoint_exporter = FlashKDAPrefillCheckpointExporter(
+-                state_len=self.conv_size - 1
+-            )
++    def _init_flashkda_prefill(self, vllm_config: VllmConfig) -> None:
++        import vllm._flashkda_C  # noqa: F401
++
++        max_tokens = vllm_config.scheduler_config.max_num_batched_tokens
++        max_seqs = vllm_config.scheduler_config.max_num_seqs
++        workspace_size = torch.ops._flashkda_C.get_workspace_size(
++            max_tokens, self.local_num_heads, max_seqs
++        )
++        self._flashkda_buffer_specs = (
++            (
++                (max_seqs, self.local_num_heads, self.head_dim, self.head_dim),
++                self.get_state_dtype()[1],
++            ),
++            (
++                (max_seqs, self.local_num_heads, self.head_dim, self.head_dim),
++                self.get_state_dtype()[1],
++            ),
++            ((workspace_size,), torch.uint8),
++            # Output buffer for steps that also carry spec-decode tokens:
++            # the non-spec tokens are then scattered by non_spec_token_indx.
++            (
++                (1, max_tokens, self.local_num_heads, self.head_dim),
++                vllm_config.model_config.dtype,
++            ),
++        )
++        self._checkpoint_exporter = FlashKDAPrefillCheckpointExporter(
++            state_len=self.conv_size - 1
++        )
++        # The profile run skips KDA (no mamba metadata), so reserve the runtime
++        # layout before the workspace locks; only the current DBO ubatch slot.
++        if is_workspace_manager_initialized():
++            current_workspace_manager().get_simultaneous(*self._flashkda_buffer_specs)
+ 
+     def _flashkda_prefill(
+         self,

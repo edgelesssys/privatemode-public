@@ -1,8 +1,8 @@
 diff --git a/vllm/config/model.py b/vllm/config/model.py
-index efdedc064e..5bb70ed4bb 100644
+index f35dcb8773..02bfca85ac 100644
 --- a/vllm/config/model.py
 +++ b/vllm/config/model.py
-@@ -1838,6 +1838,7 @@ class ModelConfig:
+@@ -1881,6 +1881,7 @@ class ModelConfig:
              "top_p",
              "min_p",
              "max_new_tokens",
@@ -11,10 +11,10 @@ index efdedc064e..5bb70ed4bb 100644
          if any(p in config for p in available_params):
              diff_sampling_param = {
 diff --git a/vllm/entrypoints/openai/chat_completion/protocol.py b/vllm/entrypoints/openai/chat_completion/protocol.py
-index bb45dad0a0..68c08f3389 100644
+index 79dd9605e6..ba66291a02 100644
 --- a/vllm/entrypoints/openai/chat_completion/protocol.py
 +++ b/vllm/entrypoints/openai/chat_completion/protocol.py
-@@ -273,7 +273,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
+@@ -280,7 +280,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
      include_stop_str_in_output: bool = False
      ignore_eos: bool = False
      min_tokens: int = 0
@@ -23,7 +23,7 @@ index bb45dad0a0..68c08f3389 100644
      spaces_between_special_tokens: bool = True
      truncate_prompt_tokens: Annotated[int, Field(ge=-1, le=_INT64_MAX)] | None = None
      truncation_side: Literal["left", "right"] | None = Field(
-@@ -640,6 +640,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
+@@ -693,6 +693,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
              temperature = default_sampling_params.get(
                  "temperature", self._DEFAULT_SAMPLING_PARAMS["temperature"]
              )
@@ -34,8 +34,8 @@ index bb45dad0a0..68c08f3389 100644
  
          return BeamSearchParams(
              beam_width=n,
-@@ -648,7 +652,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
-             temperature=temperature,
+@@ -702,7 +706,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
+             watermarking=self.watermarking,
              length_penalty=self.length_penalty,
              include_stop_str_in_output=self.include_stop_str_in_output,
 -            skip_special_tokens=self.skip_special_tokens,
@@ -43,7 +43,7 @@ index bb45dad0a0..68c08f3389 100644
          )
  
      def extract_structured_outputs(self) -> StructuredOutputsParams | None:
-@@ -672,6 +676,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
+@@ -726,6 +730,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
              )
              for name, default in self._DEFAULT_SAMPLING_PARAMS.items()
          }
@@ -54,7 +54,7 @@ index bb45dad0a0..68c08f3389 100644
  
          # Merge server-default stop_token_ids (e.g., model-specific tokens
          # like </call> for gpt-oss) with any request-specified ones
-@@ -713,7 +721,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
+@@ -767,7 +775,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
              ignore_eos=self.ignore_eos,
              max_tokens=max_tokens,
              min_tokens=self.min_tokens,
@@ -64,10 +64,10 @@ index bb45dad0a0..68c08f3389 100644
              include_stop_str_in_output=self.include_stop_str_in_output,
              output_kind=(
 diff --git a/vllm/renderers/online_derenderer.py b/vllm/renderers/online_derenderer.py
-index 6f7cd10758..3f3dae1a05 100644
+index 345e5443ea..4a8f93ceda 100644
 --- a/vllm/renderers/online_derenderer.py
 +++ b/vllm/renderers/online_derenderer.py
-@@ -66,6 +66,12 @@ class OnlineDerenderer:
+@@ -75,6 +75,12 @@ class OnlineDerenderer:
      ) -> None:
          self.model_config = model_config
          self.renderer = renderer
@@ -80,41 +80,69 @@ index 6f7cd10758..3f3dae1a05 100644
          self.request_logger = request_logger
  
          self.enable_auto_tools = enable_auto_tools
-@@ -196,12 +202,8 @@ class OnlineDerenderer:
-                 )
-             else:
-                 # No parser: plain detokenization honouring the request's
--                # skip_special_tokens (default True when no request was given).
--                skip_special = (
--                    chat_request.skip_special_tokens
--                    if chat_request is not None
--                    else True
--                )
-+                # skip_special_tokens, else the server default.
-+                skip_special = self._skip_special_tokens(chat_request)
-                 decoded_text = tokenizer.decode(
-                     choice.token_ids, skip_special_tokens=skip_special
-                 )
-@@ -218,6 +220,11 @@ class OnlineDerenderer:
+@@ -140,7 +146,10 @@ class OnlineDerenderer:
  
-         return choices
+         has_parser = self.parser is not None and chat_request is not None
+         skip_special, spaces_between = _decode_params(
+-            tokenizer, chat_request, preserve_special=has_parser
++            tokenizer,
++            chat_request,
++            preserve_special=has_parser,
++            default_skip_special=self.default_skip_special_tokens,
+         )
+         seed_ids = (
+             prompt_token_ids
+@@ -177,8 +186,8 @@ class OnlineDerenderer:
  
-+    def _skip_special_tokens(self, chat_request: ChatCompletionRequest | None) -> bool:
-+        if chat_request is None or chat_request.skip_special_tokens is None:
-+            return self.default_skip_special_tokens
-+        return chat_request.skip_special_tokens
-+
-     def _detokenize_delta(
-         self,
-         tokenizer: TokenizerLike,
-@@ -356,9 +363,7 @@ class OnlineDerenderer:
+             # With a parser, special tokens are preserved so it can see
+             # markers like </think>, <tool_call>, or Harmony channel tokens.
+-            # Without one, the request's skip_special_tokens is honoured
+-            # (default True when no request was given).
++            # Without one, the request's skip_special_tokens is honoured,
++            # else the server default.
+             decoded_text, _ = self._detokenize_delta(
+                 tokenizer,
+                 choice.token_ids,
+@@ -426,7 +435,11 @@ class OnlineDerenderer:
              )
  
          tokenizer = self.renderer.get_tokenizer()
--        skip_special = (
--            chat_request.skip_special_tokens if chat_request is not None else True
--        )
-+        skip_special = self._skip_special_tokens(chat_request)
-         stream_choices: list[ChatCompletionResponseStreamChoice] = []
-         updated_state = state
+-        skip_special, spaces_between = _decode_params(tokenizer, chat_request)
++        skip_special, spaces_between = _decode_params(
++            tokenizer,
++            chat_request,
++            default_skip_special=self.default_skip_special_tokens,
++        )
+         # Seed on the first chunk only. A carried state already has the prompt.
+         if state is None:
+             state = _seed_stream_state(
+@@ -923,6 +936,7 @@ def _decode_params(
+     tokenizer: TokenizerLike,
+     request: ChatCompletionRequest | CompletionRequest | None,
+     preserve_special: bool = False,
++    default_skip_special: bool = True,
+ ) -> tuple[bool, bool]:
+     """Derive `(skip_special_tokens, spaces_between_special_tokens)` the way
+     the engine does (`IncrementalDetokenizer`).
+@@ -932,13 +946,16 @@ def _decode_params(
+         request: The original request, if the caller supplied one.
+         preserve_special: Keep special tokens so a parser can see markers.
+             The serving side does this via `adjust_request`.
++        default_skip_special: Used when the request leaves
++            `skip_special_tokens` unset.
  
+     """
+-    skip_special = (
+-        False
+-        if preserve_special
+-        else (request.skip_special_tokens if request is not None else True)
+-    )
++    if preserve_special:
++        skip_special = False
++    elif request is None or request.skip_special_tokens is None:
++        skip_special = default_skip_special
++    else:
++        skip_special = request.skip_special_tokens
+     spaces_between = (
+         request.spaces_between_special_tokens if request is not None else True
+     )
